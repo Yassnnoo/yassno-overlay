@@ -25,11 +25,12 @@ import sys
 import threading
 import time
 import traceback
+import urllib.request
 import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import colorchooser, filedialog, messagebox, ttk
 
-APP_VERSION = "2.5.17"
+APP_VERSION = "2.5.18"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -118,6 +119,79 @@ MODES = {"stand_mode": [("table", "Таблица"), ("compact", "Компакт
 MAP_RADII = [200, 300, 500, 800, 1200]
 UPDATE_FILES = ("yassno_overlay.py", "yassno_launcher.py", "README.txt")
 BACKUP_DIR = os.path.join(HERE, "backup")
+UPDATE_REPO, UPDATE_BRANCH = "Yassnnoo/yassno-overlay", "main"        # откуда лаунчер сам берёт обновления
+UPDATE_EXT = (".py", ".txt", ".png", ".cmd")
+UPDATE_BLOCK = ("profiles", "stats", "maps", "logs", "backup")        # свои данные обновление не трогает
+
+
+def ver_tuple(v):
+    return tuple(int(x) for x in re.findall(r"\d+", str(v))[:4])
+
+
+def raw_url(path):
+    return f"https://raw.githubusercontent.com/{UPDATE_REPO}/{UPDATE_BRANCH}/{path}"
+
+
+def http_get(url, timeout=20):
+    req = urllib.request.Request(url, headers={"User-Agent": "yassno-overlay-updater", "Cache-Control": "no-cache"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        data = r.read(8_000_000)
+    return data
+
+
+def safe_rel(p):
+    """Путь из списка обновления: только внутри папки программы, только свои файлы."""
+    p = str(p).replace("\\", "/").strip()
+    parts = p.split("/")
+    if (not p or p.startswith("/") or ":" in p or ".." in parts or len(parts) > 2 or "" in parts
+            or parts[0] in UPDATE_BLOCK or not p.lower().endswith(UPDATE_EXT)):
+        return None
+    return p
+
+
+def check_online_update():
+    """Возвращает (сведения, ошибка). Берёт version.json из репозитория."""
+    try:
+        data = json.loads(http_get(raw_url("version.json") + "?t=%d" % time.time(), 15).decode("utf-8"))
+        ver = str(data["version"])
+        files = [f for f in (safe_rel(x) for x in data.get("files", [])) if f]
+        if not ver_tuple(ver) or "yassno_overlay.py" not in files or "yassno_launcher.py" not in files:
+            return None, "в version.json нет нужных файлов"
+    except Exception as e:
+        return None, str(e)
+    return {"version": ver, "notes": str(data.get("notes", ""))[:700], "files": files,
+            "newer": ver_tuple(ver) > ver_tuple(APP_VERSION)}, None
+
+
+def apply_online_update(info):
+    """Скачивает все файлы, проверяет, сохраняет копию старых в backup и заменяет. Возвращает текст ошибки или None."""
+    got = {}
+    try:
+        for rel in info["files"]:
+            body = http_get(raw_url(rel) + "?t=%d" % time.time())
+            if not body:
+                return f"пустой файл {rel}"
+            if rel.endswith(".py"):
+                compile(body, rel, "exec")                       # битый файл не ставим
+            got[rel] = body
+    except Exception as e:
+        return f"{e}"
+    try:
+        bdir = os.path.join(BACKUP_DIR, time.strftime("%Y%m%d-%H%M%S"))
+        os.makedirs(bdir, exist_ok=True)
+        for name in UPDATE_FILES:
+            src = os.path.join(HERE, name)
+            if os.path.isfile(src):
+                shutil.copyfile(src, os.path.join(bdir, name))
+        for rel, body in got.items():
+            dst = os.path.join(HERE, *rel.split("/"))
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            with open(dst + ".new", "wb") as f:
+                f.write(body)
+            os.replace(dst + ".new", dst)
+    except OSError as e:
+        return f"{e}"
+    return None
 
 HOTKEYS = [("lock", "Режим перемещения окон"), ("reset", "Вернуть окна на экран"), ("quit", "Выйти из оверлея"),
            ("hide", "Спрятать / показать оверлей"), ("tim", "Вид тайминга"), ("map", "Вид карты"),
@@ -285,7 +359,8 @@ def reset_positions(game):
 def default_launcher():
     return {"autostart": True, "close_with_game": True, "theme": "dark", "lang": "ru", "win_start": False,
             "start_min": False, "min_tray": False, "close_tray": False, "stop_on_exit": False, "poll_sec": 2.5,
-            "apps_close": True, "launch_with_game": True, "telemetry": True, "i2_path": "", "tel_strips": []}
+            "apps_close": True, "launch_with_game": True, "telemetry": True, "i2_path": "", "tel_strips": [],
+            "auto_update": True}
 
 
 def load_launcher():
@@ -4344,6 +4419,7 @@ class SettingsPage(ttk.Frame):
             "stop_on_exit": tk.BooleanVar(value=bool(cfg["stop_on_exit"])),
             "poll_sec": tk.DoubleVar(value=float(cfg["poll_sec"])),
             "telemetry": tk.BooleanVar(value=bool(cfg.get("telemetry", True))),
+            "auto_update": tk.BooleanVar(value=bool(cfg.get("auto_update", True))),
         }
         self.i2_var = tk.StringVar(value=str(cfg.get("i2_path", "")))
         self.columnconfigure(0, weight=1)
@@ -4455,6 +4531,8 @@ class SettingsPage(ttk.Frame):
         self.ver_lbl.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 4))
         ttk.Button(box, text="Установить из zip…", command=self.install_update).grid(row=1, column=0, sticky="w", padx=(0, 8))
         ttk.Button(box, text="Откатить", command=self.rollback).grid(row=1, column=1, sticky="w")
+        ttk.Button(box, text="Проверить обновления", command=lambda: self.app.check_update(True)).grid(row=2, column=0, sticky="w", padx=(0, 8), pady=(8, 0))
+        Toggle(box, "Проверять при запуске лаунчера", self.v["auto_update"]).grid(row=3, column=0, columnspan=2, sticky="w", pady=(6, 0))
         self.refresh_version()
 
         box = ttk.LabelFrame(col2, text="Перенос настроек", padding=10)
@@ -4487,7 +4565,7 @@ class SettingsPage(ttk.Frame):
         ttk.Button(box, text="Сбросить настройки лаунчера", command=self.reset).pack(anchor="w")
         ttk.Label(box, text="Профили оверлея (LMU и rFactor 2) не затрагиваются.", style="Dim.TLabel").pack(anchor="w", pady=(4, 0))
 
-        for key in ("win_start", "start_min", "min_tray", "close_tray", "stop_on_exit", "telemetry"):
+        for key in ("win_start", "start_min", "min_tray", "close_tray", "stop_on_exit", "telemetry", "auto_update"):
             self.v[key].trace_add("write", lambda *a: self.apply())
         self.refresh_tray()
 
@@ -4532,7 +4610,7 @@ class SettingsPage(ttk.Frame):
 
     def apply(self):
         cfg = self.app.cfg
-        for k in ("win_start", "start_min", "min_tray", "close_tray", "stop_on_exit", "telemetry"):
+        for k in ("win_start", "start_min", "min_tray", "close_tray", "stop_on_exit", "telemetry", "auto_update"):
             cfg[k] = bool(self.v[k].get())
         cfg["i2_path"] = self.i2_var.get().strip()
         try:
@@ -4813,6 +4891,8 @@ class App:
         self.root.after(300, self.pump)
         if "--minimized" in sys.argv or self.cfg.get("start_min_now"):
             self.root.after(400, self.start_hidden)
+        elif self.cfg.get("auto_update", True):
+            self.root.after(4000, lambda: self.check_update(False))
 
     # ---------- построение интерфейса ----------
     def build(self):
@@ -5165,7 +5245,12 @@ class App:
         try:
             while True:
                 cmd = self.tray_q.get_nowait()
-                if cmd == "show":
+                if isinstance(cmd, tuple):                       # результат обновления из фонового потока
+                    if cmd[0] == "upd_info":
+                        self.on_update_info(*cmd[1:])
+                    elif cmd[0] == "upd_done":
+                        self.after_update(*cmd[1:])
+                elif cmd == "show":
                     self.show_from_tray()
                 elif cmd == "stop":
                     self.stop_overlay()
@@ -5175,6 +5260,47 @@ class App:
         except queue.Empty:
             pass
         self.root.after(300, self.pump)
+
+    # ---------- обновление из репозитория ----------
+    def check_update(self, manual=False):
+        def work():
+            info, err = check_online_update()
+            self.tray_q.put(("upd_info", info, err, manual))
+        threading.Thread(target=work, daemon=True).start()
+
+    def on_update_info(self, info, err, manual):
+        if err:
+            if manual:
+                mb_error("Обновление", tr("Не удалось проверить обновления:") + "\n" + err)
+            return
+        if not info["newer"]:
+            if manual:
+                mb_info("Обновление", tr("У вас последняя версия: ") + APP_VERSION)
+            return
+        msg = (tr("Доступна версия ") + info["version"] + tr(" (у вас ") + APP_VERSION + ").\n\n"
+               + (info["notes"] + "\n\n" if info["notes"] else "")
+               + tr("Установить сейчас? Текущие файлы сохранятся в папке backup, настройки не меняются."))
+        if messagebox.askyesno(tr("Обновление"), msg):
+            def work():
+                self.tray_q.put(("upd_done", info, apply_online_update(info)))
+            threading.Thread(target=work, daemon=True).start()
+
+    def after_update(self, info, err):
+        if err:
+            mb_error("Обновление", tr("Не удалось установить, файлы не изменены:") + "\n" + err)
+            return
+        try:
+            self.settings_page.refresh_version()
+        except Exception:
+            pass
+        mb_info("Обновление", tr("Установлена версия ") + info["version"] + tr(". Лаунчер перезапустится. Если оверлей запущен, он обновится при следующем запуске."))
+        try:
+            subprocess.Popen([sys.executable, os.path.join(HERE, "yassno_launcher.py")] + [a for a in sys.argv[1:] if a != "--minimized"],
+                             cwd=HERE, creationflags=0x00000008 if os.name == "nt" else 0)
+        except OSError as e:
+            mb_error("Обновление", str(e))
+            return
+        self.quit_app(stop=False)
 
     def quit_app(self, stop=False):
         if stop:
