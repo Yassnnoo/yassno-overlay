@@ -26,11 +26,12 @@ import threading
 import time
 import traceback
 import urllib.request
+import webbrowser
 import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import colorchooser, filedialog, messagebox, ttk
 
-APP_VERSION = "2.5.22"
+APP_VERSION = "2.5.25"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -60,6 +61,12 @@ PAGES = [("general", "Общие и цвета", None), ("standings", "Табл�
 STEAM_IDS = {"lmu": "2399420", "rf2": "365960", "iracing": "266410"}           # запуск игр через Steam, если путь к игре не задан
 COMPANIONS = [("racelab", "RaceLab"), ("simhub", "SimHub"), ("crewchief", "Crew Chief"), ("tradingpaints", "Trading Paints")]
 COMPANION_GAMES = {"tradingpaints": ("iracing",)}          # программы, которые есть только для одной игры
+
+
+# официальные страницы скачивания (прямые ссылки на файлы меняются с каждой версией, поэтому — страницы загрузки)
+APP_DOWNLOAD = {"racelab": "https://racelab.app/", "simhub": "https://www.simhubdash.com/download-2/",
+                "crewchief": "https://thecrewchief.org/forumdisplay.php?28-Download-and-Links",
+                "tradingpaints": "https://tradingpaints.com/install"}
 
 
 def companion_runs(key, game):
@@ -534,11 +541,19 @@ def app_candidates(key):
         out += [os.path.join(local, "CrewChiefV4", "CrewChiefV4.exe")] if local else []
     elif key == "tradingpaints":
         for base in ([local] if local else []) + pf:
-            out += [os.path.join(base, "Trading Paints", "Trading Paints.exe"), os.path.join(base, "TradingPaints", "Trading Paints.exe"),
-                    os.path.join(base, "Programs", "Trading Paints", "Trading Paints.exe"), os.path.join(base, "Programs", "TradingPaints", "Trading Paints.exe")]
+            for folder in (("Rhinode LLC", "Trading Paints"), ("Trading Paints",), ("TradingPaints",),
+                           ("Programs", "Trading Paints"), ("Programs", "TradingPaints")):
+                d = os.path.join(base, *folder)
+                out.append(os.path.join(d, "Trading Paints.exe"))
+                try:                                           # на случай другого имени exe-файла
+                    out += [os.path.join(d, f) for f in sorted(os.listdir(d))
+                            if f.lower().endswith(".exe") and "trading" in f.lower() and "unins" not in f.lower()]
+                except OSError:
+                    pass
     elif key == "racelab":
         for base in ([local] if local else []) + pf:
-            out += [os.path.join(base, "Programs", "RaceLab", "RaceLab.exe"), os.path.join(base, "RaceLab", "RaceLab.exe"),
+            out += [os.path.join(base, "RaceLabApps", "RacelabApps.exe"),           # установка Squirrel: %LOCALAPPDATA%\racelabapps
+                    os.path.join(base, "Programs", "RaceLab", "RaceLab.exe"), os.path.join(base, "RaceLab", "RaceLab.exe"),
                     os.path.join(base, "RaceLabApps", "RaceLab.exe"), os.path.join(base, "Programs", "racelab", "RaceLab.exe")]
     return out
 
@@ -873,7 +888,7 @@ EN.update({
     "ничего не найдено (запустите игру и откройте окно заново)": "nothing found (start the game and reopen this window)",
     "Стереть сохранённые карты трасс": "Erase saved track maps", "Зелёный горит, секунд": "Green stays on, seconds",
     "Размер окна": "Window size", "Запас, кругов": "Reserve, laps", "Средний расход за": "Average consumption over", "кругов": "laps",
-    "▶ Запустить игру": "▶ Start the game", "Доп. программы": "Extra programs",
+    "▶ Запустить игру": "▶ Start the game", "Доп. программы": "Extra programs", "Скачать программу": "Download the program",
     "Программы, которые запускаются вместе с оверлеем этой игры (например, RaceLab, SimHub, Crew Chief). Для каждой игры свой набор.":
         "Programs started together with this game's overlay (for example RaceLab, SimHub, Crew Chief). Each game has its own set.",
     "Запускать вместе с оверлеем этой игры:": "Start together with this game's overlay:", "Обзор…": "Browse…",
@@ -1694,7 +1709,7 @@ class ProfilePanel(ttk.Frame):
     def build_apps(self, L, R):
         app = self.app
         box = self.card("Запускать вместе с оверлеем этой игры", L)
-        self.app_status, self.custom_status = {}, {}
+        self.app_status, self.custom_status, self.app_link = {}, {}, {}
         for i, (key, name) in enumerate(companions_for(self.game)):
             r = self.nr(box)
             Toggle(box, name + ("" if companion_runs(key, self.game) else tr(" (запускается только для iRacing)")),
@@ -1705,6 +1720,11 @@ class ProfilePanel(ttk.Frame):
             lb = ttk.Label(box, text="", style="Dim.TLabel", wraplength=420, justify="left")
             lb.grid(row=self.nr(box), column=0, columnspan=3, sticky="w")
             self.app_status[key] = lb
+            lk = tk.Label(box, text=tr("Скачать программу"), bg=UI_PANEL, fg=UI_ACCENT, cursor="hand2",
+                          font=("Segoe UI", 9, "underline"), anchor="w")
+            lk.grid(row=self.nr(box), column=0, columnspan=3, sticky="w", pady=(0, 2))
+            lk.bind("<Button-1>", lambda e, k=key: webbrowser.open(APP_DOWNLOAD[k]))
+            self.app_link[key] = lk
         cbox = self.card("Свои программы", L)
         self.custom_vars = {}
         for it in app.cfg["custom_apps"]:
@@ -1763,6 +1783,9 @@ class ProfilePanel(ttk.Frame):
             try:
                 path = resolve_app(key, self.app.cfg)
                 typed = self.app.app_vars[key].get().strip()
+                lk = getattr(self, "app_link", {}).get(key)
+                if lk is not None:
+                    lk.grid() if not path else lk.grid_remove()          # «Скачать программу» — только если её нет
                 if path:
                     lb.config(text=tr("Найдена: ") + path, foreground=UI_GREEN_DK if UI_THEME_NAME == "light" else UI_GREEN)
                     lb.grid()

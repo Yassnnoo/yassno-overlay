@@ -1,6 +1,6 @@
 {
- "version": "2.5.22",
- "notes": "Карта iRacing по схеме трассы с сайта iRacing (скачивается сама, есть запасной вариант).",
+ "version": "2.5.25",
+ "notes": "RaceLab находится автоматически.",
  "files": [
   "README.txt",
   "diagnose.cmd",
