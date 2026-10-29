@@ -30,7 +30,7 @@ import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import colorchooser, filedialog, messagebox, ttk
 
-APP_VERSION = "2.5.18"
+APP_VERSION = "2.5.19"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -4652,7 +4652,7 @@ class SettingsPage(ttk.Frame):
             return "—"
 
     def refresh_version(self):
-        self.ver_foot.config(text=f"Yassno Overlay  ·  {tr('лаунчер')} {APP_VERSION}  ·  {tr('оверлей')} {self.overlay_version()}")
+        self.ver_foot.config(text=f"Yassno Overlay  ·  {APP_VERSION}")
         def when(f):
             try:
                 return time.strftime("%d.%m.%Y %H:%M", time.localtime(os.path.getmtime(os.path.join(HERE, f))))

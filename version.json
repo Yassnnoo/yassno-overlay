@@ -1,6 +1,6 @@
 {
- "version": "2.5.18",
- "notes": "Автообновление из интернета, колонка iRating и лицензии для iRacing, растягивание окон за любой край.",
+ "version": "2.5.19",
+ "notes": "Внизу лаунчера теперь просто «Yassno Overlay · версия».",
  "files": [
   "README.txt",
   "diagnose.cmd",
