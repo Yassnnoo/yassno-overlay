@@ -30,7 +30,7 @@ import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import colorchooser, filedialog, messagebox, ttk
 
-APP_VERSION = "2.5.19"
+APP_VERSION = "2.5.22"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -58,7 +58,17 @@ PAGES = [("general", "Общие и цвета", None), ("standings", "Табл�
          ("sesstime", "Таймер сессии", "sesstime"), ("clock", "Локальное время", "clock"), ("speedo", "Спидометр", "speedo"),
          ("apps", "Доп. программы", None)]
 STEAM_IDS = {"lmu": "2399420", "rf2": "365960", "iracing": "266410"}           # запуск игр через Steam, если путь к игре не задан
-COMPANIONS = [("racelab", "RaceLab"), ("simhub", "SimHub"), ("crewchief", "Crew Chief")]
+COMPANIONS = [("racelab", "RaceLab"), ("simhub", "SimHub"), ("crewchief", "Crew Chief"), ("tradingpaints", "Trading Paints")]
+COMPANION_GAMES = {"tradingpaints": ("iracing",)}          # программы, которые есть только для одной игры
+
+
+def companion_runs(key, game):
+    """Запускается ли программа для этой игры (в списке она видна всегда)."""
+    return game in COMPANION_GAMES.get(key, tuple(GAMES))
+
+
+def companions_for(game):
+    return list(COMPANIONS)
 THEME_DEFAULT = {"accent": "#f2b705", "text": "#eef1f5", "dim": "#8791a0", "panel": "#161b24",
                  "background": "#0b0e13", "border": "#2a3140", "me": "#4da3ff",
                  "throttle": "#2ee26d", "brake": "#ff3b30", "clutch": "#4a90ff"}
@@ -117,7 +127,7 @@ MODES = {"stand_mode": [("table", "Таблица"), ("compact", "Компакт
          "tyres_view": [("table", "Подробная"), ("compact", "Компактная: шины рисунком"),
                        ("wear", "Износ: остаток и за круг")]}
 MAP_RADII = [200, 300, 500, 800, 1200]
-UPDATE_FILES = ("yassno_overlay.py", "yassno_launcher.py", "README.txt")
+UPDATE_FILES = ("yassno_overlay.py", "yassno_launcher.py", "yassno_svgmap.py", "README.txt")
 BACKUP_DIR = os.path.join(HERE, "backup")
 UPDATE_REPO, UPDATE_BRANCH = "Yassnnoo/yassno-overlay", "main"        # откуда лаунчер сам берёт обновления
 UPDATE_EXT = (".py", ".txt", ".png", ".cmd")
@@ -225,10 +235,10 @@ DEFAULTS = {**{k: True for k, _ in ELEMENTS}, "font": 13, "family": "", "rows": 
             "map_wind": True, "map_dot": 6, "map_mirror": False, "map_rot": 0,
             "radar_arcs": True, "radar_fade": True, "lights_hold": 4,
             "map_nums": True, "map_sectors": True, "fuel_ve": True,
-            "app_racelab": False, "app_simhub": False, "app_crewchief": False, "stats": True,
+            "app_racelab": False, "app_simhub": False, "app_crewchief": False, "app_tradingpaints": False, "stats": True,
             "stand_mode": "table", "ticker_w": 1000, "ticker_speed": 70, "map_mode": "full", "map_radius": 500,
             "map_headup": True, "delta_ref": "best", "delta_range": 1.0, "delta_view": "full", "delta_theme": "full", "delta_show_session": True, "delta_show_mine": True, "delta_show_pred": True, "tyres_view": "table", "layout_mode": "off", "wheel_style": "round"}
-DEFAULTS.update({"weather_view": "cards", "map_style": "classic", "map_one_color": False, "map_frame": True,
+DEFAULTS.update({"map_ir_svg": True, "weather_view": "cards", "map_style": "classic", "map_one_color": False, "map_frame": True,
                  **{"hg_" + k: True for k, _ in ELEMENTS if k not in ("standings", "shiftlight")}})
 DEFAULTS.update({"tyres": False, "pitplan": False, "gaps": False, "engine": False, "engine_view": "table", "delta_sec_bar": True,
                  "sesstime": False, "clock": False, "speedo": False, "speedo_view": "arc", "speedo_max": 340, "clock_seconds": True, "st_session": True, "st_timer": True, "st_clock": True,
@@ -352,6 +362,8 @@ def reset_positions(game):
     data = read_json(profile_path(game))
     for k in POS_KEYS:
         data.pop(k, None)
+    data.pop("screen_layouts", None)                  # раскладки по мониторам тоже сбрасываются
+    data.pop("screen_last", None)
     data["ver"] = CFG_VERSION
     write_json(profile_path(game), data)
 
@@ -520,6 +532,10 @@ def app_candidates(key):
         out += [os.path.join(b, "Britton IT Ltd", "CrewChiefV4", "CrewChiefV4.exe") for b in pf]
         out += [os.path.join(b, "CrewChiefV4", "CrewChiefV4.exe") for b in pf]
         out += [os.path.join(local, "CrewChiefV4", "CrewChiefV4.exe")] if local else []
+    elif key == "tradingpaints":
+        for base in ([local] if local else []) + pf:
+            out += [os.path.join(base, "Trading Paints", "Trading Paints.exe"), os.path.join(base, "TradingPaints", "Trading Paints.exe"),
+                    os.path.join(base, "Programs", "Trading Paints", "Trading Paints.exe"), os.path.join(base, "Programs", "TradingPaints", "Trading Paints.exe")]
     elif key == "racelab":
         for base in ([local] if local else []) + pf:
             out += [os.path.join(base, "Programs", "RaceLab", "RaceLab.exe"), os.path.join(base, "RaceLab", "RaceLab.exe"),
@@ -1601,6 +1617,8 @@ class ProfilePanel(ttk.Frame):
             self.tg(g, None, "Сектора и отметка старта/финиша", self.v["map_sectors"])
             self.tg(g, None, "Компас ветра в углу", self.v["map_wind"])
             self.tg(g, None, "Зеркально отразить карту", self.v["map_mirror"])
+            if self.game == "iracing":
+                self.tg(g, None, "Схема трассы с сайта iRacing (скачивается сама; нет схемы — карта по вашей траектории)", self.v["map_ir_svg"])
             ttk.Button(g, text="Стереть сохранённые карты трасс", command=self.erase_maps).grid(row=self.nr(g), column=0, columnspan=3, sticky="w", pady=(8, 0))
         elif key == "radar":
             f = main_card()
@@ -1677,9 +1695,10 @@ class ProfilePanel(ttk.Frame):
         app = self.app
         box = self.card("Запускать вместе с оверлеем этой игры", L)
         self.app_status, self.custom_status = {}, {}
-        for i, (key, name) in enumerate(COMPANIONS):
+        for i, (key, name) in enumerate(companions_for(self.game)):
             r = self.nr(box)
-            Toggle(box, name, self.v["app_" + key]).grid(row=r, column=0, columnspan=3, sticky="w", pady=(8, 0))
+            Toggle(box, name + ("" if companion_runs(key, self.game) else tr(" (запускается только для iRacing)")),
+                   self.v["app_" + key]).grid(row=r, column=0, columnspan=3, sticky="w", pady=(8, 0))
             r = self.nr(box)
             ttk.Entry(box, textvariable=app.app_vars[key], width=34).grid(row=r, column=0, columnspan=2, sticky="ew", pady=(2, 0))
             ttk.Button(box, text="Обзор…", command=lambda k=key: app.browse_app(k)).grid(row=r, column=2, padx=6, pady=(2, 0))
@@ -1941,7 +1960,7 @@ class ProfilePanel(ttk.Frame):
         if self.page == "apps":
             self.update_app_status()
         row, lbl, dot, strip = self.rows_ui["apps"]
-        anyon = any(self.v["app_" + k].get() for k, _ in COMPANIONS) or any(self.game in c["games"] for c in self.app.cfg["custom_apps"])
+        anyon = any(self.v["app_" + k].get() for k, _ in companions_for(self.game) if companion_runs(k, self.game)) or any(self.game in c["games"] for c in self.app.cfg["custom_apps"])
         dot.config(text="●" if anyon else "○", fg=UI_GREEN if anyon else UI_DIM)
         for key, _, elem in self.pages():
             if elem is None:
@@ -2114,7 +2133,7 @@ class ProfilePanel(ttk.Frame):
                  "trackmap": map_size, "radar": (130, 130), "weather": ((70 * ncards + 10, 56) if self.mode_val("weather_view") == "compact" else (180, 6 + ncards * 46)),
                  "lights": (210, 58), "limiter": (160, 46),
                  "fuel": (140, 232 if (self.game == "lmu" and self.v["fuel_ve"].get()) else 176),
-                 "apps": (320, 36 + 26 * (len(COMPANIONS) + len(self.app.cfg["custom_apps"])))}
+                 "apps": (320, 36 + 26 * (len(companions_for(self.game)) + len(self.app.cfg["custom_apps"])))}
         fn = {"apps": self.d_apps, "standings": self.d_standings, "relative": self.d_relative, "pedals": self.d_pedals,
               "trackmap": self.d_map, "radar": self.d_radar, "weather": self.d_weather, "lights": self.d_lights,
               "limiter": self.d_limiter, "fuel": self.d_fuel, "delta": self.d_delta, "alerts": self.d_alerts,
@@ -2891,17 +2910,17 @@ class ProfilePanel(ttk.Frame):
         c, th = self.canvas, self.th
         self.panel(x, y, w, h)
         c.create_text(x + 12, y + 14, text=f"{GAMES[self.game]} + оверлей", fill=th["accent"], anchor="w", font=self.f_b)
-        items = [(k, n) for k, n in COMPANIONS] + [(c["id"], c["name"]) for c in self.app.cfg["custom_apps"]]
+        items = companions_for(self.game) + [(c["id"], c["name"]) for c in self.app.cfg["custom_apps"]]
         rh = (h - 34) / len(items)
         for i, (key, name) in enumerate(items):
             yy = y + 30 + i * rh
-            on = bool(self.v["app_" + key].get()) if key.startswith("c_") is False else self.game in next(
+            on = (bool(self.v["app_" + key].get()) and companion_runs(key, self.game)) if key.startswith("c_") is False else self.game in next(
                 (c["games"] for c in self.app.cfg["custom_apps"] if c["id"] == key), [])
             found = bool(resolve_app(key, self.app.cfg))
             c.create_rectangle(x + 8, yy, x + w - 8, yy + rh - 4, fill=mix(th["panel"], "#ffffff", 0.05), outline="")
             c.create_oval(x + 16, yy + rh / 2 - 6, x + 28, yy + rh / 2 + 4, fill="#2ee26d" if on else "#4a5260", outline="")
             c.create_text(x + 36, yy + rh / 2 - 2, text=name, fill=th["text"] if on else th["dim"], anchor="w", font=self.f_s)
-            c.create_text(x + w - 14, yy + rh / 2 - 2, text=("запустится" if on else "не запускается") if (found or not on) else "не найдена",
+            c.create_text(x + w - 14, yy + rh / 2 - 2, text=("запустится" if on else ("только для iRacing" if key.startswith("c_") is False and not companion_runs(key, self.game) else "не запускается")) if (found or not on) else "не найдена",
                           fill=th["dim"] if (found or not on) else "#ff5a4f", anchor="e", font=self.f_t)
 
     def d_limiter(self, x, y, w, h):
@@ -5075,7 +5094,7 @@ class App:
 
     def after_start(self, game, mode, auto):
         """Оверлей запущен: поднимаем программы, отмеченные для этой игры (в фоне, чтобы окно не зависало)."""
-        keys = [k for k, _ in COMPANIONS if load_settings(game).get("app_" + k)]
+        keys = [k for k, _ in companions_for(game) if companion_runs(k, game) and load_settings(game).get("app_" + k)]
         keys += [c["id"] for c in self.cfg.get("custom_apps", []) if game in c["games"]]
         if not keys:
             return

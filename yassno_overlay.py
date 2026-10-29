@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "2.5.19"
+APP_VERSION = "2.5.22"
 import argparse
 import bisect
 import collections
@@ -539,7 +539,9 @@ def parse_ir_session(text):
                          "laps": int(laps) if laps.isdigit() else 0})
     sectors = [float(x) for x in re.findall(r"SectorStartPct:[ \t]*([\d.]+)", text)]
     tl = _yfloat(wk, "TrackLength", 0.0)
+    tid = _yget(wk, "TrackID")
     return {"track": _yget(wk, "TrackDisplayName") or _yget(wk, "TrackName"),
+            "track_id": int(tid) if tid.isdigit() else 0, "track_slug": _yget(wk, "TrackName"),
             "track_len": tl * (1609.344 if "mi" in _yget(wk, "TrackLength").split()[-1:] else 1000.0),
             "air": _yfloat(wk, "TrackAirTemp"), "track_temp": _yfloat(wk, "TrackSurfaceTemp"),
             "me": int(_yfloat(di, "DriverCarIdx", -1)), "redline": _yfloat(di, "DriverCarRedLine", 8000.0),
@@ -780,6 +782,7 @@ class IracingReader:
                 "air": float(f("AirTemp", 0, info["air"])), "track_temp": float(f("TrackTempCrew", 0, info["track_temp"])),
                 "rain": float(f("Precipitation")) if "Precipitation" in V else 0.0, "track_len": L,
                 "options_location": 3, "game": "iracing", "in_realtime": bool(f("IsOnTrack")),
+                "track_id": info.get("track_id", 0), "track_slug": info.get("track_slug", ""),
                 "session_start": self._sess, "scoring_event": int(self._last_tick or 0),
                 "player_elapsed": et if player else None, "cars": out}
 
@@ -1171,6 +1174,7 @@ def poller(stop, hz, source=None, game="auto"):
                     last_seq = seq
                     state["changes"].append(now)
                     try:
+                        ir_svg_apply(frame)
                         mapper.update(frame)
                     except Exception:
                         pass                                      # карта не должна ронять чтение данных
@@ -1323,6 +1327,38 @@ def status_of(car, out_lap=False):
 # 3b. Карта трассы: рисуем по тому, как вы едете
 # =========================================================================
 MAP_DIR = os.path.join(HERE, "maps")
+try:
+    import yassno_svgmap as svgmap
+    IR_SVG = svgmap.IrSvgMaps(os.path.join(MAP_DIR, "svg"))
+except Exception:                                    # нет файла или сломан — работаем по траектории игрока
+    svgmap, IR_SVG = None, None
+RUNTIME = {"ir_svg": True}                           # переключатель «схема трассы iRacing» (ставится из настроек карты)
+
+
+def ir_svg_apply(frame):
+    """iRacing: если для трассы скачана схема с сайта iRacing, ставим машины на её линию и отдаём её карте."""
+    if not (IR_SVG and RUNTIME.get("ir_svg", True)) or frame.get("game") != "iracing":
+        return
+    loop = IR_SVG.get(frame.get("track_id"), frame.get("track_slug"))
+    L = frame.get("track_len") or 0.0
+    if not loop or L < 500:
+        return
+    cache = IR_SVG.world.get(frame["track_id"])
+    if cache is None or abs(cache[0] - L) > 1.0:
+        cache = (L, svgmap.to_world(loop, L))
+        IR_SVG.world[frame["track_id"]] = cache
+    pts = cache[1]
+    n = len(pts)
+    frame["svg_pts"] = pts
+    for car in frame["cars"]:
+        i = int(max(0.0, min(0.99999, car["lap_dist"] / L)) * n)
+        a, b = pts[i], pts[(i + 6) % n]
+        car["pos"] = a
+        d = math.hypot(b[0] - a[0], b[1] - a[1]) or 1.0
+        fx, fz = (b[0] - a[0]) / d, (b[1] - a[1]) / d
+        car["ori"] = (fz, -fx, fx, fz)
+        if car.get("player"):
+            frame["player_pos"] = a
 
 
 def polyline_length(pts, closed=False):
@@ -1439,6 +1475,16 @@ class TrackMapper:
             if me is None:
                 return
             self._learn_sectors(me, length)
+            ext = frame.get("svg_pts")
+            if ext:                                      # готовая схема трассы iRacing: свою не записываем
+                if self.sources != "схема iRacing":
+                    self.loop, self.laps, self.sources, self.status = list(ext), self.MAX_LAPS, "схема iRacing", "ready"
+                return
+            if self.sources == "схема iRacing":          # схему выключили или не получили — возвращаемся к записи
+                sec = self.sec
+                self.reset_state()
+                self.load(key)
+                self.sec = self.sec or sec
             if self.laps >= self.MAX_LAPS:
                 return                                   # карта готова, больше не пишем
             if lap is not None and self.cur_lap is not None and lap == self.cur_lap + 1:
@@ -1995,6 +2041,54 @@ LAYOUT_POS = ("x", "y", "rel_x", "rel_y", "ped_x", "ped_y", "map_x", "map_y", "r
               "tyres_x", "tyres_y", "pitplan_x", "pitplan_y", "gaps_x", "gaps_y", "engine_x", "engine_y", "sesstime_x", "sesstime_y", "clock_x", "clock_y", "speedo_x", "speedo_y")
 LAYOUT_SCALE = tuple("scale_" + e for e in ELEMENTS) + ("map_scale", "fuel_scale") + tuple("sx_" + e for e in ELEMENTS) + tuple("sy_" + e for e in ELEMENTS)
 LAYOUT_KEYS = ELEMENTS + ("stand_mode", "map_mode", "delta_view", "delta_theme", "tyres_view", "engine_view", "speedo_view", "speedo_max") + LAYOUT_POS + LAYOUT_SCALE
+SCREEN_KEYS = LAYOUT_POS + tuple("sx_" + e for e in ELEMENTS) + tuple("sy_" + e for e in ELEMENTS)
+
+
+def screen_bounds(w):
+    """Весь рабочий стол со всеми мониторами: (x0, y0, ширина, высота)."""
+    if os.name == "nt":
+        try:
+            import ctypes
+            u = ctypes.windll.user32
+            x0, y0, cw, ch = (int(u.GetSystemMetrics(i)) for i in (76, 77, 78, 79))
+            if cw > 0 and ch > 0:
+                return x0, y0, cw, ch
+        except Exception:
+            pass
+    return 0, 0, int(w.winfo_screenwidth()), int(w.winfo_screenheight())
+
+
+def screen_signature(w):
+    pw, ph = int(w.winfo_screenwidth()), int(w.winfo_screenheight())
+    x0, y0, cw, ch = screen_bounds(w)
+    return f"{pw}x{ph}@{x0},{y0},{cw}x{ch}"
+
+
+def load_screen_layout(cfg, sig, bounds):
+    """У каждого набора мониторов своя раскладка окон. Если такого набора ещё не было —
+    берём раскладку прошлого и пересчитываем пропорционально."""
+    sl = cfg.get("screen_layouts")
+    if not isinstance(sl, dict):
+        sl = cfg["screen_layouts"] = {}
+    cur = sl.get(sig)
+    if isinstance(cur, dict) and isinstance(cur.get("v"), dict):
+        cfg.update({k: v for k, v in cur["v"].items() if k in SCREEN_KEYS})
+    else:
+        prev = sl.get(cfg.get("screen_last"))
+        if isinstance(prev, dict) and isinstance(prev.get("b"), list) and len(prev["b"]) == 4 and cfg.get("screen_last") != sig:
+            ox, oy, ow, oh = prev["b"]
+            nx, ny, nw, nh = bounds
+            if ow > 0 and oh > 0:
+                for k in SCREEN_KEYS:
+                    if k.endswith("_x") or k == "x":
+                        if isinstance(cfg.get(k), (int, float)):
+                            cfg[k] = int(nx + (cfg[k] - ox) * nw / ow)
+                    elif k.endswith("_y") or k == "y":
+                        if isinstance(cfg.get(k), (int, float)):
+                            cfg[k] = int(ny + (cfg[k] - oy) * nh / oh)
+    cfg["screen_last"] = sig
+
+
 LAYOUT_CAT = {"TEST": "practice", "PRACTICE": "practice", "WARMUP": "practice", "QUALIFYING": "qualify", "RACE": "race"}
 
 
@@ -2421,11 +2515,11 @@ class RelativeWindow:
     def fit_on_screen(self):
         """Если окно оказалось за краем экрана — возвращаем его в видимую область."""
         try:
-            sw, sh = int(self.top.winfo_screenwidth()), int(self.top.winfo_screenheight())
+            bx, by, bw, bh = screen_bounds(self.top)
             x, y = int(self.main.cfg[self.POS[0]]), int(self.main.cfg[self.POS[1]])
         except (TypeError, ValueError, KeyError):
             return
-        nx, ny = max(0, min(x, sw - self.width)), max(0, min(y, sh - self.height))
+        nx, ny = max(bx, min(x, bx + bw - self.width)), max(by, min(y, by + bh - self.height))
         if (nx, ny) != (x, y):
             self.main.cfg[self.POS[0]], self.main.cfg[self.POS[1]] = nx, ny
             self.top.geometry(f"+{nx}+{ny}")
@@ -2971,6 +3065,7 @@ class MapWindow(RelativeWindow):
             draw_rrect(c, 0, 0, W - 1, H - 1, self.R, fill=panel, outline=BORDER)
         else:
             c.create_rectangle(0, 0, W - 1, H - 1, fill=panel, outline=BORDER)
+        RUNTIME["ir_svg"] = bool(m.cfg.get("map_ir_svg", True))
         loop, partial, status, laps, track_name, sec = mapper.snapshot()
         rot, mirror = int(m.cfg.get("map_rot", 0)) % 4, bool(m.cfg.get("map_mirror", False))
         mode = self._mode
@@ -3029,7 +3124,9 @@ class MapWindow(RelativeWindow):
         if bare:
             return
         fy = gy0 + side + self.h_foot // 2
-        if status == "ready":
+        if status == "ready" and mapper.sources == "схема iRacing":
+            txt, col = "схема трассы iRacing", DIM
+        elif status == "ready":
             txt, col = f"карта готова  •  кругов в карте: {laps}/{TrackMapper.MAX_LAPS}", DIM
         elif status == "recording":
             txt, col = "запись карты: проедьте круг без боксов", ACCENT
@@ -5142,6 +5239,9 @@ class Overlay:
         self._fuel, self._fuel_session, self._fuel_live = {}, None, set()
         self._out, self._out_session = {}, None
         self.root = r = tk.Tk()
+        self.screen_sig = screen_signature(r)
+        self.screen_b = screen_bounds(r)
+        load_screen_layout(cfg, self.screen_sig, self.screen_b)
         r.title("LMU Standings")
         r.overrideredirect(True)
         r.attributes("-topmost", True)
@@ -6056,6 +6156,9 @@ class Overlay:
         for w in self.subs:
             self.cfg[w.POS[0]], self.cfg[w.POS[1]] = w.top.winfo_x(), w.top.winfo_y()
         self.capture_layout()
+        self.cfg.setdefault("screen_layouts", {})[self.screen_sig] = {
+            "b": list(self.screen_b), "v": {k: self.cfg[k] for k in SCREEN_KEYS if k in self.cfg}}
+        self.cfg["screen_last"] = self.screen_sig
         try:
             with open(CFG_PATH, "w", encoding="utf-8") as f:
                 json.dump(self.cfg, f)
