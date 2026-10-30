@@ -31,7 +31,7 @@ import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import colorchooser, filedialog, messagebox, ttk
 
-APP_VERSION = "2.5.29"
+APP_VERSION = "2.5.41"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -134,7 +134,7 @@ MODES = {"stand_mode": [("table", "Таблица"), ("compact", "Компакт
          "tyres_view": [("table", "Подробная"), ("compact", "Компактная: шины рисунком"),
                        ("wear", "Износ: остаток и за круг")]}
 MAP_RADII = [200, 300, 500, 800, 1200]
-UPDATE_FILES = ("yassno_overlay.py", "yassno_launcher.py", "yassno_svgmap.py", "README.txt")
+UPDATE_FILES = ("yassno_overlay.py", "yassno_launcher.py", "yassno_svgmap.py", "yassno_readers.py", "README.txt")
 BACKUP_DIR = os.path.join(HERE, "backup")
 UPDATE_REPO, UPDATE_BRANCH = "Yassnnoo/yassno-overlay", "main"        # откуда лаунчер сам берёт обновления
 UPDATE_EXT = (".py", ".txt", ".png", ".cmd")
@@ -240,7 +240,7 @@ DEFAULTS = {**{k: True for k, _ in ELEMENTS}, "font": 13, "family": "", "rows": 
             "radar_range": 40, "fuel_reserve": 0.0, "fuel_avg": 5,
             "rel_ahead": 3, "rel_behind": 3, "ped_seconds": 8, "shift_start": 82.0, "shift_flash": 98.0, "speed_mph": False,
             "map_wind": True, "map_dot": 6, "map_mirror": False, "map_rot": 0,
-            "radar_arcs": True, "radar_fade": True, "lights_hold": 4,
+            "radar_arcs": True, "radar_fade": True, "radar_fast": True, "lights_hold": 4,
             "map_nums": True, "map_sectors": True, "fuel_ve": True,
             "app_racelab": False, "app_simhub": False, "app_crewchief": False, "app_tradingpaints": False, "stats": True,
             "stand_mode": "table", "ticker_w": 1000, "ticker_speed": 70, "map_mode": "full", "map_radius": 500,
@@ -686,6 +686,75 @@ def setup_style(root):
     for opt, val in (("background", UI_FIELD), ("foreground", UI_FG), ("selectBackground", UI_ACCENT),
                      ("selectForeground", UI_ACCENT_FG)):
         root.option_add("*TCombobox*Listbox." + opt, val)
+
+
+def glow_image(master, W, H, bg, blobs, step=2):
+    """Плавное размытое свечение без внешних библиотек: считаем цвета точек и кладём в PhotoImage.
+    blobs: (x0, x1, y0, y1, цвет, fx(x), fy(y), сила) — свечение = fx*fy*сила, смешивается с фоном."""
+    w, h = max(1, int(W) // step), max(1, int(H) // step)
+    rgb = lambda c: (int(c[1:3], 16), int(c[3:5], 16), int(c[5:7], 16))
+    rows = [[rgb(bg)] * w for _ in range(h)]
+    for x0, x1, y0, y1, col, fx, fy, gain in blobs:
+        cr = rgb(col)
+        xs = range(max(0, int(x0 / step)), min(w, int(x1 / step) + 1))
+        ys = range(max(0, int(y0 / step)), min(h, int(y1 / step) + 1))
+        fxs = {x: fx(x * step + step / 2) * gain for x in xs}
+        for y in ys:
+            a_y = fy(y * step + step / 2)
+            if a_y <= 0.01:
+                continue
+            row = rows[y]
+            for x in xs:
+                a = fxs[x] * a_y
+                if a < 0.02:
+                    continue
+                if a > 1.0:
+                    a = 1.0
+                r, g, b = row[x]
+                row[x] = (int(r + (cr[0] - r) * a), int(g + (cr[1] - g) * a), int(b + (cr[2] - b) * a))
+    img = tk.PhotoImage(master=master, width=w, height=h)
+    for y, row in enumerate(rows):
+        img.put("{" + " ".join("#%02x%02x%02x" % p for p in row) + "}", to=(0, y))
+    return img.zoom(step) if step > 1 else img
+
+
+def ir_radar_blobs(W, H, cx, cy, ch, cw, items, rng, car_l=4.8):
+    """Пятна радара iRacing (общие для оверлея и предпросмотра): красные сбоку, жёлтые спереди/сзади."""
+    blobs, lim = [], W / 2 - 8
+    soft = lambda d, core, blur, p=1.8: 1.0 if d <= core else max(0.0, 1.0 - (d - core) / blur) ** p
+    k = ch / car_l
+    for it in sorted(items, key=lambda t: t["kind"] in ("L", "R")):          # жёлтые первыми, красные поверх
+        kind = it["kind"]
+        if kind in ("L", "R"):
+            off = max(-(lim - ch / 2), min(lim - ch / 2, it["dy"] * k))
+            yc = cy - off
+            sg = -1 if kind == "L" else 1
+            x_in = cx + sg * (cw / 2 + 8)
+            x_out = 6 if sg < 0 else W - 6
+            blur = ch * 0.9
+            span = abs(x_out - x_in)
+            fx = lambda x, x_in=x_in, sg=sg, span=span: (max(0.0, 1.0 - (x - x_in) * sg / span) ** 1.3 if (x - x_in) * sg >= 0 else 0.0)
+            fy = lambda y, yc=yc, ch=ch, blur=blur: soft(abs(y - yc), ch / 2, blur)
+            blobs.append((min(x_in, x_out), max(x_in, x_out), yc - ch / 2 - blur, yc + ch / 2 + blur, "#ff3b30", fx, fy, 1.0))
+        else:
+            gap = it["d"]
+            sgn = -1 if kind == "F" else 1
+            span = lim - ch / 2 - 14
+            yn = cy + sgn * (ch / 2 + 6 + (gap / rng) * span)               # ближний к вам край машины соперника
+            room = (yn - 8) if kind == "F" else (W - 8 - yn)
+            ln = max(8.0, min(ch * 1.7, room))
+            w2, blur = W * 0.26, ch * 0.8
+            prox = max(0.35, 1.0 - 0.6 * gap / rng)
+
+            def fy(y, yn=yn, sgn=sgn, ln=ln, ch=ch):
+                s = (y - yn) * sgn
+                if s < 0:
+                    return max(0.0, 1.0 + s / (ch * 0.10))                    # почти резкий край у вашей стороны
+                return (1.0 - s / ln) ** 0.9 if s <= ln else 0.0
+            fx = lambda x, w2=w2, blur=blur: soft(abs(x - cx), w2, blur)
+            ya, yb = (yn - ln, yn + ch * 0.12) if sgn < 0 else (yn - ch * 0.12, yn + ln)
+            blobs.append((cx - w2 - blur, cx + w2 + blur, ya, yb, "#ffd23a", fx, fy, prox))
+    return blobs
 
 
 def mix(c1, c2, t):
@@ -1371,6 +1440,7 @@ class ProfilePanel(ttk.Frame):
         self.btn_move = ttk.Button(bar2, text="Режим перемещения окон", command=self.toggle_move)
         self.btn_move.pack(side="left", padx=(0, 6))
         ttk.Button(bar2, text="Демо без игры", command=lambda: self.launch("demo")).pack(side="left", padx=(0, 6))
+        ttk.Button(bar2, text="Проверить оверлей", command=self.selftest).pack(side="left", padx=(0, 6))
         ttk.Button(bar2, text="Журнал", command=self.show_log).pack(side="left")
         self.msg = ttk.Label(self, text="", style="Dim.TLabel")
         self.msg.grid(row=3, column=0, columnspan=2, sticky="w", pady=(6, 0))
@@ -1408,7 +1478,9 @@ class ProfilePanel(ttk.Frame):
         self.canvas.config(height=190 if key == "apps" else self.gen_h() if key == "general" else self.PH)
         self.scroll.yview_moveto(0)
         self.title.config(text=tr(next(t for k, t, _ in PAGES if k == key)))
-        self.note.config(text=tr(PAGE_NOTES.get(key, "Все панели оверлея сразу. Клик по панели в предпросмотре включает или выключает её. "
+        IR_NOTES = {"radar": "Вы в центре. Красная размытая полоса сбоку — машина рядом, её высота показывает, насколько она впереди или позади. "
+                             "Жёлтое свечение спереди/сзади — расстояние до машины. Пропадает, когда рядом никого нет."}
+        self.note.config(text=tr((IR_NOTES.get(key) if self.game == "iracing" else None) or PAGE_NOTES.get(key, "Все панели оверлея сразу. Клик по панели в предпросмотре включает или выключает её. "
                                                       "Шрифт и цвета общие для всего оверлея.")))
         for w in self.settings.winfo_children():
             w.destroy()
@@ -1640,8 +1712,10 @@ class ProfilePanel(ttk.Frame):
             self.slider(f, None, "Размер радара", self.v["radar_scale"], 0.5, 3.0, mult)
             self.combo(f, None, "Дальность, м", "radar_range", [str(x) for x in RADAR_RANGES])
             g = self.card("Оформление", R)
-            self.tg(g, None, "Красные дуги, когда машина сбоку", self.v["radar_arcs"])
+            if self.game != "iracing":
+                self.tg(g, None, "Красные дуги, когда машина сбоку", self.v["radar_arcs"])
             self.tg(g, None, "Плавное проявление при приближении", self.v["radar_fade"])
+            self.tg(g, None, "Предупреждать, если сзади быстрая машина другого класса (рамка мигает)", self.v["radar_fast"])
         elif key == "weather":
             f = main_card()
             self.slider(f, None, "Размер", self.v["scale_weather"], 0.5, 2.5, mult)
@@ -1893,6 +1967,49 @@ class ProfilePanel(ttk.Frame):
                   "demo": "Демо без игры (закрыть: Ctrl+Shift+Q или «Остановить оверлей»)."}[mode])
         self.app.refresh_status()
 
+    def selftest(self):
+        """Прогоняет демо со всеми панелями в фоне и показывает, нашлись ли ошибки."""
+        if not os.path.isfile(OVERLAY):
+            mb_error("Нет файла", f"Рядом с лаунчером не найден {os.path.basename(OVERLAY)}")
+            return
+        if not self.save(quiet=True):
+            return
+        self.say("Проверяю оверлей: на несколько секунд на экране появятся все панели…")
+        exe = sys.executable or "python"
+        if exe.lower().endswith("pythonw.exe"):
+            exe = exe[:-11] + "python.exe"
+        cmd = [exe, OVERLAY, "--game", self.game, "--selftest"]
+
+        def work():
+            try:
+                r = subprocess.run(cmd, cwd=HERE, stdin=subprocess.DEVNULL, capture_output=True, timeout=60,
+                                   creationflags=NO_WINDOW)
+                out = (r.stdout or b"").decode("utf-8", "replace") + (r.stderr or b"").decode("utf-8", "replace")
+            except Exception as e:
+                out = f"SELFTEST FAIL: не удалось запустить проверку: {e!r}"
+            lines = out.strip().splitlines()
+            start = next((i for i, ln in enumerate(lines) if ln.startswith("SELFTEST")), None)
+            report = "\n".join(lines[start:] if start is not None else lines[-12:]) or "нет ответа"
+            box.append((report.startswith("SELFTEST OK"), report))
+
+        box = []
+
+        def poll():                                         # результат забираем из главного потока
+            if box:
+                done(*box[0])
+            else:
+                self.app.root.after(300, poll)
+
+        def done(ok, report):
+            if ok:
+                self.say("Проверка пройдена.")
+                mb_info("Проверка оверлея", report.replace("SELFTEST OK: ", "Всё в порядке: "))
+            else:
+                self.say("Проверка нашла ошибки — см. сообщение.")
+                mb_error("Проверка оверлея", report[:1800])
+        threading.Thread(target=work, daemon=True).start()
+        self.app.root.after(300, poll)
+
     def move_active(self):
         """Включён ли сейчас режим перемещения у работающего оверлея этой игры."""
         r = self.app.runner
@@ -2040,6 +2157,7 @@ class ProfilePanel(ttk.Frame):
         if self.page == "general":
             kk = min(1.0, ph / self.OV_H)
             self.base_k = kk
+            self._pk = kk
             self.make_fonts(1.0)
             self.draw_overview()
             if kk < 1.0:
@@ -2106,7 +2224,7 @@ class ProfilePanel(ttk.Frame):
             self.hits.append((key, x, y, x + w, y + h))
         # нижние ряды: остальные панели рисуются в натуральную величину и уменьшаются целиком
         yb = max(t[3] + t[5] for t in layout) + 12
-        nat = {"tyres": {"compact": (150, 190), "wear": (260, 92)}.get(self.mode_val("tyres_view"), (200, 160)), "pitplan": (260, 150),
+        nat = {"tyres": {"compact": (150, 190), "wear": (260, 92)}.get(self.mode_val("tyres_view"), (200, 160)), "pitplan": (260, 168),
                "gaps": (270, 130), "engine": {"compact": (360, 34), "gauges": (170, 200)}.get(self.mode_val("engine_view"), (230, 200)),
                "alerts": (240, 120), "sesstime": (190, 52), "clock": (170, 52), "speedo": self.speedo_size()}
         fns = {"tyres": self.d_tyres, "pitplan": self.d_pitplan, "gaps": self.d_gaps, "engine": self.d_engine, "alerts": self.d_alerts,
@@ -2120,6 +2238,7 @@ class ProfilePanel(ttk.Frame):
                 self.compute_theme(key)
                 self.make_fonts(k)
                 before = set(c.find_all())
+                self._pk = k
                 if self.v[key].get():
                     fns[key](0, 0, dw, dh)
                 else:
@@ -2152,7 +2271,7 @@ class ProfilePanel(ttk.Frame):
         mmode = self.mode_val("map_mode")
         map_size = {"full": (180, 190), "linear": (320, 150), "local": (190, 200)}[mmode]
         sizes = {"delta": ((190, self.delta_th_h()) if self.mode_val("delta_theme") not in ("full", "bar", "sectors") else {"bar": (190, 38), "sectors": (190, 152 if self.v["delta_sec_bar"].get() else 112)}.get(self.mode_val("delta_theme"), (190, 124))), "alerts": (240, 120),
-                 "tyres": {"compact": (150, 190), "wear": (260, 92)}.get(self.mode_val("tyres_view"), (200, 160)), "pitplan": (260, 150), "gaps": (270, 130), "sesstime": (190, 52), "clock": (170, 52), "speedo": self.speedo_size(),
+                 "tyres": {"compact": (150, 190), "wear": (260, 92)}.get(self.mode_val("tyres_view"), (200, 160)), "pitplan": (260, 168), "gaps": (270, 130), "sesstime": (190, 52), "clock": (170, 52), "speedo": self.speedo_size(),
                  "engine": {"compact": (360, 34), "gauges": (170, 200)}.get(self.mode_val("engine_view"), (230, 200)),
                  "standings": stand_size, "relative": (176 + (84 if self.game == "iracing" and self.relc["irat"].get() else 0), 26 + count * 18), "pedals": (290, 76),
                  "trackmap": map_size, "radar": (130, 130), "weather": ((70 * ncards + 10, 56) if self.mode_val("weather_view") == "compact" else (180, 6 + ncards * 46)),
@@ -2172,6 +2291,7 @@ class ProfilePanel(ttk.Frame):
         k = max(0.4, min(fit, 3.2, fit * 0.85 * user))
         self.make_fonts(k)
         before = set(c.find_all())
+        self._pk = k
         if key == "apps" or self.v[key].get():
             fn(0, 0, dw, dh)
         else:
@@ -2335,7 +2455,29 @@ class ProfilePanel(ttk.Frame):
             if show_tag and i == ra + 2:
                 c.create_text(x + w - 8, mid, text="PIT", fill=th["accent"], anchor="e", font=self.f_t)
 
+    def d_radar_ir(self, x, y, w, h):
+        """Радар iRacing: красные размытые полосы сбоку и жёлтое свечение спереди/сзади (картинка с настоящим размытием)."""
+        c, th = self.canvas, self.th
+        bg = "#10151d"
+        pk = getattr(self, "_pk", None) or 1.0
+        W, H = int(w * pk), int(h * pk)
+        cx, cy = W / 2, H / 2
+        ch, cw = H * 0.19, W * 0.09
+        items = [{"kind": "L", "dy": 1.5, "d": 0.0}, {"kind": "R", "dy": -2.5, "d": 0.0},
+                 {"kind": "F", "dy": 26.0, "d": 21.0}, {"kind": "B", "dy": -30.0, "d": 25.0}]
+        img = glow_image(c, W, H, bg, ir_radar_blobs(W, H, cx, cy, ch, cw, items, 40.0), 2 if W > 120 else 1)
+        self._rimgs = getattr(self, "_rimgs", [])[-6:] + [img]
+        c.create_image(x, y, image=img, anchor="nw")
+        sc = 1.0 / pk
+        c.create_rectangle(x + 1, y + 1, x + w - 1, y + h - 1, fill="", outline="#2a3240", width=2)
+        mx = x + w / 2
+        c.create_line(mx, y + 5, mx, y + h - 5, fill="#aab4c2")
+        c.create_rectangle(mx - cw * sc / 2, y + h / 2 - ch * sc / 2, mx + cw * sc / 2, y + h / 2 + ch * sc / 2, fill="#ffffff", outline="")
+        c.create_text(mx, y + h - 3, text=f"{self.v['radar_range'].get()} м", fill=th["dim"], font=self.f_t)
+
     def d_radar(self, x, y, w, h):
+        if self.game == "iracing":
+            return self.d_radar_ir(x, y, w, h)
         c, th = self.canvas, self.th
         cx, cy, r = x + w / 2, y + h / 2, min(w, h) / 2 - 3
         c.create_oval(cx - r, cy - r, cx + r, cy + r, outline="#7c8696", width=2)
@@ -2737,12 +2879,13 @@ class ProfilePanel(ttk.Frame):
         self.panel(x, y, w, h)
         self.mark(c, x + 6, y + 6, x + 9, y + 18)
         c.create_text(x + 14, y + 12, text="ПИТ-СТОП И СТИНТ", fill=th["text"], anchor="w", font=self.f_t)
-        rows = [("Стинт", "42:10 • 18 кр."), ("Топлива хватит на", "6.2 кр."), ("Энергии хватит на", "5.4 кр."),
-                ("Заезд в боксы", "через 4 кр."), ("Последний стоп", "48.2 с"), ("За рулём ZINOVIEV", "1:42:10")]
+        rows = [("Стинт", "42:10 • 18 кр."), ("Темп, последние 5 кр.", "1:42.318"), ("Лучший круг стинта", "1:41.870"),
+                ("Топлива хватит на", "6.2 кр."), ("Заезд в боксы", "через 4 кр."), ("Последний стоп", "48.2 с"),
+                ("За рулём ZINOVIEV", "1:42:10")]
         for i, (a, b) in enumerate(rows):
             yy = y + 32 + i * 18
             c.create_text(x + 10, yy, text=a, fill=th["dim"], anchor="w", font=self.f_t)
-            c.create_text(x + w - 10, yy, text=b, fill=th["accent"] if i == 3 else th["text"], anchor="e", font=self.f_t)
+            c.create_text(x + w - 10, yy, text=b, fill=th["accent"] if i == 4 else th["text"], anchor="e", font=self.f_t)
 
     def d_engine(self, x, y, w, h):
         c, th = self.canvas, self.th
@@ -2815,9 +2958,10 @@ class ProfilePanel(ttk.Frame):
         c, th = self.canvas, self.th
         v = self.mode_val("speedo_view")
         acc = th.get("accent", "#f2b705")
-        G, R_, D = "#2ee26d", "#ff3b30", "#262d38"
+        G, R_, D = "#2ee26d", "#ff3b30", "#b3b8bf"
+        INK, INK2, AMB = "#17191c", "#4b5157", "#a86b00"
         if v != "minimal":
-            self.panel(x, y, w, h)
+            self.panel(x, y, w, h, fill="#dde0e4")
         cx, cy = x + w / 2, y + h / 2
         def pt(r, a):
             return cx + r * math.cos(math.radians(a)), cy - r * math.sin(math.radians(a))
@@ -2829,28 +2973,39 @@ class ProfilePanel(ttk.Frame):
             r2 = r - 13
             c.create_arc(cx - r2, cy - r2, cx + r2, cy + r2, start=245, extent=-80, style="arc", outline=G, width=4)
             c.create_arc(cx - r2, cy - r2, cx + r2, cy + r2, start=295, extent=30, style="arc", outline=R_, width=4)
-            c.create_text(cx, cy - h * 0.2, text="5", fill=th["text"], font=self.f_b)
-            c.create_text(cx, cy + h * 0.05, text="255", fill=th["text"], font=self.f_s)
-            c.create_text(cx, cy + h * 0.18, text="KPH", fill=th["dim"], font=self.f_t)
+            c.create_text(cx, cy - h * 0.2, text="5", fill=INK, font=self.f_b)
+            c.create_text(cx, cy + h * 0.05, text="255", fill=INK, font=self.f_s)
+            c.create_text(cx, cy + h * 0.18, text="KPH", fill=INK2, font=self.f_t)
         elif v in ("dial", "tacho"):
             r = w * 0.46
-            c.create_oval(cx - r, cy - r, cx + r, cy + r, fill="#0d0e10", outline="#c9ccd2", width=3)
+            for k, col in enumerate(("#5d6065", "#8e9298", "#c8cbd0", "#9a9ea4", "#6f7378")):      # ободок
+                rr = r * (1.0 - k * 0.012)
+                c.create_oval(cx - rr, cy - rr, cx + rr, cy + rr, fill=col, outline="")
+            for k in range(10):                                                                   # светлая панель
+                rr = r * 0.94 * (1.0 - k / 9 * 0.55)
+                c.create_oval(cx - rr, cy - rr, cx + rr, cy + rr, fill=mix("#b7babf", "#e9ebed", k / 9), outline="")
+            ink, ink2, ndl = "#17191c", "#4b5157", "#e5281d"
             n = 12 if v == "dial" else 9
             for i in range(n + 1):
                 a = 225 - 270 * i / n
-                x0, y0 = pt(r * 0.8, a)
-                x1, y1 = pt(r * 0.92, a)
-                c.create_line(x0, y0, x1, y1, fill=acc, width=2)
-                tx, ty = pt(r * 0.64, a)
-                c.create_text(tx, ty, text=str(i * (30 if v == "dial" else 1) if v == "dial" else i), fill=acc, font=self.f_t)
-            xa, ya = pt(r * 0.8, 225 - 270 * (0.74 if v == "dial" else 0.8))
-            c.create_line(cx, cy, xa, ya, fill="#ffffff", width=3)
+                x0, y0 = pt(r * 0.78, a)
+                x1, y1 = pt(r * 0.88, a)
+                c.create_line(x0, y0, x1, y1, fill=ink, width=2)
+                tx, ty = pt(r * 0.62, a)
+                c.create_text(tx, ty, text=str(i * 30 if v == "dial" else i), fill=ink, font=self.f_t)
+            xa, ya = pt(r * 0.84, 225 - 270 * (0.74 if v == "dial" else 0.8))
             if v == "dial":
-                c.create_oval(cx - 6, cy - 6, cx + 6, cy + 6, fill="#1b1d20", outline="#555")
-                c.create_text(cx, cy + r * 0.55, text="255", fill=th["text"], font=self.f_s)
+                self.panel(cx - r * 0.34, cy + r * 0.34, r * 0.68, r * 0.28, fill="#0b0c0e", r=5)
+                c.create_text(cx, cy + r * 0.48, text="255", fill="#ffffff", font=self.f_s)
+                c.create_text(cx, cy + r * 0.78, text="km/h", fill=ink2, font=self.f_t)
+                c.create_line(cx, cy, xa, ya, fill=ndl, width=3, capstyle="round")
+                c.create_oval(cx - 6, cy - 6, cx + 6, cy + 6, fill="#050607", outline="#7b8794")
             else:
-                c.create_text(cx, cy - r * 0.05, text="5", fill=acc, font=self.f_b)
-                c.create_text(cx, cy + r * 0.4, text="255", fill=th["text"], font=self.f_s)
+                c.create_line(cx + (xa - cx) * 0.35, cy + (ya - cy) * 0.35, xa, ya, fill=ndl, width=3, capstyle="round")
+                c.create_oval(cx - r * 0.27, cy - r * 0.27, cx + r * 0.27, cy + r * 0.27, fill="#7b8794", outline="")
+                c.create_oval(cx - r * 0.22, cy - r * 0.22, cx + r * 0.22, cy + r * 0.22, fill="#050607", outline="")
+                c.create_text(cx, cy, text="5", fill="#ffffff", font=self.f_b)
+                c.create_text(cx, cy + r * 0.55, text="255", fill=ink, font=self.f_s)
         elif v == "led":
             n = 22
             lw = (w - 20 - 3 * (n - 1)) / n
@@ -2858,26 +3013,26 @@ class ProfilePanel(ttk.Frame):
                 col = G if i < 10 else R_ if i < 17 else "#4a90ff"
                 lx = x + 10 + i * (lw + 3)
                 c.create_rectangle(lx, y + 8, lx + lw, y + 22, fill=col if i < 15 else D, outline="")
-            c.create_text(x + w * 0.09, y + h * 0.66, text="5", fill=acc, font=self.f_b)
-            c.create_text(x + w * 0.5, y + h * 0.64, text="255", fill=th["text"], font=self.f_b)
-            c.create_text(x + w * 0.5 + 32, y + h * 0.8, text="KPH", fill=th["dim"], anchor="w", font=self.f_t)
+            c.create_text(x + w * 0.09, y + h * 0.66, text="5", fill=AMB, font=self.f_b)
+            c.create_text(x + w * 0.5, y + h * 0.64, text="255", fill=INK, font=self.f_b)
+            c.create_text(x + w * 0.5 + 32, y + h * 0.8, text="KPH", fill=INK2, anchor="w", font=self.f_t)
             c.create_rectangle(x + w - 28, y + h * 0.45, x + w - 18, y + h - 8, fill=G, outline="")
             c.create_rectangle(x + w - 14, y + h * 0.8, x + w - 6, y + h - 8, fill=R_, outline="")
         elif v == "digital":
-            self.panel(x, y, w, h)
+            self.panel(x, y, w, h, fill="#dde0e4")
             self.canvas.create_rectangle(x + 8, y + 8, x + w * 0.28, y + h * 0.6, fill=acc, outline="")
             c.create_text(x + w * 0.14 + 4, y + h * 0.34, text="5", fill="#111", font=self.f_b)
-            c.create_text(x + w - 10, y + h * 0.3, text="255", fill=th["text"], anchor="e", font=self.f_b)
-            c.create_text(x + w - 10, y + h * 0.52, text="KPH", fill=th["dim"], anchor="e", font=self.f_t)
+            c.create_text(x + w - 10, y + h * 0.3, text="255", fill=INK, anchor="e", font=self.f_b)
+            c.create_text(x + w - 10, y + h * 0.52, text="KPH", fill=INK2, anchor="e", font=self.f_t)
             c.create_rectangle(x + 8, y + h * 0.72, x + w - 8, y + h * 0.8, fill=D, outline="")
             c.create_rectangle(x + 8, y + h * 0.72, x + w * 0.7, y + h * 0.8, fill=acc, outline="")
             c.create_rectangle(x + 8, y + h * 0.86, x + w * 0.8, y + h * 0.9, fill=G, outline="")
             c.create_rectangle(x + 8, y + h * 0.92, x + w * 0.3, y + h * 0.96, fill=R_, outline="")
         else:
-            c.create_rectangle(x, y, x + w, y + h, fill=th["panel"], outline="")
-            c.create_text(x + w * 0.16, cy, text="5", fill=acc, font=self.f_b)
-            c.create_text(x + w * 0.72, cy - 4, text="255", fill=th["text"], anchor="e", font=self.f_b)
-            c.create_text(x + w * 0.76, cy + 8, text="KPH", fill=th["dim"], anchor="w", font=self.f_t)
+            self.panel(x, y, w, h, fill="#dde0e4")
+            c.create_text(x + w * 0.16, cy, text="5", fill=AMB, font=self.f_b)
+            c.create_text(x + w * 0.72, cy - 4, text="255", fill=INK, anchor="e", font=self.f_b)
+            c.create_text(x + w * 0.76, cy + 8, text="KPH", fill=INK2, anchor="w", font=self.f_t)
 
     def d_sesstime(self, x, y, w, h):
         c, th = self.canvas, self.th

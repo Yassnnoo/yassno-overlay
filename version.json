@@ -1,6 +1,6 @@
 {
- "version": "2.5.29",
- "notes": "iRacing: статусы FINISH (клетчатый флаг), DSQ (дисквалификация) и OUT (выбывшие в гонке остаются в таблице).",
+ "version": "2.5.41",
+ "notes": "Код разбит: чтение игр вынесено в yassno_readers.py. Добавлены тесты и скрипт выпуска.",
  "files": [
   "README.txt",
   "diagnose.cmd",
@@ -30,6 +30,7 @@
   "run.cmd",
   "yassno_launcher.py",
   "yassno_overlay.py",
+  "yassno_readers.py",
   "yassno_svgmap.py"
  ]
 }
