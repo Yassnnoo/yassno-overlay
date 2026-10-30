@@ -31,7 +31,7 @@ import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import colorchooser, filedialog, messagebox, ttk
 
-APP_VERSION = "2.5.43"
+APP_VERSION = "2.5.44"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -49,9 +49,9 @@ ELEMENTS = [("standings", "Таблица (стендинг)"), ("relative", "Р
             ("weather", "Погода"), ("lights", "Стартовые огни"), ("limiter", "Пит-лимитер"),
             ("fuel", "Топливный калькулятор"), ("delta", "Дельта к лучшему кругу"), ("alerts", "Предупреждения"),
             ("tyres", "Шины и тормоза"), ("pitplan", "Пит-стоп и стинт"), ("gaps", "Соперники: гэпы и тренд"),
-            ("engine", "Двигатель и расход"), ("sesstime", "Таймер сессии"), ("clock", "Локальное время"), ("speedo", "Спидометр")]
-PRESETS = [("Эндуро", ("standings", "relative", "trackmap", "weather", "fuel", "delta", "alerts", "tyres", "pitplan", "gaps", "engine", "sesstime", "limiter")),
-           ("Спринт", ("standings", "relative", "pedals", "shiftlight", "trackmap", "radar", "lights", "limiter", "fuel", "delta", "alerts", "tyres")),
+            ("engine", "Двигатель и расход"), ("sesstime", "Таймер сессии"), ("clock", "Локальное время"), ("speedo", "Спидометр"), ("laplog", "Журнал кругов")]
+PRESETS = [("Эндуро", ("standings", "relative", "trackmap", "weather", "fuel", "delta", "alerts", "tyres", "pitplan", "gaps", "engine", "sesstime", "limiter", "laplog")),
+           ("Спринт", ("standings", "relative", "pedals", "shiftlight", "trackmap", "radar", "lights", "limiter", "fuel", "delta", "alerts", "tyres", "laplog")),
            ("Для стрима", ("standings", "pedals", "trackmap", "weather", "delta", "alerts", "sesstime", "clock", "speedo")),
            ("Минимум", ("relative", "delta", "alerts", "limiter", "lights"))]
 # список панелей слева: (ключ страницы, название, ключ включения или None)
@@ -60,11 +60,11 @@ PAGES = [("general", "Общие и цвета", None), ("standings", "Табл�
          ("weather", "Погода", "weather"), ("lights", "Стартовые огни", "lights"), ("limiter", "Пит-лимитер", "limiter"),
          ("fuel", "Топливо", "fuel"), ("delta", "Дельта", "delta"), ("alerts", "Предупреждения", "alerts"),
          ("tyres", "Шины и тормоза", "tyres"), ("pitplan", "Пит-стоп и стинт", "pitplan"), ("gaps", "Соперники", "gaps"), ("engine", "Двигатель и расход", "engine"),
-         ("sesstime", "Таймер сессии", "sesstime"), ("clock", "Локальное время", "clock"), ("speedo", "Спидометр", "speedo"),
+         ("laplog", "Журнал кругов", "laplog"), ("sesstime", "Таймер сессии", "sesstime"), ("clock", "Локальное время", "clock"), ("speedo", "Спидометр", "speedo"),
          ("apps", "Доп. программы", None)]
 PAGE_GROUPS = [("", ("general",)), ("Таблицы", ("standings", "relative", "gaps")),
                ("Машина", ("pedals", "speedo", "delta", "fuel", "tyres", "engine", "limiter", "pitplan")),
-               ("Трасса", ("trackmap", "radar", "weather", "lights")), ("Информация", ("alerts", "sesstime", "clock"))]
+               ("Трасса", ("trackmap", "radar", "weather", "lights")), ("Информация", ("laplog", "alerts", "sesstime", "clock"))]
 PAGE_WORDS = {"general": "шрифт цвета тема светлая тёмная стиль окон раскладки наборы пресеты эндуро спринт стрим минимум прозрачность",
               "standings": "тайминг стендинг позиции колонки шины ирейтинг лидер круг", "relative": "релатив соседи впереди сзади гэпы",
               "pedals": "руль педали газ тормоз сцепление передача шифт лайт обороты", "trackmap": "карта трасса ветер направление",
@@ -72,7 +72,7 @@ PAGE_WORDS = {"general": "шрифт цвета тема светлая тёмн
               "lights": "старт огни светофор", "limiter": "пит лимитер скорость пит-лейн", "fuel": "топливо бензин расход круги хватит",
               "delta": "дельта лучший круг сектора прогноз", "alerts": "флаги штраф предупреждения жёлтый синий", "tyres": "шины тормоза износ температура",
               "pitplan": "пит-стоп стинт заправка замена", "gaps": "соперники гэпы тренд отрыв", "engine": "двигатель расход энергия температура масла",
-              "sesstime": "таймер сессии до финиша осталось", "clock": "время часы локальное", "speedo": "спидометр скорость циферблат стрелка тахометр дуга"}
+              "sesstime": "таймер сессии до финиша осталось", "clock": "время часы локальное", "speedo": "спидометр скорость циферблат стрелка тахометр дуга", "laplog": "журнал кругов время круга лучший дельта температура лап лог"}
 STEAM_IDS = {"lmu": "2399420", "rf2": "365960", "iracing": "266410"}           # запуск игр через Steam, если путь к игре не задан
 COMPANIONS = [("racelab", "RaceLab"), ("simhub", "SimHub"), ("crewchief", "Crew Chief"), ("tradingpaints", "Trading Paints")]
 COMPANION_GAMES = {"tradingpaints": ("iracing",)}          # программы, которые есть только для одной игры
@@ -105,7 +105,7 @@ PAGE_COLORS = {"general": list(THEME_NAMES), "standings": ["accent", "text", "di
                "trackmap": ["panel", "border", "text"], "radar": ["accent"], "weather": ["panel", "text", "dim"],
                "lights": [], "limiter": [], "fuel": ["panel", "text", "dim"], "apps": [],
                "delta": ["panel", "text"], "alerts": [], "tyres": ["panel", "text", "dim"], "pitplan": ["panel", "text", "dim"],
-               "gaps": ["panel", "text", "dim"], "engine": ["panel", "text", "dim"], "sesstime": ["panel", "text", "dim"], "clock": ["panel", "text", "dim"], "speedo": ["panel", "text", "dim", "accent"]}
+               "gaps": ["panel", "text", "dim"], "engine": ["panel", "text", "dim"], "sesstime": ["panel", "text", "dim"], "clock": ["panel", "text", "dim"], "speedo": ["panel", "text", "dim", "accent"], "laplog": ["panel", "text", "dim", "accent", "background"]}
 PAGE_NOTES = {
     "apps": "Программы, которые запускаются вместе с оверлеем этой игры (например, RaceLab, SimHub, Crew Chief). Для каждой игры свой набор.",
     "standings": "Главная таблица. Колонки включаются и выключаются переключателями ниже, предпросмотр показывает результат.",
@@ -123,6 +123,7 @@ PAGE_NOTES = {
     "engine": "Температура воды и масла, расход топлива и остаток резины по каждому колесу. Виды: обычный, компактный (одна строка), циферблаты.",
     "pitplan": "Стинт, на сколько кругов хватит топлива и энергии, когда заезжать, таймеры пит-лейна и стоянки, время за рулём у каждого пилота.",
     "sesstime": "Название сессии (практика, квалификация, гонка) и таймер: сколько осталось, какой круг или сколько прошло. Те же данные, что в шапке таблицы, но отдельным окном.",
+    "laplog": "Таблица последних кругов: номер, время, разница с прошлым (или лучшим) кругом и температура трассы, внизу — лучший круг сессии. Количество кругов, колонки и порядок настраиваются ниже.",
     "speedo": "Скорость, передача и обороты. Виды: дуга оборотов, круглый циферблат со стрелкой, тахометр, лента светодиодов, цифровой и минимальный. Выбор вида ниже.",
     "clock": "Реальное время на вашем компьютере крупными цифрами. Удобно, чтобы не терять счёт времени в длинной гонке.",
     "gaps": "Гэпы до соседей по классу спереди и сзади, как они меняются от круга к кругу и через сколько кругов вас догонят или вы догоните.",
@@ -142,6 +143,7 @@ MODES = {"stand_mode": [("table", "Таблица"), ("compact", "Компакт
                          ("rally", "Раллийный: толстый обод"), ("bar", "Полоса поворота")],
          "weather_view": [("cards", "Карточки столбиком"), ("compact", "Компактный: одной строкой")],
          "theme_mode": [("dark", "Тёмная"), ("light", "Светлая")],
+         "laplog_ref": [("prev", "К прошлому кругу"), ("best", "К лучшему кругу")],
          "win_style": [("classic", "Классика: красная метка"), ("square", "Строгий: прямые углы"),
                        ("soft", "Мягкий: сильно скруглённые"), ("minimal", "Минимализм: без цветной метки"),
                        ("accent", "Акцент: метка и рамка цвета акцента")],
@@ -247,13 +249,13 @@ REL_COLS = [("pos", "Позиция"), ("num", "Номер"), ("tag", "Метк�
 WX_CARDS = [("track", "Температура трассы"), ("air", "Температура воздуха"), ("wet", "Влажность трассы"), ("rain", "Осадки")]
 OP_DEFAULT = {"standings": 0.94, "relative": 0.94, "pedals": 0.94, "trackmap": 0.94, "radar": 1.0,
               "weather": 0.94, "lights": 1.0, "limiter": 1.0, "fuel": 0.94, "delta": 0.94, "alerts": 1.0,
-              "tyres": 0.94, "pitplan": 0.94, "gaps": 0.94, "engine": 0.94, "sesstime": 0.94, "clock": 0.94, "speedo": 0.94}
+              "tyres": 0.94, "pitplan": 0.94, "gaps": 0.94, "engine": 0.94, "sesstime": 0.94, "clock": 0.94, "speedo": 0.94, "laplog": 0.94}
 SCALE_KEYS = {"standings": "scale_standings", "relative": "scale_relative", "pedals": "scale_pedals", "weather": "scale_weather", "lights": "scale_lights",
               "limiter": "scale_limiter", "trackmap": "map_scale", "radar": "radar_scale", "fuel": "fuel_scale",
-              "delta": "scale_delta", "alerts": "scale_alerts", "tyres": "scale_tyres", "pitplan": "scale_pitplan", "gaps": "scale_gaps", "engine": "scale_engine", "sesstime": "scale_sesstime", "clock": "scale_clock", "speedo": "scale_speedo"}
+              "delta": "scale_delta", "alerts": "scale_alerts", "tyres": "scale_tyres", "pitplan": "scale_pitplan", "gaps": "scale_gaps", "engine": "scale_engine", "sesstime": "scale_sesstime", "clock": "scale_clock", "speedo": "scale_speedo", "laplog": "scale_laplog"}
 SCALE_DEFAULT = {"scale_standings": 1.0, "scale_relative": 1.0, "scale_pedals": 1.0, "scale_weather": 1.0, "scale_lights": 1.0, "scale_limiter": 1.0,
                  "map_scale": 1.0, "radar_scale": 1.0, "fuel_scale": 0.8, "scale_delta": 1.0, "scale_alerts": 1.0,
-                 "scale_tyres": 1.0, "scale_pitplan": 1.0, "scale_gaps": 1.0, "scale_engine": 1.0, "scale_sesstime": 1.0, "scale_clock": 1.0, "scale_speedo": 1.0}
+                 "scale_tyres": 1.0, "scale_pitplan": 1.0, "scale_gaps": 1.0, "scale_engine": 1.0, "scale_sesstime": 1.0, "scale_clock": 1.0, "scale_speedo": 1.0, "scale_laplog": 1.0}
 DEFAULTS = {**{k: True for k, _ in ELEMENTS}, "font": 13, "family": "", "rows": 12,
             "hide_garage": True, "class_only": False, **SCALE_DEFAULT, **{"op_" + k: v for k, v in OP_DEFAULT.items()},
             "radar_range": 40, "fuel_reserve": 0.0, "fuel_avg": 5,
@@ -267,11 +269,12 @@ DEFAULTS = {**{k: True for k, _ in ELEMENTS}, "font": 13, "family": "", "rows": 
 DEFAULTS.update({"map_ir_svg": True, "weather_view": "cards", "map_style": "classic", "map_one_color": False, "map_frame": True,
                  **{"hg_" + k: True for k, _ in ELEMENTS if k not in ("standings", "shiftlight")}})
 DEFAULTS.update({"tyres": False, "pitplan": False, "gaps": False, "engine": False, "engine_view": "table", "delta_sec_bar": True,
-                 "sesstime": False, "clock": False, "speedo": False, "speedo_view": "arc", "speedo_max": 340, "clock_seconds": True, "st_session": True, "st_timer": True, "st_clock": True,
+                 "sesstime": False, "clock": False, "speedo": False, "laplog": False, "laplog_count": 5, "laplog_best": True, "laplog_delta": True, "laplog_temp": True,
+                 "laplog_ref": "prev", "laplog_newest": True, "speedo_view": "arc", "speedo_max": 340, "clock_seconds": True, "st_session": True, "st_timer": True, "st_clock": True,
                  "win_style": "classic", "theme_mode": "dark"})        # эти панели по умолчанию выключены
 POS_KEYS = ["x", "y", "rel_x", "rel_y", "ped_x", "ped_y", "map_x", "map_y", "radar_x", "radar_y",
             "wx_x", "wx_y", "lights_x", "lights_y", "lim_x", "lim_y", "fuel_x", "fuel_y",
-            "delta_x", "delta_y", "alerts_x", "alerts_y", "tyres_x", "tyres_y", "pitplan_x", "pitplan_y", "gaps_x", "gaps_y", "engine_x", "engine_y", "sesstime_x", "sesstime_y", "clock_x", "clock_y", "speedo_x", "speedo_y"]
+            "delta_x", "delta_y", "alerts_x", "alerts_y", "tyres_x", "tyres_y", "pitplan_x", "pitplan_y", "gaps_x", "gaps_y", "engine_x", "engine_y", "sesstime_x", "sesstime_y", "clock_x", "clock_y", "speedo_x", "speedo_y", "laplog_x", "laplog_y"]
 RADAR_RANGES = [15, 20, 30, 40, 60, 80, 120]
 RESERVES = ["0", "0.5", "1", "2"]
 
@@ -1248,7 +1251,7 @@ NAV_TIPS = {
     "delta": "Разница времени с лучшим кругом по ходу круга.", "alerts": "Флаги, штрафы и последний круг.",
     "tyres": "Износ и температура шин и тормозов.", "pitplan": "План пит-стопа и темп стинта.",
     "gaps": "Отрыв до соперников спереди и сзади и тренд.", "engine": "Температуры двигателя и расход.",
-    "sesstime": "Сколько осталось до конца сессии.", "clock": "Локальное время ПК.", "speedo": "Спидометр: шесть видов приборов.",
+    "sesstime": "Сколько осталось до конца сессии.", "clock": "Локальное время ПК.", "speedo": "Спидометр: шесть видов приборов.", "laplog": "Последние круги с дельтой и температурой, плюс лучший круг.",
 }
 
 
@@ -1893,12 +1896,19 @@ class ProfilePanel(ttk.Frame):
             _vis()
             f._r = r_sb + 4
             self.slider(f, None, "Шкала, секунд (±)", self.v["delta_range"], 0.3, 3.0, lambda x: f"{x:.1f} с")
-        elif key in ("alerts", "tyres", "pitplan", "gaps", "engine", "sesstime", "clock", "speedo"):
+        elif key in ("alerts", "tyres", "pitplan", "gaps", "engine", "sesstime", "clock", "speedo", "laplog"):
             f = main_card()
             self.slider(f, None, "Размер", self.v["scale_" + key], 0.5, 2.5, mult)
             if key == "speedo":
                 self.mcombo(f, "Вид", "speedo_view", width=30)
                 self.spin(f, None, "Шкала циферблата, км/ч", "speedo_max", 120, 450, "км/ч")
+            if key == "laplog":
+                self.spin(f, None, "Сколько кругов показывать", "laplog_count", 1, 12)
+                self.mcombo(f, "Дельта считается", "laplog_ref")
+                self.tg(f, None, "Показывать дельту", self.v["laplog_delta"])
+                self.tg(f, None, "Показывать температуру трассы", self.v["laplog_temp"])
+                self.tg(f, None, "Показывать строку «Лучший круг»", self.v["laplog_best"])
+                self.tg(f, None, "Новые круги сверху", self.v["laplog_newest"])
             if key == "clock":
                 self.tg(f, None, "Показывать секунды", self.v["clock_seconds"])
             if key == "tyres":
@@ -2434,10 +2444,10 @@ class ProfilePanel(ttk.Frame):
         yb = max(t[3] + t[5] for t in layout) + 12
         nat = {"tyres": {"compact": (150, 190), "wear": (260, 92)}.get(self.mode_val("tyres_view"), (200, 160)), "pitplan": (260, 168),
                "gaps": (270, 130), "engine": {"compact": (360, 34), "gauges": (170, 200)}.get(self.mode_val("engine_view"), (230, 200)),
-               "alerts": (240, 120), "sesstime": (190, 52), "clock": (170, 52), "speedo": self.speedo_size()}
+               "alerts": (240, 120), "sesstime": (190, 52), "clock": (170, 52), "speedo": self.speedo_size(), "laplog": self.laplog_size(True)}
         fns = {"tyres": self.d_tyres, "pitplan": self.d_pitplan, "gaps": self.d_gaps, "engine": self.d_engine, "alerts": self.d_alerts,
-               "sesstime": self.d_sesstime, "clock": self.d_clock, "speedo": self.d_speedo}
-        rows = [(("tyres", "pitplan", "gaps", "engine"), 0.656), (("alerts", "sesstime", "clock", "speedo"), 0.62)]
+               "sesstime": self.d_sesstime, "clock": self.d_clock, "speedo": self.d_speedo, "laplog": self.d_laplog}
+        rows = [(("tyres", "pitplan", "gaps", "engine"), 0.656), (("alerts", "sesstime", "clock", "speedo", "laplog"), 0.52)]
         for keys, k in rows:
             x = 10
             rh_ = 0
@@ -2479,7 +2489,7 @@ class ProfilePanel(ttk.Frame):
         mmode = self.mode_val("map_mode")
         map_size = {"full": (180, 190), "linear": (320, 150), "local": (190, 200)}[mmode]
         sizes = {"delta": ((190, self.delta_th_h()) if self.mode_val("delta_theme") not in ("full", "bar", "sectors") else {"bar": (190, 38), "sectors": (190, 152 if self.v["delta_sec_bar"].get() else 112)}.get(self.mode_val("delta_theme"), (190, 124))), "alerts": (240, 120),
-                 "tyres": {"compact": (150, 190), "wear": (260, 92)}.get(self.mode_val("tyres_view"), (200, 160)), "pitplan": (260, 168), "gaps": (270, 130), "sesstime": (190, 52), "clock": (170, 52), "speedo": self.speedo_size(),
+                 "tyres": {"compact": (150, 190), "wear": (260, 92)}.get(self.mode_val("tyres_view"), (200, 160)), "pitplan": (260, 168), "gaps": (270, 130), "sesstime": (190, 52), "clock": (170, 52), "speedo": self.speedo_size(), "laplog": self.laplog_size(),
                  "engine": {"compact": (360, 34), "gauges": (170, 200)}.get(self.mode_val("engine_view"), (230, 200)),
                  "standings": stand_size, "relative": (176 + (84 if self.game == "iracing" and self.relc["irat"].get() else 0), 26 + count * 18), "pedals": (290, 76),
                  "trackmap": map_size, "radar": (130, 130), "weather": ((70 * ncards + 10, 56) if self.mode_val("weather_view") == "compact" else (180, 6 + ncards * 46)),
@@ -2490,7 +2500,7 @@ class ProfilePanel(ttk.Frame):
               "trackmap": self.d_map, "radar": self.d_radar, "weather": self.d_weather, "lights": self.d_lights,
               "limiter": self.d_limiter, "fuel": self.d_fuel, "delta": self.d_delta, "alerts": self.d_alerts,
               "tyres": self.d_tyres, "pitplan": self.d_pitplan, "gaps": self.d_gaps, "engine": self.d_engine,
-              "sesstime": self.d_sesstime, "clock": self.d_clock, "speedo": self.d_speedo}[key]
+              "sesstime": self.d_sesstime, "clock": self.d_clock, "speedo": self.d_speedo, "laplog": self.d_laplog}[key]
         dw, dh = sizes[key]
         user = 1.0
         if key in SCALE_KEYS:
@@ -3264,6 +3274,55 @@ class ProfilePanel(ttk.Frame):
             c.create_text(x + w * 0.16, cy, text=str(gr), fill=AMB, font=self.f_b)
             c.create_text(x + w * 0.72, cy - 4, text=str(sp), fill=INK, anchor="e", font=self.f_b)
             c.create_text(x + w * 0.76, cy + 8, text="KPH", fill=INK2, anchor="w", font=self.f_t)
+
+    def laplog_size(self, cp=False):
+        n = max(1, min(12, int(self.num("laplog_count", 5))))
+        if cp:                                                  # общий предпросмотр: три строки крупным планом, без температуры
+            return (int(28 + (15 + (9.5 if self.v["laplog_delta"].get() else 0)) * 13), int(66 + min(n, 3) * 34 + (34 if self.v["laplog_best"].get() else 8)))
+        cols = 5.5 + 9.5 + (9.5 if self.v["laplog_delta"].get() else 0) + (8.5 if self.v["laplog_temp"].get() else 0)
+        return (int(28 + cols * 7.2), int(52 + n * 21 + (28 if self.v["laplog_best"].get() else 6)))
+
+    def d_laplog(self, x, y, w, h):
+        c, th = self.canvas, self.th
+        self.panel(x, y, w, h)
+        self.mark(c, x + 6, y + 8, x + 9, y + 24)
+        c.create_text(x + 16, y + (14 if self.__dict__.get("_pk", 1.0) and (getattr(self, "_pk", None) or 1.0) < 0.9 else 16), text="ЖУРНАЛ КРУГОВ", fill=th["text"], anchor="w", font=self.f_b)
+        cp = (getattr(self, "_pk", None) or 1.0) < 0.9
+        n = max(1, min(12 if not cp else 3, int(self.num("laplog_count", 5))))
+        show_d, show_t, show_b = self.v["laplog_delta"].get(), self.v["laplog_temp"].get() and not cp, self.v["laplog_best"].get()
+        cols = [("n", "КРУГ", 5.5), ("t", "ВРЕМЯ", 9.5)] + ([("d", "ДЕЛЬТА", 9.5)] if show_d else []) + ([("tmp", "ТРАССА", 8.5)] if show_t else [])
+        u = 13.0 if cp else 7.2
+        xs, cx = {}, x + 14
+        for k, title, cw_ in cols:
+            xs[k] = (cx, cx + cw_ * u)
+            c.create_text(cx + 4 if k == "n" else cx + cw_ * u - 6, y + (48 if cp else 42), text=title, fill=th["accent"], anchor="w" if k == "n" else "e", font=self.f_t)
+            cx += cw_ * u
+        rows = [(20 - n + i, 136.9 + (0.2, 0.55, -0.15, 0.3, 0.45, -0.1, 0.25, 0.6, 0.05, 0.35, 0.4, 0.15)[i % 12]) for i in range(n)]
+        base = 136.75
+        # «живой» предпросмотр: самый новый круг каждые несколько секунд меняет время
+        rows[-1] = (rows[-1][0], rows[-1][1] + 0.4 * math.sin(self.at() * 0.9))
+        order = list(range(n))[::-1] if self.v["laplog_newest"].get() else list(range(n))
+        by_ref = self.mode_val("laplog_ref") == "best"
+        ytop = y + (62 if cp else 52)
+        rh_ = 34 if cp else 21
+        for i, idx in enumerate(order):
+            yy = ytop + i * rh_
+            c.create_rectangle(x + 4, yy, x + w - 4, yy + rh_, fill=mix(th["background"], "#ffffff", 0.045 if i % 2 == 0 else 0.02), outline="")
+            lap, t = rows[idx]
+            ref = (min(r[1] for r in rows[:idx]) if idx else None) if by_ref else (rows[idx - 1][1] if idx else None)
+            d = None if ref is None else t - ref
+            mid = yy + rh_ / 2
+            c.create_text(xs["n"][0] + 4, mid, text=str(lap), fill=th["text"], anchor="w", font=self.f_b)
+            c.create_text(xs["t"][1] - 6, mid, text=f"{int(t // 60)}:{t - 60 * int(t // 60):06.3f}", fill="#c77dff" if t <= base else th["text"], anchor="e", font=self.f_b)
+            if show_d:
+                c.create_text(xs["d"][1] - 6, mid, text="—" if d is None else f"{d:+.3f}", fill=th["dim"] if d is None else "#2ee26d" if d < 0 else "#ff5a4f", anchor="e", font=self.f_b)
+            if show_t:
+                c.create_text(xs["tmp"][1] - 6, mid, text="23.4 °C", fill=th["text"], anchor="e", font=self.f_t)
+        if show_b:
+            yb = ytop + n * rh_ + 4
+            c.create_line(x + 14, yb, x + w - 14, yb, fill=th["border"])
+            c.create_text(x + 14, yb + 12, text="ЛУЧШИЙ  (круг 11)", fill="#c77dff", anchor="w", font=self.f_t)
+            c.create_text(x + w - 14, yb + 12, text=f"{int(base // 60)}:{base - 60 * int(base // 60):06.3f}", fill="#c77dff", anchor="e", font=self.f_b)
 
     def d_sesstime(self, x, y, w, h):
         c, th = self.canvas, self.th

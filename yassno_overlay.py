@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "2.5.43"
+APP_VERSION = "2.5.44"
 import argparse
 import bisect
 import collections
@@ -996,12 +996,12 @@ DEFAULT_THEME = {"accent": "#f2b705", "text": "#eef1f5", "dim": "#8791a0", "pane
                  "background": "#0b0e13", "border": "#2a3140", "me": "#4da3ff",
                  "throttle": "#2ee26d", "brake": "#ff3b30", "clutch": "#4a90ff"}
 ELEMENTS = ("standings", "relative", "pedals", "shiftlight", "trackmap", "radar", "weather", "lights", "limiter", "fuel",
-            "delta", "alerts", "tyres", "pitplan", "gaps", "engine", "sesstime", "clock", "speedo")
+            "delta", "alerts", "tyres", "pitplan", "gaps", "engine", "sesstime", "clock", "speedo", "laplog")
 LAYOUT_POS = ("x", "y", "rel_x", "rel_y", "ped_x", "ped_y", "map_x", "map_y", "radar_x", "radar_y", "wx_x", "wx_y",
               "lights_x", "lights_y", "lim_x", "lim_y", "fuel_x", "fuel_y", "delta_x", "delta_y", "alerts_x", "alerts_y",
-              "tyres_x", "tyres_y", "pitplan_x", "pitplan_y", "gaps_x", "gaps_y", "engine_x", "engine_y", "sesstime_x", "sesstime_y", "clock_x", "clock_y", "speedo_x", "speedo_y")
+              "tyres_x", "tyres_y", "pitplan_x", "pitplan_y", "gaps_x", "gaps_y", "engine_x", "engine_y", "sesstime_x", "sesstime_y", "clock_x", "clock_y", "speedo_x", "speedo_y", "laplog_x", "laplog_y")
 LAYOUT_SCALE = tuple("scale_" + e for e in ELEMENTS) + ("map_scale", "fuel_scale") + tuple("sx_" + e for e in ELEMENTS) + tuple("sy_" + e for e in ELEMENTS)
-LAYOUT_KEYS = ELEMENTS + ("stand_mode", "map_mode", "delta_view", "delta_theme", "tyres_view", "engine_view", "speedo_view", "speedo_max") + LAYOUT_POS + LAYOUT_SCALE
+LAYOUT_KEYS = ELEMENTS + ("stand_mode", "map_mode", "delta_view", "delta_theme", "tyres_view", "engine_view", "speedo_view", "speedo_max", "laplog_count", "laplog_best", "laplog_delta", "laplog_temp", "laplog_ref", "laplog_newest") + LAYOUT_POS + LAYOUT_SCALE
 SCREEN_KEYS = LAYOUT_POS + tuple("sx_" + e for e in ELEMENTS) + tuple("sy_" + e for e in ELEMENTS)
 
 
@@ -1171,7 +1171,7 @@ SCALE_SPEC = {"trackmap": ("map_scale", 0.5, 3.0, 1.0), "radar": ("radar_scale",
 OVERLAY_NAMES = {"standings": "Таблица", "relative": "Релатив", "pedals": "Ввод", "trackmap": "Карта", "radar": "Радар",
                  "weather": "Погода", "lights": "Огни", "limiter": "Лимитер", "fuel": "Топливо", "delta": "Дельта",
                  "alerts": "Предупреждения", "tyres": "Шины", "pitplan": "План пит-стопа", "gaps": "Отрывы",
-                 "engine": "Двигатель", "sesstime": "Время сессии", "clock": "Часы", "speedo": "Спидометр"}
+                 "engine": "Двигатель", "sesstime": "Время сессии", "clock": "Часы", "speedo": "Спидометр", "laplog": "Журнал кругов"}
 
 
 EDGE = 9                                                        # ширина полосы у края окна, за которую его растягивают
@@ -3314,7 +3314,59 @@ class WearTracker:
         return [sum(h[i] for h in part) / len(part) for i in range(4)]
 
 
+
+
+class LapLog:
+    """Журнал кругов игрока: номер, время, температура трассы, заезд через боксы."""
+
+    def __init__(self):
+        self.reset(None)
+
+    def reset(self, key):
+        self.key, self.laps, self.seen, self.game_best = key, [], None, None
+
+    def update(self, frame):
+        me = next((c for c in frame["cars"] if c["player"]), None) if frame else None
+        if not me:
+            return
+        key = (frame.get("session_start"), frame.get("track"), frame.get("kind"))
+        if key != self.key:
+            self.reset(key)
+        b = me.get("best")
+        self.game_best = float(b) if isinstance(b, (int, float)) and 20.0 < b < 3600.0 else None
+        n = me.get("laps") or 0
+        last = me.get("last")
+        if self.seen is not None and n > self.seen and isinstance(last, (int, float)) and 20.0 < last < 3600.0:
+            tt = frame.get("track_temp")
+            self.laps.append({"n": n, "t": float(last), "pit": bool(me.get("in_pits") or me.get("garage")),
+                              "temp": float(tt) if isinstance(tt, (int, float)) and -50 < tt < 90 else None})
+            del self.laps[:-200]
+        self.seen = n
+
+    def best(self):
+        """(время, номер круга или None): лучший из записанных и из данных игры."""
+        rec = min((l for l in self.laps if not l["pit"]), key=lambda l: l["t"], default=None)
+        if self.game_best is not None and (rec is None or self.game_best < rec["t"] - 1e-6):
+            return self.game_best, None
+        return (rec["t"], rec["n"]) if rec else (None, None)
+
+    def rows(self, count, ref="prev"):
+        """Последние count кругов (старые → новые) с дельтой: к прошлому кругу или к лучшему."""
+        out = []
+        for i in range(max(0, len(self.laps) - count), len(self.laps)):
+            l, d = self.laps[i], None
+            if not l["pit"]:
+                if ref == "best":
+                    before = [x["t"] for x in self.laps[:i] if not x["pit"]]
+                    d = l["t"] - min(before) if before else None
+                elif i > 0 and not self.laps[i - 1]["pit"]:
+                    d = l["t"] - self.laps[i - 1]["t"]
+            out.append(dict(l, d=d))
+        return out
+
+
 delta_tracker, stint_tracker, gap_tracker, alert_engine = DeltaTracker(), StintTracker(), GapTracker(), AlertEngine()
+lap_log = LapLog()
 wear_tracker = WearTracker()
 
 
@@ -4025,6 +4077,97 @@ class SpeedoWindow(SimpleWindow):
         c.create_text(W * 0.76, H * 0.62, text="MPH" if v["mph"] else "KPH", fill=self.INK2, anchor="w", font=self.f_t)
 
 
+class LapLogWindow(SimpleWindow):
+    """Журнал времён кругов: последние N кругов, дельта, температура трассы и лучший круг."""
+    POS, ON = ("laplog_x", "laplog_y"), "laplog"
+    WIDTH, HEIGHT, HZ = 36.0, 12.0, 4
+    COLS = (("n", "КРУГ", 5.5), ("t", "ВРЕМЯ", 9.5), ("d", "ДЕЛЬТА", 9.5), ("tmp", "ТРАССА", 8.5))      # ширины в цифрах жирного шрифта
+
+    def u(self):
+        return max(6, self.main.bold.measure("0"))
+
+    def opts(self):
+        cf = self.main.cfg
+        try:
+            n = max(1, min(12, int(cf.get("laplog_count", 5))))
+        except (TypeError, ValueError):
+            n = 5
+        return (n, bool(cf.get("laplog_best", True)), bool(cf.get("laplog_delta", True)), bool(cf.get("laplog_temp", True)),
+                "best" if cf.get("laplog_ref") == "best" else "prev", bool(cf.get("laplog_newest", True)))
+
+    def view(self):
+        return "|".join(map(str, self.opts()))
+
+    def cols(self):
+        _, _, sd, st, _, _ = self.opts()
+        return [c for c in self.COLS if (c[0] != "d" or sd) and (c[0] != "tmp" or st)]
+
+    def dims(self, view):
+        n, sb = self.opts()[:2]
+        w = (2 * 14 + self.u() * sum(c[2] for c in self.cols())) / self.cw
+        return w, 1.9 + 1.5 + n * 1.5 + (1.9 if sb else 0.3)
+
+    @staticmethod
+    def fmt(t):
+        return f"{int(t // 60)}:{t - 60 * (int(t // 60)):06.3f}" if t is not None else "—"
+
+    def sample(self, n):
+        base = 136.9
+        out, prev = [], None
+        for i in range(n):
+            t = base + (0.2, 0.55, -0.15, 0.3, 0.45, -0.1, 0.25, 0.6, 0.05, 0.35, 0.4, 0.15)[i % 12]
+            out.append({"n": 20 - n + i, "t": t, "pit": False, "temp": 23.4, "d": None if prev is None else t - prev})
+            prev = t
+        return out, (136.75, 11)
+
+    def draw(self, frame):
+        m, rh, W, cw = self.main, self.rh, self.width, self.cw
+        n, show_best, show_d, show_t, ref, newest = self.opts()
+        rows = lap_log.rows(n, ref)
+        best = lap_log.best()
+        c, cy = _card(self, "ЖУРНАЛ КРУГОВ", "")
+        if not rows and not m.locked:
+            rows, best = self.sample(n)
+        cols = self.cols()
+        u = self.u()
+        xs, x = {}, 14
+        for key, title, w in cols:
+            xs[key] = x
+            x += int(u * w)
+        hy = int(rh * 2.3)
+        for key, title, w in cols:
+            c.create_text(xs[key] + (int(u * w) - 8 if key != "n" else 4), hy, text=title, fill=ACCENT, anchor="e" if key != "n" else "w", font=m.small)
+        bt = best[0]
+        shown = list(reversed(rows)) if newest else rows
+        y0 = int(rh * 3.0)
+        step = int(rh * 1.5)
+        if not rows:
+            c.create_text(W // 2, y0 + step * n // 2, text="жду первый круг", fill=DIM, font=m.small)
+        for i, r in enumerate(shown):
+            ytop = y0 + i * step
+            c.create_rectangle(4, ytop, W - 5, ytop + step, fill=ROW_A if i % 2 == 0 else ROW_B, outline="")
+            yy = ytop + step // 2
+            pit = r["pit"]
+            c.create_text(xs["n"] + 4, yy, text=str(r["n"]), fill=DIM if pit else FG, anchor="w", font=m.bold)
+            isbest = bt is not None and abs(r["t"] - bt) < 1e-6 and not pit
+            c.create_text(xs["t"] + int(u * 9.5) - 8, yy, text=self.fmt(r["t"]), fill=PURPLE if isbest else (DIM if pit else FG), anchor="e", font=m.bold)
+            if show_d:
+                d = r["d"]
+                if d is None:
+                    txt, col = ("пит" if pit else "—"), DIM
+                else:
+                    txt, col = (f"{d:+.3f}" if abs(d) < 10 else f"{d:+.2f}"), (GREEN if d < 0 else RED if d > 0 else FG)
+                c.create_text(xs["d"] + int(u * 9.5) - 8, yy, text=txt, fill=col, anchor="e", font=m.bold)
+            if show_t:
+                c.create_text(xs["tmp"] + int(u * 8.5) - 8, yy, text=f"{r['temp']:.1f} °C" if r["temp"] is not None else "—", fill=DIM if r["temp"] is None else FG, anchor="e", font=m.font)
+        if show_best:
+            yb = y0 + n * step + int(rh * 0.3)
+            c.create_line(14, yb - int(rh * 0.15), W - 14, yb - int(rh * 0.15), fill=BORDER)
+            yy = yb + int(rh * 0.8)
+            c.create_text(14, yy, text="ЛУЧШИЙ" + (f"  (круг {best[1]})" if best[1] else ""), fill=PURPLE, anchor="w", font=m.small)
+            c.create_text(W - 14, yy, text=self.fmt(bt) if bt else "—", fill=PURPLE, anchor="e", font=m.bold)
+
+
 class AlertsWindow(SimpleWindow):
     POS, ON = ("alerts_x", "alerts_y"), "alerts"
     OWN_ALPHA = True
@@ -4435,7 +4578,8 @@ class Overlay:
     def __init__(self, cfg, logo_dir=None):
         self.cfg = cfg
         for k, v in (("delta", True), ("alerts", True), ("tyres", False), ("pitplan", False), ("gaps", False), ("engine", False),
-                     ("sesstime", False), ("clock", False), ("speedo", False), ("speedo_view", "arc"), ("speedo_max", 340), ("st_session", True), ("st_timer", True), ("st_clock", True),
+                     ("sesstime", False), ("clock", False), ("speedo", False), ("laplog", False), ("laplog_count", 5), ("laplog_best", True), ("laplog_delta", True),
+                     ("laplog_temp", True), ("laplog_ref", "prev"), ("laplog_newest", True), ("speedo_view", "arc"), ("speedo_max", 340), ("st_session", True), ("st_timer", True), ("st_clock", True),
                      ("delta_show_session", True), ("delta_show_mine", True), ("delta_show_pred", True)):
             cfg.setdefault(k, v)
         self.logo_dir = logo_dir
@@ -4467,7 +4611,7 @@ class Overlay:
         self.canvas.pack()
         self._h = 0
         self.rel = self.ped = self.map = self.radar = self.weather = self.lights = self.limiter = self.fuel = None
-        self.delta = self.alerts = self.tyres = self.pitplan = self.gaps = self.engine = self.sesstime = self.clock = self.speedo = None
+        self.delta = self.alerts = self.tyres = self.pitplan = self.gaps = self.engine = self.sesstime = self.clock = self.speedo = self.laplog = None
         self.subs = []                                   # дополнительные окна: релатив, ввод
         self.rebuild()
         cfg.setdefault("rel_x", cfg["x"] + self.width + 24)      # по умолчанию — справа от таблицы
@@ -4539,7 +4683,7 @@ class Overlay:
         self.new_vars = {}
         for key, label in (("delta", "Дельта к лучшему кругу"), ("alerts", "Предупреждения"),
                            ("tyres", "Шины и тормоза"), ("pitplan", "Пит-стоп и стинт"), ("gaps", "Соперники: гэпы и тренд"),
-                           ("engine", "Двигатель и расход"), ("sesstime", "Таймер сессии"), ("clock", "Локальное время"), ("speedo", "Спидометр")):
+                           ("engine", "Двигатель и расход"), ("sesstime", "Таймер сессии"), ("clock", "Локальное время"), ("speedo", "Спидометр"), ("laplog", "Журнал кругов")):
             self.new_vars[key] = tk.BooleanVar(value=bool(cfg.get(key)))
             self.menu.add_checkbutton(label=label, variable=self.new_vars[key],
                                       command=lambda k=key: self._toggle_sub(getattr(self, k), self.new_vars[k]))
@@ -4657,8 +4801,12 @@ class Overlay:
         cfg.setdefault("speedo_y", max(0, cfg["y"] - 330))
         self.speedo = SpeedoWindow(self)
         self.speedo.fit_on_screen()
+        cfg.setdefault("laplog_x", cfg["x"] + 260)
+        cfg.setdefault("laplog_y", max(0, cfg["y"] - 330))
+        self.laplog = LapLogWindow(self)
+        self.laplog.fit_on_screen()
         self.subs = [self.rel, self.ped, self.map, self.radar, self.weather, self.lights, self.limiter, self.fuel,
-                     self.delta, self.alerts, self.tyres, self.pitplan, self.gaps, self.engine, self.sesstime, self.clock, self.speedo]
+                     self.delta, self.alerts, self.tyres, self.pitplan, self.gaps, self.engine, self.sesstime, self.clock, self.speedo, self.laplog]
         r.update_idletasks()
         self.apply_lock()
         self._sig = None
@@ -4993,7 +5141,8 @@ class Overlay:
                         engine_x=self.cfg["tyres_x"], engine_y=self.cfg["pitplan_y"] + self.pitplan.height + 16,
                         sesstime_x=self.cfg["x"], sesstime_y=max(0, self.cfg["y"] - 90),
                         clock_x=self.cfg["x"] + self.sesstime.width + 16, clock_y=max(0, self.cfg["y"] - 90),
-                        speedo_x=self.cfg["x"], speedo_y=max(0, self.cfg["y"] - 330))
+                        speedo_x=self.cfg["x"], speedo_y=max(0, self.cfg["y"] - 330),
+                        laplog_x=self.cfg["x"] + 260, laplog_y=max(0, self.cfg["y"] - 330))
         for w in self.subs:
             w.top.geometry(f"+{self.cfg[w.POS[0]]}+{self.cfg[w.POS[1]]}")
             w.fit_on_screen()
@@ -5862,6 +6011,7 @@ class Overlay:
                 try:
                     delta_tracker.update(frame, self.cfg.get("delta_ref", "best"))
                     stint_tracker.update(frame)
+                    lap_log.update(frame)
                     wear_tracker.update(frame)
                     gap_tracker.update(frame)
                     alert_engine.update(frame, self.cfg)
@@ -6151,7 +6301,29 @@ def main():
             except Exception:
                 import traceback
                 SELFTEST.append(traceback.format_exc(limit=-3).strip())
+        def _laps():                                        # журнал кругов: подкладываем круги и просим перерисовку
+            lap_log.laps = [{"n": 10 + i, "t": 136.9 + (0.3, -0.2, 0.5, 0.1, -0.4, 0.2, 0.6)[i], "pit": i == 3,
+                             "temp": 23.4 if i != 5 else None} for i in range(7)]
+            lap_log.game_best = 136.4
+            for cfgv in ({"laplog_count": 3}, {"laplog_ref": "best", "laplog_newest": False}, {"laplog_delta": False, "laplog_temp": False, "laplog_best": False}, {"laplog_count": 9}):
+                ov.cfg.update(cfgv)
+                try:
+                    ov.laplog.build()
+                    ov.laplog.draw(None)
+                except Exception:
+                    import traceback
+                    SELFTEST.append(traceback.format_exc(limit=-3).strip())
+        def _shot():                                        # YASSNO_SHOT=папка — сохранить снимок журнала кругов (для проверки глазами)
+            d = os.environ.get("YASSNO_SHOT")
+            if d:
+                ov.cfg.update(laplog_count=5, laplog_ref="prev", laplog_newest=True, laplog_delta=True, laplog_temp=True, laplog_best=True)
+                ov.laplog.build()
+                ov.laplog.draw(None)
+                ov.root.update()
+                os.system("import -window %d %s/laplog.png" % (ov.laplog.top.winfo_id(), d))
         ov.root.after(800, _views)
+        ov.root.after(1350, _shot)
+        ov.root.after(1200, _laps)
         ov.root.after(1500, _snap)
         ov.root.after(3000, ov.toggle_lock)                 # вторая половина проверки — режим перемещения
         ov.root.after(6500, _finish)

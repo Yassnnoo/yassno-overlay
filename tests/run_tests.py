@@ -149,6 +149,47 @@ class Misc(unittest.TestCase):
         self.assertTrue(callable(O.class_from_name))
 
 
+class LapLogTests(unittest.TestCase):
+    @staticmethod
+    def frame(laps, last, best=None, pit=False, temp=24.0, key="s1"):
+        me = {"player": True, "laps": laps, "last": last, "best": best, "in_pits": pit, "garage": False}
+        return {"cars": [me], "session_start": key, "track": "T", "kind": "race", "track_temp": temp}
+
+    def feed(self, steps, key="s1"):
+        ll = O.LapLog()
+        for laps, last, kw in steps:
+            ll.update(self.frame(laps, last, key=key, **kw))
+        return ll
+
+    def test_records_completed_laps_only(self):
+        ll = self.feed([(3, 0, {}), (3, 0, {}), (4, 100.5, {}), (4, 100.5, {}), (5, 99.9, {"temp": 25.0})])
+        self.assertEqual([l["n"] for l in ll.laps], [4, 5])
+        self.assertEqual(ll.laps[1]["temp"], 25.0)
+
+    def test_delta_prev_and_best(self):
+        ll = self.feed([(1, 0, {}), (2, 100.0, {}), (3, 101.0, {}), (4, 99.5, {})])
+        d = [r["d"] for r in ll.rows(5, "prev")]
+        self.assertEqual(d[0], None)
+        self.assertAlmostEqual(d[1], 1.0)
+        self.assertAlmostEqual(d[2], -1.5)
+        db = [r["d"] for r in ll.rows(5, "best")]
+        self.assertAlmostEqual(db[2], -0.5)
+
+    def test_count_best_and_pit_laps(self):
+        ll = self.feed([(1, 0, {})] + [(1 + i, 100.0 + i, {"pit": i == 2}) for i in range(1, 8)])
+        self.assertEqual(len(ll.rows(3)), 3)
+        t, n = ll.best()
+        self.assertAlmostEqual(t, 101.0)
+        pit_row = next(r for r in ll.rows(8) if r["pit"])
+        self.assertIsNone(pit_row["d"])
+
+    def test_game_best_wins_and_session_reset(self):
+        ll = self.feed([(1, 0, {}), (2, 100.0, {"best": 98.0})])
+        self.assertEqual(ll.best(), (98.0, None))
+        ll.update(self.frame(1, 0, key="s2"))
+        self.assertEqual(ll.laps, [])
+
+
 @unittest.skipUnless(os.environ.get("DISPLAY") or os.name == "nt", "нет экрана — самопроверку панелей пропускаем")
 class SelfTest(unittest.TestCase):
     def test_all_games(self):
