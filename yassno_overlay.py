@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "2.5.41"
+APP_VERSION = "2.5.43"
 import argparse
 import bisect
 import collections
@@ -991,6 +991,7 @@ def brand_of(car):
     return letter, "#6e7887", ""
 
 
+THEME_MODE = "dark"
 DEFAULT_THEME = {"accent": "#f2b705", "text": "#eef1f5", "dim": "#8791a0", "panel": "#161b24",
                  "background": "#0b0e13", "border": "#2a3140", "me": "#4da3ff",
                  "throttle": "#2ee26d", "brake": "#ff3b30", "clutch": "#4a90ff"}
@@ -1057,14 +1058,16 @@ WIN_STYLES = {"classic": (1.0, "red"), "square": (0.0, "red"), "soft": (1.9, "re
 MARK, STYLE_R = "#e5322d", 1.0                       # цвет метки у заголовка окна ("" — без метки) и множитель скругления
 
 
-def apply_theme(theme, style="classic"):
+def apply_theme(theme, style="classic", mode="dark"):
     """Цвета и стиль окон из профиля (запуск через приложение-лаунчер). Вызывается один раз до создания окон."""
-    global MARK, STYLE_R, BG, HDR_BG, ROW_A, ROW_B, ME_BG, ME_EDGE, BORDER, TRACK, FG, DIM, ACCENT
+    global MARK, STYLE_R, THEME_MODE, BG, HDR_BG, ROW_A, ROW_B, ME_BG, ME_EDGE, BORDER, TRACK, FG, DIM, ACCENT
     t = dict(DEFAULT_THEME)
     t.update({k: v for k, v in (theme or {}).items() if isinstance(v, str) and len(v) == 7 and v.startswith("#")})
     ACCENT, FG, DIM, HDR_BG, BG, BORDER, ME_EDGE = (t["accent"], t["text"], t["dim"], t["panel"],
                                                     t["background"], t["border"], t["me"])
-    ROW_A, ROW_B = _mix(BG, "#ffffff", 0.035), _mix(BG, "#ffffff", 0.015)
+    THEME_MODE = "light" if mode == "light" else "dark"
+    tint = "#000000" if THEME_MODE == "light" else "#ffffff"
+    ROW_A, ROW_B = _mix(BG, tint, 0.045), _mix(BG, tint, 0.02)
     ME_BG = _mix(BG, ME_EDGE, 0.30)
     TRACK = _mix(BORDER, BG, 0.2)
     STYLE_R, kind = WIN_STYLES.get(style, WIN_STYLES["classic"])
@@ -1072,7 +1075,8 @@ def apply_theme(theme, style="classic"):
     if kind == "accent":
         BORDER = _mix(BG, ACCENT, 0.65)
     PedalsWindow.THR, PedalsWindow.BRK, PedalsWindow.CLU = t["throttle"], t["brake"], t["clutch"]
-    WeatherWindow.CARD = _mix(HDR_BG, "#000000", 0.12)
+    WeatherWindow.CARD = _mix(HDR_BG, "#000000", 0.06 if THEME_MODE == "light" else 0.12)
+    SpeedoWindow.set_palette(THEME_MODE)
     FuelWindow.CARD = WeatherWindow.CARD
 
 
@@ -1532,7 +1536,10 @@ class RelativeWindow:
         if getattr(self, "_resizing", False):
             self.main._m.resize_drag(e)
             return
-        self.top.geometry(f"+{e.x_root - self._dx}+{e.y_root - self._dy}")
+        nx, ny = e.x_root - self._dx, e.y_root - self._dy
+        if not e.state & 0x1:                                  # Shift зажат — без магнита
+            nx, ny = self.main.snap_pos(self.top, nx, ny)
+        self.top.geometry(f"+{nx}+{ny}")
 
     def drag_end(self, e):
         if getattr(self, "_resizing", False):
@@ -3834,11 +3841,12 @@ class SpeedoWindow(SimpleWindow):
         v = self.values(frame)
         self._vmax = max(self._vmax, v["spd"])
         W, H = self.W, self.H
+        self.use_palette()
         if self._view != "minimal":
             if self.R:
-                draw_rrect(c, 0, 0, W - 1, H - 1, self.R, fill=self.LBG, outline="#8e9298")
+                draw_rrect(c, 0, 0, W - 1, H - 1, self.R, fill=self.LBG, outline=self.EDGE)
             else:
-                c.create_rectangle(0, 0, W - 1, H - 1, fill=self.LBG, outline="#8e9298")
+                c.create_rectangle(0, 0, W - 1, H - 1, fill=self.LBG, outline=self.EDGE)
         getattr(self, "draw_" + self._view)(c, v)
 
     # ---------- дуга оборотов ----------
@@ -3869,8 +3877,20 @@ class SpeedoWindow(SimpleWindow):
             c.create_text(cx, cy + u * 0.35, text=f"{v['fuel']:.1f} L", fill=self.INK, font=self.f_t)
 
     # ---------- аналоговый циферблат (светлый, «приборный») ----------
-    INK, INK2, NEEDLE = "#17191c", "#4b5157", "#e5281d"
-    LTRACK, AMB, LBG = "#b3b8bf", "#a86b00", "#dde0e4"
+    NEEDLE = "#e5281d"
+    SILVER = ("#17191c", "#4b5157", "#b3b8bf", "#a86b00", "#dde0e4", "#8e9298")     # приборная светлая палитра
+    INK, INK2, LTRACK, AMB, LBG, EDGE = SILVER
+    THEMED = False
+
+    @classmethod
+    def set_palette(cls, mode):
+        cls.THEMED = mode != "light"          # в тёмной теме дуга/лента/цифры берут цвета темы, циферблаты остаются серебристыми
+
+    def use_palette(self):
+        if self.THEMED and self._view not in ("dial", "tacho"):
+            self.INK, self.INK2, self.LTRACK, self.AMB, self.LBG, self.EDGE = FG, DIM, TRACK, ACCENT, BG, BORDER
+        else:
+            self.INK, self.INK2, self.LTRACK, self.AMB, self.LBG, self.EDGE = self.SILVER
 
     def dial_face(self, c, cx, cy, r):
         for k, col in enumerate(("#5d6065", "#8e9298", "#c8cbd0", "#9a9ea4", "#6f7378")):      # металлический ободок
@@ -3999,7 +4019,7 @@ class SpeedoWindow(SimpleWindow):
     # ---------- минимальный ----------
     def draw_minimal(self, c, v):
         W, H = self.W, self.H
-        draw_rrect(c, 0, 0, W - 1, H - 1, min(self.R, H // 2), fill=self.LBG, outline="#8e9298")
+        draw_rrect(c, 0, 0, W - 1, H - 1, min(self.R, H // 2), fill=self.LBG, outline=self.EDGE)
         c.create_text(W * 0.14, H / 2, text=v["gear"], fill=self.AMB if v["live"] else self.INK2, font=self.f_g)
         c.create_text(W * 0.74, H * 0.45, text=f"{v['spd']:.0f}", fill=self.INK, anchor="e", font=self.f_s)
         c.create_text(W * 0.76, H * 0.62, text="MPH" if v["mph"] else "KPH", fill=self.INK2, anchor="w", font=self.f_t)
@@ -5064,7 +5084,7 @@ class Overlay:
         f_b = tkfont.Font(family=self.family, size=9, weight="bold")
         l1 = tk.Label(body, text="РЕЖИМ ПЕРЕМЕЩЕНИЯ", bg="#12171f", fg="#2ee26d", font=f_b, cursor="fleur")
         l1.grid(row=0, column=0, columnspan=3, sticky="ew", pady=(6, 0))
-        l2 = tk.Label(body, text="тяните окно · за край или угол — размер", bg="#12171f", fg="#8b95a5", font=f_s, cursor="fleur")
+        l2 = tk.Label(body, text="тяните окно (магнит к краям; Shift — без него) · за угол — размер", bg="#12171f", fg="#8b95a5", font=f_s, cursor="fleur")
         l2.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(0, 4))
 
         def d_start(e):
@@ -5229,7 +5249,37 @@ class Overlay:
         if getattr(self, "_resizing", False):
             self.resize_drag(e)
             return
-        self.root.geometry(f"+{e.x_root - self._dx}+{e.y_root - self._dy}")
+        nx, ny = e.x_root - self._dx, e.y_root - self._dy
+        if not e.state & 0x1:
+            nx, ny = self.snap_pos(self.root, nx, ny)
+        self.root.geometry(f"+{nx}+{ny}")
+
+    SNAP = 12
+
+    def snap_pos(self, win, nx, ny):
+        """Магнит в режиме перемещения: края окна прилипают к краям экрана и к соседним окнам оверлея."""
+        try:
+            w, h = win.winfo_width(), win.winfo_height()
+            sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
+            xs, ys = [0, sw], [0, sh]
+            others = [self.root] + [x.top for x in self.subs]
+            for o in others:
+                if o is win or not o.winfo_viewable():
+                    continue
+                ox, oy, ow, oh = o.winfo_x(), o.winfo_y(), o.winfo_width(), o.winfo_height()
+                xs += [ox, ox + ow]
+                ys += [oy, oy + oh]
+            def fit(pos, size, lines):
+                best, bd = pos, self.SNAP + 1
+                for ln in lines:
+                    for cand in (ln, ln - size):                # левый/верхний край к линии или правый/нижний к линии
+                        d = abs(cand - pos)
+                        if d < bd:
+                            best, bd = cand, d
+                return best
+            return fit(nx, w, xs), fit(ny, h, ys)
+        except tk.TclError:
+            return nx, ny
 
     def drag_end(self, e):
         if getattr(self, "_resizing", False):
@@ -6000,6 +6050,7 @@ def main():
     ap.add_argument("--unlock", action="store_true", help="запустить в режиме перемещения")
     ap.add_argument("--demo", action="store_true", help="тестовая гонка без игры")
     ap.add_argument("--selftest", action="store_true", help="самопроверка: демо со всеми панелями, отчёт в консоль")
+    ap.add_argument("--theme", choices=("dark", "light"), help="тема оверлеев (для самопроверки)")
     ap.add_argument("--diagnose", action="store_true", help="напечатать, что видно в памяти игры")
     a = ap.parse_args()
     if a.diagnose:
@@ -6028,10 +6079,15 @@ def main():
     except (OSError, ValueError):
         pass
     cfg["ver"] = CFG_VERSION
+    if a.theme:
+        cfg["theme_mode"] = a.theme
+        if a.theme == "light":
+            cfg["theme"] = {"accent": "#b7791f", "text": "#1b1f26", "dim": "#5d6673", "panel": "#e3e6ea",
+                            "background": "#f2f4f6", "border": "#b9c0c9", "me": "#2b7de0"}
     if a.selftest:
         for k in ELEMENTS:
             cfg[k] = True
-    apply_theme(cfg.get("theme"), cfg.get("win_style", "classic"))
+    apply_theme(cfg.get("theme"), cfg.get("win_style", "classic"), cfg.get("theme_mode", "dark"))
     for k in ("rows", "font", "alpha"):
         if getattr(a, k) is not None:
             cfg[k] = getattr(a, k)
@@ -6081,7 +6137,22 @@ def main():
                 SELFTEST.append(traceback.format_exc(limit=-3).strip())
             if i < len(vs) * 2:
                 ov.root.after(350, lambda: _views(i + 1))
+        def _snap():                                        # магнит: возле края экрана окно должно прилипнуть
+            try:
+                ov.root.update_idletasks()
+                x, _y = ov.snap_pos(ov.ped.top, 5, 300)
+                if x != 0:
+                    SELFTEST.append("магнит окон: ожидали x=0, получили %s" % x)
+                far = ov.snap_pos(ov.ped.top, 400, 300)
+                ox = ov.root.winfo_x() + ov.root.winfo_width()
+                near = ov.snap_pos(ov.ped.top, ox + 6, 300)[0]
+                if near != ox and not (abs(far[0] - 400) > 0):
+                    SELFTEST.append("магнит окон: к соседнему окну не прилип (%s вместо %s)" % (near, ox))
+            except Exception:
+                import traceback
+                SELFTEST.append(traceback.format_exc(limit=-3).strip())
         ov.root.after(800, _views)
+        ov.root.after(1500, _snap)
         ov.root.after(3000, ov.toggle_lock)                 # вторая половина проверки — режим перемещения
         ov.root.after(6500, _finish)
     try:
