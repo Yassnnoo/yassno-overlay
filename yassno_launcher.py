@@ -31,7 +31,7 @@ import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import colorchooser, filedialog, messagebox, ttk
 
-APP_VERSION = "2.5.25"
+APP_VERSION = "2.5.29"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -221,7 +221,7 @@ HK_KEYS = [chr(c) for c in range(65, 91)] + [str(i) for i in range(10)] + [f"F{i
 STAND_COLS = [("delta", "Позиции ▲▼ (изменение места)", 14), ("logo", "Логотип марки", 18), ("tyre", "Шины", 22),
               ("ahead", "Отставание от передней", 50), ("lead", "Отставание от лидера", 50), ("best", "Лучший круг", 64),
               ("last", "Последний круг", 64), ("fuel", "Топливо", 36), ("ve", "Энергия", 46), ("status", "Статус", 36),
-              ("irat", "iRating и лицензия (iRacing)", 88)]
+              ("irat", "iRating и лицензия (iRacing)", 124)]
 PED_PARTS = [("gear", "Передача"), ("speed", "Скорость"), ("wheel", "Руль"),
              ("graph", "График газа и тормоза"), ("bars", "Столбики педалей")]
 REL_COLS = [("pos", "Позиция"), ("num", "Номер"), ("tag", "Метка PIT"), ("irat", "iRating и лицензия (iRacing)")]
@@ -1595,7 +1595,7 @@ class ProfilePanel(ttk.Frame):
             g = self.card("Бегущая строка", L)
             self.spin(g, None, "Ширина, пикселей", "ticker_w", 400, 3000)
             self.spin(g, None, "Скорость, пикселей в секунду", "ticker_speed", 20, 300)
-            self.toggles(self.card("Колонки таблицы", R), [(k, n) for k, n, _ in STAND_COLS if k != "irat" or self.game == "iracing"], self.cols, ncols=3)
+            self.toggles(self.card("Колонки таблицы", R), [(k, n) for k, n, _ in STAND_COLS if (k != "irat" or self.game == "iracing") and not (self.game == "iracing" and k in ("fuel", "ve"))], self.cols, ncols=3)
             self.toggles(self.card("Шапка таблицы", R), [("st_session", "Название сессии"), ("st_timer", "Таймер: круг / осталось"),
                                                          ("st_clock", "Локальное время")], self.v, ncols=1)
         elif key == "relative":
@@ -2067,6 +2067,8 @@ class ProfilePanel(ttk.Frame):
         if self.game == "iracing" and self.cols["irat"].get():
             out.append(("irat", w["irat"]))
         for k in ("ahead", "lead", "best", "last", "fuel", "ve", "status"):
+            if self.game == "iracing" and k in ("fuel", "ve"):
+                continue                                    # в таблице iRacing топливо и энергия не показываются
             if self.cols[k].get():
                 out.append((k, w[k]))
         return out
@@ -2248,7 +2250,7 @@ class ProfilePanel(ttk.Frame):
                 elif k == "name":
                     c.create_text(kx + 2, mid, text=name, fill=th["text"], anchor="w", font=self.f_t)
                 elif k == "irat":
-                    self.irat_chips(kx + cw - 2, mid, i, rh)
+                    self.irat_chips(kx + cw - 2, mid, i, rh, forecast=True)
                 elif k in ("ahead", "lead"):
                     c.create_text(kx + cw - 2, mid, text="+%.1f" % (i * (3.7 if k == "lead" else 1.1)), fill=th["dim"], anchor="e", font=self.f_t)
                 elif k in ("best", "last"):
@@ -2265,19 +2267,23 @@ class ProfilePanel(ttk.Frame):
     LIC = (("A 4.12", "#0153db", "#ffffff"), ("B 3.40", "#00c702", "#ffffff"), ("C 2.75", "#feec04", "#10151c"),
            ("D 2.10", "#fc8a27", "#ffffff"), ("R 0.95", "#fc0706", "#ffffff"))
 
-    def irat_chips(self, right, mid, i, rh):
-        """Плашки как в iRacing: лицензия в своём цвете и светлая плашка с iRating."""
+    def irat_chips(self, right, mid, i, rh, forecast=False):
+        """Плашки как в iRacing: лицензия в своём цвете и светлая плашка с iRating одного размера; в таблице справа — прогноз."""
         c = self.canvas
         hh = max(5, rh * 0.30)
+        pw = 6 * 5 + 10
+        if forecast:
+            d = (34, 18, -12, 6, -27, 0)[i % 6]
+            c.create_text(right, mid, text=("+%d" % d) if d > 0 else ("\u2212%d" % -d) if d < 0 else "0", anchor="e", font=self.f_t,
+                          fill="#2ee26d" if d > 0 else "#ff5a4f" if d < 0 else "#8791a0")
+            right -= 26
         t = "%.1fk" % (1.2 + (i * 0.7) % 5)
-        w = len(t) * 5 + 6
-        c.create_rectangle(right - w, mid - hh, right, mid + hh, fill="#e9edf2", outline="")
-        c.create_text(right - w / 2, mid, text=t, fill="#10151c", font=self.f_t)
+        c.create_rectangle(right - pw, mid - hh, right, mid + hh, fill="#e9edf2", outline="")
+        c.create_text(right - pw / 2, mid, text=t, fill="#10151c", font=self.f_t)
         lic, bg, fg = self.LIC[i % len(self.LIC)]
-        x = right - w - 4
-        w2 = len(lic) * 5 + 6
-        c.create_rectangle(x - w2, mid - hh, x, mid + hh, fill=bg, outline="")
-        c.create_text(x - w2 / 2, mid, text=lic, fill=fg, font=self.f_t)
+        x = right - pw - 4
+        c.create_rectangle(x - pw, mid - hh, x, mid + hh, fill=bg, outline="")
+        c.create_text(x - pw / 2, mid, text=lic, fill=fg, font=self.f_t)
 
     def d_ticker(self, x, y, w, h):
         c, th = self.canvas, self.th

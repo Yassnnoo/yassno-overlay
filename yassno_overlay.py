@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "2.5.25"
+APP_VERSION = "2.5.29"
 import argparse
 import bisect
 import collections
@@ -99,7 +99,7 @@ SESSION_TYPES = {0: ("TEST", "TEST DAY"), 1: ("PRACTICE", "PRACTICE 1"), 2: ("PR
                  12: ("RACE", "RACE 3"), 13: ("RACE", "RACE 4")}
 TIMED_KINDS = {"TEST", "PRACTICE", "QUALIFYING", "WARMUP"}
 PIT_STATES = {1: "PIT REQ", 2: "PIT IN", 3: "PIT", 4: "OUT LAP"}
-FINISH_STATES = {1: "FINISH", 2: "DNF", 3: "DSQ", 4: "DNS"}
+FINISH_STATES = {1: "FINISH", 2: "DNF", 3: "DSQ", 4: "DNS", 5: "OUT"}
 CLASS_ORDER = ("HYPERCAR", "LMP2", "LMGT3", "LMP3", "GTE", "PACE", "UNKNOWN")
 
 
@@ -561,6 +561,8 @@ class IracingReader:
         self._seq = self._sess = 0
         self._sess_key, self._last_et = None, 0.0
         self._line, self._origin = {}, None
+        self._fin = {}                                 # машина -> финиш/DSQ, раз получила — остаётся до конца сессии
+        self._seen = {}                                # машина -> (доля круга, кругов) в последний раз, когда была в мире игры
         self._last_tick = None
         self._last_frame = None
         self._cs = {}                                  # по машинам: сектора, пит-стопы, скорость
@@ -667,6 +669,7 @@ class IracingReader:
         key = (info["track"], snum)
         if key != self._sess_key or et < self._last_et - 5.0:
             self._sess_key, self._sess = key, self._sess + 1
+            self._seen, self._fin = {}, {}
         self._last_et = et
         remain = float(f("SessionTimeRemain", 0, -1.0))
         end_et = et + remain if 0 <= remain < 400000 else 0.0
@@ -702,13 +705,21 @@ class IracingReader:
             if d["spec"] or d["pace"] or idx >= len(pct):
                 continue
             me_ = idx == pidx
+            gone = False
             if surf and idx < len(surf) and surf[idx] == -1 and not me_:
-                continue
+                if stype == 10 and idx in self._seen:              # в гонке выбывшего не прячем, а помечаем OUT
+                    gone = True
+                else:
+                    continue
             p = pct[idx] if pct[idx] >= 0 else 0.0
             lp = lapc[idx] if idx < len(lapc) else 0
             lp = max(int(lp), 0)
+            if gone:
+                p, lp = self._seen[idx]
+            elif surf and idx < len(surf) and surf[idx] != -1 and p > 0:
+                self._seen[idx] = (p, lp)
             ranked.append((lp + p, idx))
-            cars.append({"idx": idx, "me": me_, "pct": p, "laps": lp, "d": d})
+            cars.append({"idx": idx, "me": me_, "pct": p, "laps": lp, "d": d, "gone": gone})
         ranked.sort(reverse=True)
         total = {idx: t for t, idx in ranked}
         order = [idx for _, idx in ranked]
@@ -731,10 +742,16 @@ class IracingReader:
             s = 1 + sum(1 for x in sec[1:] if p >= x)
             cs = self._track_car(idx, p, et, surf[idx] if idx < len(surf) else 3, cflags[idx] if idx < len(cflags) else 0, sec, L)
             fl = int(cflags[idx]) if idx < len(cflags) else 0
+            fl_ = fl
             ox, oz = self._line.get(int(p * 2000), (0.0, 0.0)) if not c["me"] else (px or 0.0, pz or 0.0)
             ori = self._ori(p, c["me"], f)
+            fin = 3 if fl_ & 0x20000 else 1 if fl_ & 0x0001 else 0                        # DSQ / клетчатый флаг
+            if fin:
+                self._fin[idx] = fin
+            else:
+                fin = self._fin.get(idx, 5 if c["gone"] else 0)                           # выбыл (пропал из мира)
             car = {"key": idx, "driver": d["name"].upper(), "vehicle": f"{d['car']} #{d['number']}", "model": d["short"] or d["car"],
-                   "number": d["number"], "cls": (d["cls"] or "CLASS").upper()[:18], "laps": c["laps"], "finish": 0,
+                   "number": d["number"], "cls": (d["cls"] or "CLASS").upper()[:18], "laps": c["laps"], "finish": fin,
                    "irating": d.get("irating", 0), "lic": d.get("lic", ""), "lic_col": d.get("lic_col", ""),
                    "best": b, "last": ls, "last_s1": cs["s1"], "last_s2": cs["s2"], "tyre_wear": None, "wheels": None,
                    "place": place, "sector": s % 3, "player": c["me"],
@@ -1337,6 +1354,10 @@ RUNTIME = {"ir_svg": True}                           # переключател�
 
 def ir_svg_apply(frame):
     """iRacing: если для трассы скачана схема с сайта iRacing, ставим машины на её линию и отдаём её карте."""
+    if frame.get("game") == "iracing" and svgmap is not None and not RUNTIME.get("logos_started"):
+        RUNTIME["logos_started"] = True                  # один раз за запуск: скачать логотипы всех марок iRacing в фоне
+        threading.Thread(target=svgmap.prefetch_logos, args=(os.path.join(find_logo_dir() or os.path.join(HERE, "logos"), "ir"),),
+                         daemon=True).start()
     if not (IR_SVG and RUNTIME.get("ir_svg", True)) or frame.get("game") != "iracing":
         return
     loop = IR_SVG.get(frame.get("track_id"), frame.get("track_slug"))
@@ -1979,7 +2000,7 @@ BRANDS = [(("ferrari",), "F", "#cd101a", "ferrari"), (("porsche",), "P", "#c41e3
 
 # ключ, заголовок, ширина (в «нулях» шрифта), выравнивание
 COLS = [("pos", "ПОЗ", 2.6, "e"), ("delta", "", 2.8, "w"), ("logo", "", 2.8, "w"),
-        ("num", "№", 3.8, "e"), ("tyre", "ШИНЫ", 3.8, "w"), ("name", "ПИЛОТ", 17, "w"), ("irat", "ЛИЦЕНЗИЯ / iR", 13.5, "e"),
+        ("num", "№", 3.8, "e"), ("tyre", "ШИНЫ", 3.8, "w"), ("name", "ПИЛОТ", 17, "w"), ("irat", "ЛИЦЕНЗИЯ / iR / ПРОГНОЗ", 17.5, "e"),
         ("ahead", "ВПЕРЕДИ", 7.5, "e"), ("lead", "ЛИДЕР", 7.5, "e"),
         ("best", "ЛУЧШИЙ", 8.6, "e"), ("last", "ПОСЛЕД.", 8.6, "e"),
         ("fuel", "ТОПЛ.", 5.6, "e"), ("ve", "ЭНЕРГИЯ", 12.5, "w"), ("status", "СТАТУС", 7.8, "e")]
@@ -2022,12 +2043,21 @@ def ve_color(v):
     return GREEN if v >= 0.5 else YELLOW if v >= 0.2 else RED
 
 
+IR_BRAND_ALIAS = {"vw": "volkswagen", "skip": "skipbarber", "formula": "formulavee", "super": "superformula", "mercedesamg": "mercedes",
+                  "nascar": "nascar", "dirt": "dirtcarracing", "late": "dirtcarracing", "pro": "pro2truck", "cross": "crosscartn11"}
+
+
 def brand_of(car):
     text = f"{car['model']} {car['vehicle']}".lower()
     for keys, mono, colour, slug in BRANDS:
         if any(k in text for k in keys):
             return mono, colour, slug
     letter = "".join(ch for ch in (car["model"] or car["vehicle"] or "") if ch.isalpha())[:1].upper() or "•"   # цифры в названии мода — не марка
+    if "irating" in car:                                          # iRacing: логотип марки скачаем с сайта iRacing
+        first = (re.split(r"[^a-z0-9]+", (car["model"] or car["vehicle"] or "").lower().strip()) or [""])[0]
+        first = IR_BRAND_ALIAS.get(first, first)
+        if first and not first.isdigit():
+            return letter, "#6e7887", "ir:" + first
     return letter, "#6e7887", ""
 
 
@@ -2310,8 +2340,9 @@ def move_decor(canvas, locked, R, on_close):
     canvas.tag_raise("mv")
 
 
-def draw_irat(c, car, right, cy, font, rh):
-    """Как в iRacing: плашка лицензии в её цвете («A 4.12») и светлая плашка с iRating («3.2k»); right — правая граница колонки."""
+def draw_irat(c, car, right, cy, font, rh, delta=None):
+    """Как в iRacing: плашка лицензии в её цвете («A 4.12») и светлая плашка с iRating («3.2k») одного размера;
+    right — правая граница колонки. delta — прогноз изменения iRating (число), рисуется справа."""
     ir, lic = car.get("irating", 0), (car.get("lic", "") or "").strip()
     if not (ir > 0 or lic):
         return
@@ -2322,17 +2353,48 @@ def draw_irat(c, car, right, cy, font, rh):
     except ValueError:
         lcol, lum = "#3a4250", 0.0
     h = int(rh * 0.30)
+    pw = font.measure("A 4.99") + 12                      # обе плашки одной ширины и высоты
     x = right
+    if delta is not None and ir > 0:
+        d = int(round(delta))
+        txt = ("+%d" % d) if d > 0 else ("\u2212%d" % -d) if d < 0 else "0"
+        col = "#2ee26d" if d > 0 else "#ff5a4f" if d < 0 else "#8791a0"
+        c.create_text(x, cy, text=txt, fill=col, font=font, anchor="e")
+        x -= font.measure("+999") + 6
     if ir > 0:
         t = f"{ir / 1000:.1f}k" if ir >= 1000 else str(ir)
-        w = font.measure(t) + 12
-        draw_rrect(c, x - w, cy - h, x, cy + h, 5, fill="#e9edf2", outline="")
-        c.create_text(x - w / 2, cy, text=t, fill="#10151c", font=font)
-        x -= w + 4
+        draw_rrect(c, x - pw, cy - h, x, cy + h, 5, fill="#e9edf2", outline="")
+        c.create_text(x - pw / 2, cy, text=t, fill="#10151c", font=font)
+        x -= pw + 4
     if lic:
-        w = font.measure(lic) + 12
-        draw_rrect(c, x - w, cy - h, x, cy + h, 5, fill=lcol, outline="")
-        c.create_text(x - w / 2, cy, text=lic, fill="#10151c" if lum > 0.55 else "#ffffff", font=font)
+        draw_rrect(c, x - pw, cy - h, x, cy + h, 5, fill=lcol, outline="")
+        c.create_text(x - pw / 2, cy, text=lic, fill="#10151c" if lum > 0.55 else "#ffffff", font=font)
+
+
+def ir_forecast(cars):
+    """Прогноз изменения iRating по текущим позициям (по классам): по формуле, близкой к iRacing. Это оценка, а не точное число."""
+    out = {}
+    B = 1600.0 / math.log(2.0)
+    by_cls = {}
+    for car in cars:
+        if car.get("irating", 0) > 0 and not car.get("garage"):
+            by_cls.setdefault(car.get("cls", ""), []).append(car)
+    for grp in by_cls.values():
+        n = len(grp)
+        if n < 2:
+            continue
+        grp.sort(key=lambda x: x.get("place", 999))
+        a = [math.exp(-x["irating"] / B) for x in grp]
+        for i, car in enumerate(grp):
+            exp_beaten = 0.0
+            for j in range(n):
+                if j != i:
+                    pij = (1 - a[i]) * a[j] / ((1 - a[j]) * a[i] + (1 - a[i]) * a[j])     # шанс обойти j
+                    exp_beaten += pij
+            rank = i + 1
+            fudge = (n / 2.0 - rank) / n
+            out[car["key"]] = (n - rank - exp_beaten - fudge) * 200.0 / n
+    return out
 
 
 def fmt_rel_gap(g):
@@ -2414,7 +2476,7 @@ class RelativeWindow:
     """Отдельное окно «релатив»: 3 машины впереди по трассе, вы, 3 позади."""
     AHEAD, BEHIND = 3, 3
     POS, ON = ("rel_x", "rel_y"), "relative"        # ключи конфигурации: положение и «включено ли»
-    COLS = [("pos", 2.6, "e"), ("num", 3.8, "e"), ("name", 16.0, "w"), ("irat", 12.5, "e"), ("gap", 7.0, "e"), ("tag", 4.4, "e")]
+    COLS = [("pos", 2.6, "e"), ("num", 3.8, "e"), ("name", 16.0, "w"), ("irat", 13.5, "e"), ("gap", 7.0, "e"), ("tag", 4.4, "e")]
 
     def __init__(self, main):
         self.main, cfg = ScaledMain(main, self), main.cfg
@@ -5234,6 +5296,7 @@ class Overlay:
             cfg.setdefault(k, v)
         self.logo_dir = logo_dir
         self._logos = {}
+        self._ir_tried = set()
         self._start_pos = {}
         self._session_seen = None
         self._fuel, self._fuel_session, self._fuel_live = {}, None, set()
@@ -5478,6 +5541,8 @@ class Overlay:
         hide = set(self.cfg.get("hide_cols", []))
         if self.game in ("rf2", "iracing"):
             hide.add("ve")                       # в rFactor 2 виртуальной энергии нет
+        if self.game == "iracing":
+            hide.add("fuel")                     # в таблице iRacing топливо и энергия не нужны
         if self.game != "iracing":
             hide.add("irat")                     # iRating и лицензия есть только в iRacing
         self.cols = [c for c in COLS if c[0] not in hide]
@@ -6220,7 +6285,39 @@ class Overlay:
         x = self.x_of[key] + (self.w_of[key] if anchor == "e" else 0)
         self.canvas.create_text(x, y, text=s, fill=fill, anchor=anchor, font=font or self.font)
 
+    def ir_logo(self, name, size):
+        """Логотип марки iRacing: берём из папки logos/ir, а если его нет — один раз скачиваем с сайта iRacing."""
+        folder = os.path.join(self.logo_dir or os.path.join(HERE, "logos"), "ir")
+        path = os.path.join(folder, name + ".png")
+        key = ("ir:" + name, size)
+        if key in self._logos:
+            return self._logos[key]
+        if not os.path.exists(path):
+            if name not in self._ir_tried and svgmap is not None:
+                self._ir_tried.add(name)
+                threading.Thread(target=svgmap.download_logo, args=(name, path), daemon=True).start()
+            return None                                              # скачается — нарисуем при следующем обновлении
+        photo = None
+        try:
+            from PIL import Image, ImageTk
+            im = Image.open(path).convert("RGBA")
+            box = im.getbbox()
+            if box:
+                im = im.crop(box)
+            k = min(size * 1.25 / im.width, size / im.height)
+            photo = ImageTk.PhotoImage(im.resize((max(1, int(im.width * k)), max(1, int(im.height * k))), Image.LANCZOS))
+        except Exception:
+            try:
+                ph = tk.PhotoImage(file=path)
+                photo = ph.subsample(max(1, round(max(ph.width(), ph.height()) / size)))
+            except Exception:
+                photo = None
+        self._logos[key] = photo
+        return photo
+
     def logo(self, slug, colour, size):
+        if slug.startswith("ir:"):
+            return self.ir_logo(slug[3:], size)
         key = (slug, colour, size)
         if key in self._logos:
             return self._logos[key]
@@ -6319,6 +6416,7 @@ class Overlay:
         cpos = {x["key"]: i + 1 for i, x in enumerate(group)}
         deltas = self.track_positions(frame, scope, group) if frame and not timed else {}
         stuck = self.fuel_stuck(frame) if frame else set()
+        ir_pred = ir_forecast(cars) if (frame and self.game == "iracing" and frame.get("kind") == "RACE" and "irat" in self.x_of) else None
         out_laps = self.out_laps(frame) if frame else set()
         all_best = [x["best"] for x in cars if x["best"] > 0]
         best_all = min(all_best) if all_best else None
@@ -6438,7 +6536,8 @@ class Overlay:
                 elif key == "name":
                     self.text("name", cy, car["driver"].upper()[:22], FG, self.bold if is_me else self.font)
                 elif key == "irat":
-                    draw_irat(c, car, self.x_of["irat"] + self.w_of["irat"], cy, self.small, rh)
+                    draw_irat(c, car, self.x_of["irat"] + self.w_of["irat"], cy, self.small, rh,
+                              ir_pred.get(car["key"]) if ir_pred is not None else None)
                 elif key == "ahead":
                     self.text("ahead", cy, ahead_txt, YELLOW if close else FG)
                 elif key == "lead":

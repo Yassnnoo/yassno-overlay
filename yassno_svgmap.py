@@ -391,3 +391,39 @@ def to_world(loop, track_len):
     total = _length(list(loop))
     k = track_len / total if total > 0 and track_len > 0 else 1.0
     return [(x * k, -y * k) for x, y in loop]
+
+
+def download_logo(name, path):
+    """Логотип марки с сайта iRacing -> path. Тихо ничего не делает, если логотипа нет или нет сети."""
+    if not re.fullmatch(r"[a-z0-9]{2,30}", name or ""):
+        return False
+    try:
+        req = urllib.request.Request("https://images-static.iracing.com/img/logos/partners/%s-logo.png" % name,
+                                     headers={"User-Agent": "Mozilla/5.0 YassnoOverlay"})
+        with urllib.request.urlopen(req, timeout=12) as r:
+            data = r.read(3_000_000)
+        if not data.startswith(b"\x89PNG"):
+            return False
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(data)
+        return True
+    except Exception:
+        return False
+
+
+# марки и серии, у которых на сайте iRacing есть логотип (проверено на сайте); остальные подгружаются по мере появления машин
+IR_LOGO_BRANDS = ("acura", "audi", "dallara", "dirtcarracing", "crosscartn11", "formulavee", "hyundai", "honda", "kia", "legends",
+                  "ligier", "mazda", "nissan", "pontiac", "pro2truck", "radical", "skipbarber", "subaru", "volkswagen", "williams")
+
+
+def prefetch_logos(folder, skip=()):
+    """Скачивает сразу все известные логотипы (по одному, в фоне), кроме тех, что уже есть."""
+    done = set()
+    for name in IR_LOGO_BRANDS:
+        path = os.path.join(folder, name + ".png")
+        if name in skip or os.path.exists(path):
+            continue
+        download_logo(name, path)
+        done.add(name)
+    return done

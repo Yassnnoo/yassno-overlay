@@ -1,6 +1,6 @@
 {
- "version": "2.5.25",
- "notes": "RaceLab находится автоматически.",
+ "version": "2.5.29",
+ "notes": "iRacing: статусы FINISH (клетчатый флаг), DSQ (дисквалификация) и OUT (выбывшие в гонке остаются в таблице).",
  "files": [
   "README.txt",
   "diagnose.cmd",
