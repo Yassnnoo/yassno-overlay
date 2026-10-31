@@ -654,6 +654,10 @@ class IracingReader:
         f2 = _ir_arr(raw, V, base, "CarIdxF2Time")                # игра сама считает отставание от лидера в секундах
         clpos = _ir_arr(raw, V, base, "CarIdxClassPosition")
         player_speed = float(f("Speed"))
+        try:
+            radio_idx = int(f("RadioTransmitCarIdx", 0, -1)) if "RadioTransmitCarIdx" in V else -1
+        except Exception:
+            radio_idx = -1
         cars = []
         ranked = []
         for idx, d in sorted(info["drivers"].items()):
@@ -714,6 +718,7 @@ class IracingReader:
                    "garage": bool(f("IsInGarage")) or (surf[idx] == -1 if idx < len(surf) else False) if c["me"] else False,
                    "pit_state": 3 if (idx < len(onpit) and onpit[idx]) else 0, "control": 0 if c["me"] else 2, "flag": 0,
                    "pitstops": cs["stops"], "penalties": 1 if fl & (0x10000 | 0x80000) else 0,
+                   "radio": idx == radio_idx,
                    "gap_next": gn, "laps_next": int(ahead) if ahead >= 1.0 else 0,
                    "gap_leader": gl, "laps_leader": int(lead) if lead >= 1.0 else 0,
                    "pos": (ox, oz), "ori": ori, "lap_dist": p * L, "est_lap": lapt, "has_tel": c["me"],

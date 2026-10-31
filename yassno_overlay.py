@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "2.5.55"
+APP_VERSION = "2.5.62"
 import argparse
 import bisect
 import collections
@@ -348,6 +348,49 @@ def best_shift(ref, new, window):
         if best is None or err < best:
             best, best_s = err, s
     return best_s
+
+
+def detect_corners(loop, window_m=24.0, min_turn_deg=28.0):
+    """Повороты по форме петли трассы: [(индекс_вершины, номер, знак)] от линии старта/финиша.
+    Нумерация автоматическая (поворот = заметный набор курса в одну сторону), с официальной может не совпадать."""
+    n = len(loop)
+    if n < 60:
+        return []
+    seg = [math.hypot(loop[(i + 1) % n][0] - loop[i][0], loop[(i + 1) % n][1] - loop[i][1]) for i in range(n)]
+    step = max(1e-6, sum(seg) / n)
+    k = max(2, int(round(window_m / step)))
+    head = [math.atan2(loop[(i + 1) % n][1] - loop[i][1], loop[(i + 1) % n][0] - loop[i][0]) for i in range(n)]
+
+    def wrap(a):
+        return (a + math.pi) % (2 * math.pi) - math.pi
+    rate = [wrap(head[(i + k) % n] - head[i]) for i in range(n)]         # поворот на окне в k шагов
+    thr = math.radians(9.0)                                               # >9° на ~24 м — это уже поворот, а не плавный изгиб
+    marks, i = [], 0
+    while i < n:
+        if abs(rate[i]) > thr:
+            sgn = 1 if rate[i] > 0 else -1
+            j, tot, best, bi = i, 0.0, 0.0, i
+            while j < n + i and abs(rate[j % n]) > thr and (1 if rate[j % n] > 0 else -1) == sgn:
+                tot += rate[j % n] / k
+                if abs(rate[j % n]) > best:
+                    best, bi = abs(rate[j % n]), j % n
+                j += 1
+            if abs(tot) >= math.radians(min_turn_deg):
+                marks.append([(bi + k // 2) % n, sgn, abs(tot)])
+            i = j + 1
+        else:
+            i += 1
+    merged = []                                                           # один поворот, разорванный короткой прямой, склеиваем
+    for m in sorted(marks, key=lambda m: m[0]):
+        if merged and m[1] == merged[-1][1] and (m[0] - merged[-1][0]) * step < 35.0:
+            if m[2] > merged[-1][2]:
+                merged[-1][0] = m[0]
+            merged[-1][2] += m[2]
+        else:
+            merged.append(m)
+    if len(merged) > 1 and merged[0][1] == merged[-1][1] and ((merged[0][0] + n - merged[-1][0]) * step) < 35.0:
+        merged.pop()                                                      # поворот через линию старта посчитан дважды
+    return [(m[0], num + 1, m[1]) for num, m in enumerate(merged)]
 
 
 class TrackMapper:
@@ -930,7 +973,7 @@ BRANDS = [(("ferrari",), "F", "#cd101a", "ferrari"), (("porsche",), "P", "#c41e3
           (("ginetta",), "G", "#f59c0d", "ginetta"), (("oreca",), "O", "#6e7887", "")]
 
 # ключ, заголовок, ширина (в «нулях» шрифта), выравнивание
-COLS = [("pos", "ПОЗ", 2.6, "e"), ("delta", "", 2.8, "w"), ("logo", "", 2.8, "w"),
+COLS = [("pos", "ПОЗ", 3.6, "e"), ("delta", "", 2.8, "w"), ("logo", "", 2.8, "w"),
         ("num", "№", 3.8, "e"), ("tyre", "ШИНЫ", 3.8, "w"), ("name", "ПИЛОТ", 17, "w"), ("irat", "ЛИЦЕНЗИЯ / iR / ПРОГНОЗ", 17.5, "e"),
         ("ahead", "ВПЕРЕДИ", 7.5, "e"), ("lead", "ЛИДЕР", 7.5, "e"),
         ("best", "ЛУЧШИЙ", 8.6, "e"), ("last", "ПОСЛЕД.", 8.6, "e"),
@@ -1207,6 +1250,32 @@ def parse_hotkey(text):
     return vks + [key] if key and vks else None
 
 
+def stipple_for(op):
+    """Растр для фона окна при прозрачности op (0.2–1.0): чем меньше, тем реже точки фона; 1.0 — сплошной."""
+    if op >= 0.9:
+        return ""
+    return "gray75" if op >= 0.65 else "gray50" if op >= 0.4 else "gray25" if op >= 0.25 else "gray12"
+
+
+class BgCanvas(tk.Canvas):
+    """Холст, у которого прозрачность касается только фона окна: сплошные «подложки» рисуются растром (между точками
+    окно прозрачно), а текст, полосы и значки остаются чёткими. Растр задаётся полем stipple."""
+    stipple = ""
+
+    def _surface(self, fill):
+        return fill in (BG, HDR_BG, ROW_A, ROW_B, ME_BG, WeatherWindow.CARD)
+
+    def create_rectangle(self, *a, **kw):
+        if self.stipple and "stipple" not in kw and self._surface(kw.get("fill")):
+            kw["stipple"] = self.stipple
+        return super().create_rectangle(*a, **kw)
+
+    def create_polygon(self, *a, **kw):
+        if self.stipple and "stipple" not in kw and self._surface(kw.get("fill")):
+            kw["stipple"] = self.stipple
+        return super().create_polygon(*a, **kw)
+
+
 def draw_rrect(canvas, x1, y1, x2, y2, r, fill="", outline=""):
     pts = [x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r, x2, y2 - r, x2, y2,
            x2 - r, y2, x1 + r, y2, x1, y2, x1, y2 - r, x1, y1 + r, x1, y1]
@@ -1479,7 +1548,7 @@ class RelativeWindow:
                 self.rounded = False
                 t.configure(bg=BG)
         t.geometry(f"+{cfg[self.POS[0]]}+{cfg[self.POS[1]]}")
-        self.canvas = tk.Canvas(t, width=420, height=300, bg=KEY if self.rounded else BG, highlightthickness=0)
+        self.canvas = BgCanvas(t, width=420, height=300, bg=KEY if self.rounded else BG, highlightthickness=0)
         self.canvas.pack()
         self._sig = None
         self.build()
@@ -1951,6 +2020,7 @@ class MapWindow(RelativeWindow):
         if self._bare:
             self.h_title = self.h_foot = 0
         self.f_num = tkfont.Font(family=m.family, size=max(8, int(m.cfg["font"] * 0.9)), weight="bold")
+        self.f_turn = tkfont.Font(family=m.family, size=max(7, int(m.cfg["font"] * 0.62)), weight="bold")
         if not getattr(self, "_wheel", False):
             self._wheel = True
             self.canvas.bind("<MouseWheel>", lambda e: m.scale_map(0.1 if e.delta > 0 else -0.1))
@@ -1971,7 +2041,7 @@ class MapWindow(RelativeWindow):
         if self.mode() != self._mode or ((not cf.get("map_frame", True)) and self._mode != "linear") != self._bare:
             self.build()
         sig = (cf.get("map_style", "classic"), cf.get("map_one_color", False), cf.get("map_frame", True), ver // 2, cf["font"], self.main.locked, cf.get("map_rot", 0), cf.get("map_mirror", False),
-               cf.get("map_radius", 500), cf.get("map_headup", True), int(time.time() * 8))
+               cf.get("map_radius", 500), cf.get("map_headup", True), cf.get("map_pit", True), cf.get("map_turns", True), int(time.time() * 8))
         if sig != self._sig:
             self._sig = sig
             self.draw(frame)
@@ -2053,6 +2123,28 @@ class MapWindow(RelativeWindow):
             x0, y0, ux, uy = tick(0, 13, "#ffffff", 6)
             tick(0, 13, "#111111", 2)
             c.create_text(x0 + uy * 34, y0 - ux * 34, text="СТАРТ", fill=FG, font=self.f_num)
+
+    def draw_turns(self, c, sp, loop, gx0, gy0, side):
+        """Номера поворотов на полной карте: кружок с цифрой снаружи от вершины поворота."""
+        key = (len(loop), loop[0], loop[len(loop) // 2])
+        if getattr(self, "_corner_key", None) != key:
+            self._corner_key, self._corners = key, detect_corners(loop)
+        n_ = len(sp)
+        rr = max(7, int(self.rh * 0.42))
+        for idx, num, _sgn in self._corners:
+            i = idx % n_
+            a, b = sp[(i - 4) % n_], sp[(i + 4) % n_]
+            mx, my = sp[i]
+            tx, ty = b[0] - a[0], b[1] - a[1]
+            tn = math.hypot(tx, ty) or 1.0
+            cross = (mx - a[0]) * (b[1] - my) - (my - a[1]) * (b[0] - mx)    # знак поворота уже на экране (учтены поворот и зеркало карты)
+            side_ = -1.0 if cross > 0 else 1.0
+            nx, ny = -ty / tn * side_, tx / tn * side_
+            px, py = mx + nx * (rr + 11), my + ny * (rr + 11)
+            px = min(max(px, gx0 + rr + 1), gx0 + side - rr - 1)
+            py = min(max(py, gy0 + rr + 1), gy0 + side - rr - 1)
+            c.create_oval(px - rr, py - rr, px + rr, py + rr, fill=HDR_BG, outline=DIM)
+            c.create_text(px, py, text=str(num), fill=FG, font=self.f_turn)
 
     def black(self):
         return self.main.cfg.get("map_style", "classic") == "black"
@@ -2139,7 +2231,7 @@ class MapWindow(RelativeWindow):
 
         # ---------- расчёт масштаба ----------
         base = loop if loop else partial
-        cars = [x for x in (frame["cars"] if frame else []) if not x["garage"] and x["pos"] != (0.0, 0.0)]
+        cars = [x for x in (frame["cars"] if frame else []) if not x["garage"] and x["pos"] != (0.0, 0.0) and (m.cfg.get("map_pit", True) or x["player"] or not x["in_pits"])]
         if mode == "local" and len(base) >= 2 and me is not None and me["pos"] != (0.0, 0.0):
             self.draw_local(c, base, bool(loop), sec, cars, me, gx0, gy0, side, rot, mirror)
         elif len(base) >= 2:
@@ -2157,6 +2249,8 @@ class MapWindow(RelativeWindow):
             if loop:
                 self.track_line(c, flat, sp[0])
                 self.draw_marks(c, sp, sec)
+                if m.cfg.get("map_turns", True):
+                    self.draw_turns(c, sp, loop, gx0, gy0, side)
             else:
                 step = max(1, len(sp) // 700)
                 c.create_line(*[v for p in sp[::step] for v in p], fill=ACCENT, width=3, capstyle="round", joinstyle="round")
@@ -2281,7 +2375,7 @@ class MapWindow(RelativeWindow):
         classes += sorted({x["cls"] for x in frame["cars"]} - set(classes))
         nums = m.cfg.get("map_nums", True)
         r0 = max(int(m.cfg.get("map_dot", 6)), 12 if nums else 5)
-        cars = [x for x in frame["cars"] if not x["garage"]]
+        cars = [x for x in frame["cars"] if not x["garage"] and (self.main.cfg.get("map_pit", True) or x["player"] or not x["in_pits"])]
         lane_of = lambda car: (car["place"] % 3 if len(classes) <= 1 else min(2, classes.index(car["cls"]) if car["cls"] in classes else 2))
         jit = {}
         for ln in range(3):                                          # близкие машины в одной полосе разводим по вертикали
@@ -3313,7 +3407,14 @@ class AlertEngine:
             d = fuel_calc.compute(frame, float(cfg.get("fuel_reserve", 0.0)), cfg.get("fuel_avg", 5))
             if d and frame["kind"] not in TIMED_KINDS:
                 lf = d.get("laps_fuel")
-                if lf is not None and lf < 2.5:
+                try:
+                    pit_thr = float(cfg.get("fuel_pit_laps", 1.0))          # «пора в боксы»: топлива меньше, чем на столько кругов (0 — выключено)
+                except (TypeError, ValueError):
+                    pit_thr = 1.0
+                if lf is not None and pit_thr > 0 and lf < pit_thr:
+                    self.cond["fuel"] = ("ПИТ-СТОП: ТОПЛИВА МЕНЬШЕ КРУГА" if lf < 1.0
+                                         else f"ПИТ-СТОП: ТОПЛИВА ~{lf:.1f} КР.", 4, "red")
+                elif lf is not None and lf < 2.5:
                     self.cond["fuel"] = (("ЗАЕЗД В БОКСЫ: ТОПЛИВО ЗАКАНЧИВАЕТСЯ" if lf < 1.3 else f"МАЛО ТОПЛИВА: ~{lf:.1f} кр."), 3 if lf < 1.3 else 2)
                 v = d.get("ve")
                 if v and v.get("laps") is not None and v["laps"] < 2.5:
@@ -3417,7 +3518,55 @@ class LapLog:
 
 
 delta_tracker, stint_tracker, gap_tracker, alert_engine = DeltaTracker(), StintTracker(), GapTracker(), AlertEngine()
+def draw_radio_icon(c, x, cy, col):
+    """Маленький микрофон: капсула, дужка, ножка + волны."""
+    c.create_rectangle(x - 2, cy - 6, x + 2, cy + 1, fill=col, outline="")
+    c.create_arc(x - 5, cy - 4, x + 5, cy + 5, start=180, extent=180, style="arc", outline=col, width=1)
+    c.create_line(x, cy + 5, x, cy + 8, fill=col)
+    c.create_line(x - 3, cy + 8, x + 3, cy + 8, fill=col)
+    c.create_arc(x + 5, cy - 6, x + 11, cy + 2, start=-50, extent=100, style="arc", outline=col)
+
+
+class PitLog:
+    """Пит-стопы всех машин в гонке: на каком круге заехал и сколько стоял (от въезда в пит-лейн до выезда)."""
+    MIN_S = 3.0                                          # короче — считаем помехой в данных, не стопом
+
+    def __init__(self):
+        self.session = None
+        self.cars = {}
+
+    def update(self, frame, now=None):
+        now = time.time() if now is None else now
+        if frame.get("session_start") != self.session:
+            self.session, self.cars = frame.get("session_start"), {}
+        if frame.get("kind") != "RACE":
+            return
+        for c in frame["cars"]:
+            r = self.cars.setdefault(c["key"], {"in": False, "t0": 0.0, "lap": 0, "last": None, "n": 0})
+            pit = bool(c.get("in_pits"))
+            if pit and not r["in"]:
+                r["in"], r["t0"], r["lap"] = True, now, int(c["laps"]) + 1
+            elif not pit and r["in"]:
+                r["in"] = False
+                dur = now - r["t0"]
+                if dur >= self.MIN_S:
+                    r["last"], r["n"] = (r["lap"], dur), r["n"] + 1
+
+    def info(self, key, now=None):
+        """(круг, секунды, идёт_сейчас) для последнего или текущего стопа, либо None."""
+        r = self.cars.get(key)
+        if not r:
+            return None
+        now = time.time() if now is None else now
+        if r["in"]:
+            return r["lap"], now - r["t0"], True
+        if r["last"]:
+            return r["last"][0], r["last"][1], False
+        return None
+
+
 lap_log = LapLog()
+pit_log = PitLog()
 wear_tracker = WearTracker()
 
 
@@ -4248,7 +4397,7 @@ class AlertsWindow(SimpleWindow):
             self._sig = sig
             lv, text, kind = items[0]
             bg, fg = self.KIND_COLORS.get(kind) or self.COLORS.get(lv, self.COLORS[1])
-            if lv == 3 and int(time.time() * 2) % 2:
+            if lv >= 3 and int(time.time() * 2) % 2:
                 bg = "#8e1b1b" if kind != "white" else bg
             c, W, H = self.canvas, self.width, self.height
             c.delete("all")
@@ -4631,6 +4780,7 @@ class Overlay:
         for k, v in (("delta", True), ("alerts", True), ("tyres", False), ("pitplan", False), ("gaps", False), ("engine", False),
                      ("sesstime", False), ("clock", False), ("speedo", False), ("laplog", False), ("laplog_count", 5), ("laplog_best", True), ("laplog_delta", True),
                      ("laplog_temp", True), ("laplog_ref", "prev"), ("laplog_newest", True), ("speedo_view", "arc"), ("speedo_max", 340), ("st_session", True), ("st_timer", True), ("st_clock", True),
+                     ("op_bg_only", True), ("map_pit", True), ("map_turns", True), ("st_poscol", True), ("st_battle", True), ("st_classcount", True), ("st_pitinfo", True), ("st_radio", True),
                      ("delta_show_session", True), ("delta_show_mine", True), ("delta_show_pred", True)):
             cfg.setdefault(k, v)
         self.logo_dir = logo_dir
@@ -4658,7 +4808,7 @@ class Overlay:
             r.configure(bg=BG)
         self.family = pick_family(r, cfg.get("family"))
         self.game = "lmu"
-        self.canvas = tk.Canvas(r, width=800, height=400, bg=KEY if self.rounded else BG, highlightthickness=0)
+        self.canvas = BgCanvas(r, width=800, height=400, bg=KEY if self.rounded else BG, highlightthickness=0)
         self.canvas.pack()
         self._h = 0
         self.rel = self.ped = self.map = self.radar = self.weather = self.lights = self.limiter = self.fuel = None
@@ -4891,6 +5041,8 @@ class Overlay:
         self.cols = [c for c in COLS if c[0] not in hide]
         self.x_of, self.w_of, x = {}, {}, 14
         for key, _, w, _ in self.cols:
+            if key == "name" and self.cfg.get("st_pitinfo", True):
+                w += 8                              # место справа от фамилии под «К24 · 32с»
             self.x_of[key], self.w_of[key] = x, int(w * self.cw)
             x += int(w * self.cw) + int(self.cw * 0.9)
         self.width = max(x + 6, 520)
@@ -4939,13 +5091,32 @@ class Overlay:
             return False
         return bool(self.cfg.get("hide_garage" if on == "standings" else "hg_" + on, True))
 
+    def apply_op(self, top, canvas, hidden, op, on_change=None):
+        """Прозрачность окна: либо только фон (растр, текст чёткий), либо старый режим — всё окно целиком."""
+        if hidden:
+            top.attributes("-alpha", 0.0)
+            return
+        if self.cfg.get("op_bg_only", True) and self.rounded:
+            st = stipple_for(op)
+            if st != canvas.stipple:
+                canvas.stipple = st
+                if on_change:
+                    on_change()
+            top.attributes("-alpha", 1.0)
+        else:
+            if canvas.stipple:
+                canvas.stipple = ""
+                if on_change:
+                    on_change()
+            top.attributes("-alpha", op)
+
     def set_alpha(self, value=None):
         base = value or self.cfg["alpha"]
-        self.root.attributes("-alpha", 0.0 if (self.hid("standings") or not self.cfg.get("standings", True))
-                             else self.op("standings", base))
+        self.apply_op(self.root, self.canvas, self.hid("standings") or not self.cfg.get("standings", True),
+                      self.op("standings", base))
         for w in self.subs:
             if not getattr(w, "OWN_ALPHA", False):
-                w.top.attributes("-alpha", 0.0 if self.hid(w.ON) else self.op(w.ON, base))
+                self.apply_op(w.top, w.canvas, self.hid(w.ON), self.op(w.ON, base), lambda w=w: setattr(w, "_sig", None))
 
     def _toggle_sub(self, sub, var):
         self.cfg[sub.ON] = bool(var.get())
@@ -5771,6 +5942,28 @@ class Overlay:
             out[c["key"]] = start - (i + 1)
         return out
 
+    POS_HOLD = 10.0                                    # сколько секунд подсвечиваем смену позиции
+    BATTLE_GAP = 0.2                                   # интервал до машины впереди, при котором это «борьба», с
+
+    def pos_events(self, frame, scope_key, cpos):
+        """Кто только что выиграл (+1) или потерял (-1) позицию: подсветка держится POS_HOLD секунд."""
+        now = time.monotonic()
+        if frame["session_start"] != getattr(self, "_pe_session", None):
+            self._pe_session, self._pe = frame["session_start"], {}
+        out = {}
+        for key, pos in cpos.items():
+            rec = self._pe.get((scope_key, key))
+            if rec is None:
+                self._pe[(scope_key, key)] = [pos, 0, 0.0]
+                continue
+            if pos != rec[0]:
+                rec[1] = 1 if pos < rec[0] else -1
+                rec[2] = now
+                rec[0] = pos
+            if rec[1] and now - rec[2] < self.POS_HOLD:
+                out[key] = rec[1]
+        return out
+
     def draw(self):
         with lock:
             frame, ok, err, frame_ts = state["frame"], state["ok"], state["err"], state["frame_ts"]
@@ -5803,6 +5996,16 @@ class Overlay:
         cpos = {x["key"]: i + 1 for i, x in enumerate(group)}
         deltas = self.track_positions(frame, scope, group) if frame and not timed else {}
         stuck = self.fuel_stuck(frame) if frame else set()
+        race_like = bool(frame and not timed)
+        show_pit = bool(self.cfg.get("st_pitinfo", True))
+        pevents = self.pos_events(frame, scope, cpos) if (frame and race_like and self.cfg.get("st_poscol", True)) else {}
+        battle = set()
+        if frame and not timed and self.cfg.get("st_battle", True):
+            for gi in range(1, len(group)):
+                gs = gaps[group[gi]["key"]][1]
+                if isinstance(gs, (int, float)) and 0 < gs <= self.BATTLE_GAP:
+                    battle.add(group[gi]["key"])
+                    battle.add(group[gi - 1]["key"])
         ir_pred = ir_forecast(cars) if (frame and self.game == "iracing" and frame.get("kind") == "RACE" and "irat" in self.x_of) else None
         out_laps = self.out_laps(frame) if frame else set()
         all_best = [x["best"] for x in cars if x["best"] > 0]
@@ -5872,6 +6075,21 @@ class Overlay:
         c.create_rectangle(0, y, W, y + self.h_group, fill=HDR_BG, outline="")
         c.create_rectangle(14, gy - 7, 18, gy + 7, fill=class_color(group_name) if class_mode else ACCENT, outline="")
         c.create_text(28, gy, text=group_name, fill=FG, anchor="w", font=self.bold)
+        if not class_mode and self.cfg.get("st_classcount", True):
+            cnt = {}
+            for x in group:
+                cnt[x["cls"]] = cnt.get(x["cls"], 0) + 1
+            if len(cnt) > 1:
+                cx = 28 + self.bold.measure(group_name) + 18
+                for cname, n in sorted(cnt.items(), key=lambda kv: -kv[1]):
+                    if cname == "UNKNOWN":
+                        continue
+                    tx = f"{cname[:10]} {n}"
+                    if cx + self.small.measure(tx) + 22 > W - 150:
+                        break
+                    c.create_rectangle(cx, gy - 5, cx + 4, gy + 5, fill=class_color(cname), outline="")
+                    c.create_text(cx + 9, gy, text=tx, fill=DIM, anchor="w", font=self.small)
+                    cx += 9 + self.small.measure(tx) + 14
         count_txt = cars_word(len(group))
         if len(cars) > len(group):                       # часть машин спрятана фильтром «только мой класс»
             count_txt += f"   •   ВСЕГО В СЕССИИ {len(cars)}"
@@ -5891,11 +6109,17 @@ class Overlay:
             pos = cpos[car["key"]]
             leader = pos == 1
             ahead_txt, ahead_s, lead_txt = gaps[car["key"]]
-            close = isinstance(ahead_s, (int, float)) and 0 < ahead_s < 1.0 and not timed
+            in_battle = car["key"] in battle
+            close = in_battle and isinstance(ahead_s, (int, float)) and 0 < ahead_s <= self.BATTLE_GAP
             status, skind = status_of(car, car["key"] in out_laps)
             for key, *_ in self.cols:
                 if key == "pos":
-                    self.text("pos", cy, str(pos), ACCENT if leader else FG, self.bold)
+                    pe = pevents.get(car["key"], 0)
+                    pcol = GREEN if pe > 0 else RED if pe < 0 else YELLOW if in_battle else ACCENT if leader else "#f2f4f8"
+                    px2 = self.x_of["pos"] + self.w_of["pos"] - 3
+                    sw = min(max(self.bold.measure("00") + 8, rh - 8), self.w_of["pos"] - 3)
+                    self.rrect(px2 - sw, cy - (rh - 8) // 2, px2, cy + (rh - 8) // 2, 5, fill=pcol)
+                    self.canvas.create_text(px2 - sw / 2, cy, text=str(pos), fill="#10141a", font=self.bold)
                 elif key == "delta":
                     d = deltas.get(car["key"], 0)
                     if d:
@@ -5921,12 +6145,25 @@ class Overlay:
                         self.rrect(tx, cy - int(rh * 0.27), tx + tw, cy + int(rh * 0.27), 5, outline=col)
                         c.create_text(tx + tw // 2, cy, text=t, fill=col, font=self.small)
                 elif key == "name":
-                    self.text("name", cy, car["driver"].upper()[:22], FG, self.bold if is_me else self.font)
+                    pi = pit_log.info(car["key"]) if (show_pit and frame.get("kind") == "RACE") else None
+                    nm = car["driver"].upper()
+                    if pi:
+                        ptxt = f"К{pi[0]} · {pi[1]:.0f}с"
+                        pw_ = self.small.measure(ptxt) + 6
+                        room = max(40, self.w_of["name"] - pw_)
+                        while len(nm) > 4 and (self.bold if is_me else self.font).measure(nm) > room:
+                            nm = nm[:-1]
+                        self.canvas.create_text(self.x_of["name"] + self.w_of["name"], cy, text=ptxt, anchor="e", font=self.small,
+                                                fill=ACCENT if pi[2] else DIM)
+                    self.text("name", cy, nm[:22], FG, self.bold if is_me else self.font)
+                    if car.get("radio") and self.cfg.get("st_radio", True):
+                        rx = self.x_of["name"] + (self.bold if is_me else self.font).measure(nm[:22]) + 9
+                        draw_radio_icon(c, rx, cy, ACCENT)
                 elif key == "irat":
                     draw_irat(c, car, self.x_of["irat"] + self.w_of["irat"], cy, self.small, rh,
                               ir_pred.get(car["key"]) if ir_pred is not None else None)
                 elif key == "ahead":
-                    self.text("ahead", cy, ahead_txt, YELLOW if close else FG)
+                    self.text("ahead", cy, ahead_txt, YELLOW if close else FG, self.bold if close else None)
                 elif key == "lead":
                     self.text("lead", cy, lead_txt, ACCENT if leader else FG)
                 elif key == "best":
@@ -6076,6 +6313,7 @@ class Overlay:
                     delta_tracker.update(frame, self.cfg.get("delta_ref", "best"))
                     stint_tracker.update(frame)
                     lap_log.update(frame)
+                    pit_log.update(frame)
                     wear_tracker.update(frame)
                     gap_tracker.update(frame)
                     alert_engine.update(frame, self.cfg)
@@ -6388,6 +6626,20 @@ def main():
                 ov.laplog.draw(None)
                 ov.root.update()
                 os.system("import -window %d %s/laplog.png" % (ov.laplog.top.winfo_id(), d))
+                try:                                        # карта с номерами поворотов (полный вид)
+                    ov.cfg.update(map_mode="full", map_turns=True)
+                    with mapper.lock:                       # для снимка подставляем готовую петлю с несколькими поворотами
+                        mapper.loop = [(500 * math.cos(t) + 130 * math.cos(3 * t + .4), 330 * math.sin(t) + 90 * math.sin(2 * t))
+                                       for t in (2 * math.pi * i / 400 for i in range(400))]
+                        mapper.laps, mapper.status = mapper.MAX_LAPS, "ready"
+                    ov.map.build()
+                    ov.map.draw(state["frame"])
+                    ov.map.top.geometry("+1300+300")
+                    ov.map.top.lift()
+                    ov.root.update()
+                    os.system("import -window %d %s/map.png" % (ov.map.top.winfo_id(), d))
+                except Exception:
+                    pass
         ov.root.after(800, _views)
         ov.root.after(1350, _shot)
         ov.root.after(1200, _laps)

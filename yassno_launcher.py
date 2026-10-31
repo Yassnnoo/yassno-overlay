@@ -31,7 +31,7 @@ import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import colorchooser, filedialog, messagebox, ttk
 
-APP_VERSION = "2.5.55"
+APP_VERSION = "2.5.62"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -411,11 +411,11 @@ SCALE_DEFAULT = {"scale_standings": 1.0, "scale_relative": 1.0, "scale_pedals": 
                  "scale_tyres": 1.0, "scale_pitplan": 1.0, "scale_gaps": 1.0, "scale_engine": 1.0, "scale_sesstime": 1.0, "scale_clock": 1.0, "scale_speedo": 1.0, "scale_laplog": 1.0}
 DEFAULTS = {**{k: True for k, _ in ELEMENTS}, "font": 13, "family": "", "rows": 12,
             "hide_garage": True, "class_only": False, **SCALE_DEFAULT, **{"op_" + k: v for k, v in OP_DEFAULT.items()},
-            "radar_range": 40, "fuel_reserve": 0.0, "fuel_avg": 5,
+            "radar_range": 40, "fuel_reserve": 0.0, "fuel_pit_laps": 1.0, "fuel_avg": 5,
             "rel_ahead": 3, "rel_behind": 3, "ped_seconds": 8, "shift_start": 82.0, "shift_flash": 98.0, "speed_mph": False,
             "map_wind": True, "map_dot": 6, "map_mirror": False, "map_rot": 0,
             "radar_arcs": True, "radar_fade": True, "radar_fast": True, "lights_hold": 4,
-            "map_nums": True, "map_sectors": True, "fuel_ve": True,
+            "map_nums": True, "map_pit": True, "map_turns": True, "map_sectors": True, "fuel_ve": True,
             "app_racelab": False, "app_simhub": False, "app_crewchief": False, "app_tradingpaints": False, "stats": True,
             "stand_mode": "table", "ticker_w": 1000, "ticker_speed": 70, "map_mode": "full", "map_radius": 500,
             "map_headup": True, "delta_ref": "best", "delta_range": 1.0, "delta_view": "full", "delta_theme": "full", "delta_show_session": True, "delta_show_mine": True, "delta_show_pred": True, "tyres_view": "table", "layout_mode": "off", "wheel_style": "round"}
@@ -423,8 +423,8 @@ DEFAULTS.update({"map_ir_svg": True, "weather_view": "cards", "map_style": "clas
                  **{"hg_" + k: True for k, _ in ELEMENTS if k not in ("standings", "shiftlight")}})
 DEFAULTS.update({"tyres": False, "pitplan": False, "gaps": False, "engine": False, "engine_view": "table", "delta_sec_bar": True,
                  "sesstime": False, "clock": False, "speedo": False, "laplog": False, "laplog_count": 5, "laplog_best": True, "laplog_delta": True, "laplog_temp": True,
-                 "laplog_ref": "prev", "laplog_newest": True, "speedo_view": "arc", "speedo_max": 340, "clock_seconds": True, "st_session": True, "st_timer": True, "st_clock": True,
-                 "win_style": "classic", "theme_mode": "dark"})        # эти панели по умолчанию выключены
+                 "laplog_ref": "prev", "laplog_newest": True, "speedo_view": "arc", "speedo_max": 340, "clock_seconds": True, "st_session": True, "st_timer": True, "st_clock": True, "st_poscol": True, "st_battle": True, "st_classcount": True, "st_pitinfo": True, "st_radio": True,
+                 "win_style": "classic", "theme_mode": "dark", "op_bg_only": True})        # эти панели по умолчанию выключены
 POS_KEYS = ["x", "y", "rel_x", "rel_y", "ped_x", "ped_y", "map_x", "map_y", "radar_x", "radar_y",
             "wx_x", "wx_y", "lights_x", "lights_y", "lim_x", "lim_y", "fuel_x", "fuel_y",
             "delta_x", "delta_y", "alerts_x", "alerts_y", "tyres_x", "tyres_y", "pitplan_x", "pitplan_y", "gaps_x", "gaps_y", "engine_x", "engine_y", "sesstime_x", "sesstime_y", "clock_x", "clock_y", "speedo_x", "speedo_y", "laplog_x", "laplog_y"]
@@ -1384,6 +1384,7 @@ TIPS = {
     "Записывать статистику сессий": "Сохраняет итоги сессий в раздел «Статистика» лаунчера.",
     "Тема оверлеев": "Светлая или тёмная палитра для всех панелей сразу. Цвета потом можно подправить вручную.",
     "Стиль окон": "Форма углов и цветная метка у заголовков панелей.",
+    "Прозрачность только у фона окон (текст чёткий)": "Ползунок «Непрозрачность» меняет только подложку окон (она рисуется мелким растром), текст и значки остаются чёткими. Выключите, если растр не нравится: тогда прозрачным становится всё окно целиком, как раньше.",
     "Раскладки окон": "Запоминать положение и размеры окон отдельно для практики, квалификации, гонки или класса машины.",
     "Размер радара": "Масштаб окна радара.",
     "Дальность, м": "На каком расстоянии от тебя радар начинает показывать машины.",
@@ -1580,7 +1581,7 @@ class ProfilePanel(ttk.Frame):
                 self.v[k] = tk.StringVar(value=self.mode_label(k, val))
             elif k in ("radar_range", "map_radius"):
                 self.v[k] = tk.StringVar(value=str(int(val)))
-            elif k == "fuel_reserve":
+            elif k in ("fuel_reserve", "fuel_pit_laps"):
                 self.v[k] = tk.StringVar(value=f"{float(val):g}")
             elif k == "map_rot":
                 self.v[k] = tk.StringVar(value=self.ROT[int(val) % 4])
@@ -1979,6 +1980,7 @@ class ProfilePanel(ttk.Frame):
             self.tg(f, None, "Записывать статистику сессий", self.v["stats"])
             self.mcombo(f, "Тема оверлеев", "theme_mode")
             self.mcombo(f, "Стиль окон", "win_style", width=34)
+            self.tg(f, None, "Прозрачность только у фона окон (текст чёткий)", self.v["op_bg_only"])
             self.mcombo(f, "Раскладки окон", "layout_mode", width=34)
             self.lay_info = ttk.Label(f, text="", style="Dim.TLabel", justify="left", wraplength=440)
             self.lay_info.grid(row=self.nr(f), column=0, columnspan=3, sticky="w", pady=(2, 0))
@@ -2009,6 +2011,11 @@ class ProfilePanel(ttk.Frame):
             self.toggles(self.card("Колонки таблицы", R), [(k, n) for k, n, _ in STAND_COLS if (k != "irat" or self.game == "iracing") and not (self.game == "iracing" and k in ("fuel", "ve"))], self.cols, ncols=3)
             self.toggles(self.card("Шапка таблицы", R), [("st_session", "Название сессии"), ("st_timer", "Таймер: круг / осталось"),
                                                          ("st_clock", "Локальное время")], self.v, ncols=1)
+            self.toggles(self.card("Выделение в таблице", R), [("st_poscol", "Смена позиции: зелёный — выиграл, красный — потерял"),
+                                                               ("st_battle", "Борьба (до 0,2 с): жёлтым"),
+                                                               ("st_classcount", "Число пилотов по классам в шапке"),
+                                                               ("st_pitinfo", "Пит-стоп у фамилии: круг и время (гонка)")]
+                        + ([("st_radio", "Рация: значок у говорящего")] if self.game == "iracing" else []), self.v, ncols=1)
         elif key == "relative":
             f = main_card()
             self.slider(f, None, "Размер", self.v["scale_relative"], 0.5, 2.5, mult)
@@ -2040,6 +2047,8 @@ class ProfilePanel(ttk.Frame):
             self.tg(h, None, "«Вперёд» всегда вверх (иначе север сверху)", self.v["map_headup"])
             g = self.card("На карте", R)
             self.tg(g, None, "Номера мест на машинах", self.v["map_nums"])
+            self.tg(g, None, "Номера поворотов (полная карта)", self.v["map_turns"])
+            self.tg(g, None, "Машины на пит-лейне", self.v["map_pit"])
             self.tg(g, None, "Сектора и отметка старта/финиша", self.v["map_sectors"])
             self.tg(g, None, "Компас ветра в углу", self.v["map_wind"])
             self.tg(g, None, "Зеркально отразить карту", self.v["map_mirror"])
@@ -2115,6 +2124,10 @@ class ProfilePanel(ttk.Frame):
                 self.tg(f, None, "Новые круги сверху", self.v["laplog_newest"])
             if key == "clock":
                 self.tg(f, None, "Показывать секунды", self.v["clock_seconds"])
+            if key == "alerts":
+                self.combo(f, None, "Пит-стоп: топлива меньше, кругов", "fuel_pit_laps", ["0", "0.5", "1", "1.5", "2"])
+                ttk.Label(f, text="0 — выключить. Красная плашка «ПИТ-СТОП»,\nкогда топлива меньше, чем на столько кругов\n(нужен один полный круг — для расхода).",
+                          style="Dim.TLabel", justify="left").grid(row=self.nr(f), column=0, columnspan=3, sticky="w", pady=(2, 0))
             if key == "tyres":
                 self.mcombo(f, "Вид", "tyres_view", width=28)
             if key == "engine":
@@ -2280,6 +2293,7 @@ class ProfilePanel(ttk.Frame):
         for k in OP_DEFAULT:
             st["op_" + k] = round(lim(st["op_" + k], 0.2, 1.0), 2)
         st["fuel_reserve"] = self.num("fuel_reserve", 0.0)
+        st["fuel_pit_laps"] = self.num("fuel_pit_laps", 1.0)
         st["hide_cols"] = [k for k, v in self.cols.items() if not v.get()]
         st["rel_hide"] = [k for k, v in self.relc.items() if not v.get()]
         st["wx_hide"] = [k for k, v in self.wxc.items() if not v.get()]
@@ -2634,14 +2648,14 @@ class ProfilePanel(ttk.Frame):
     def stand_cols(self):
         """Колонки таблицы в порядке оверлея: (ключ, ширина) только включённые."""
         w = {k: sw for k, _, sw in STAND_COLS}
-        out = [("pos", 18)]
+        out = [("pos", 30)]
         for k in ("delta", "logo"):
             if self.cols[k].get():
                 out.append((k, w[k]))
         out.append(("num", 20))
         if self.cols["tyre"].get():
             out.append(("tyre", w["tyre"]))
-        out.append(("name", 84))
+        out.append(("name", 84 + (46 if self.v["st_pitinfo"].get() else 0)))
         if self.game == "iracing" and self.cols["irat"].get():
             out.append(("irat", w["irat"]))
         for k in ("ahead", "lead", "best", "last", "fuel", "ve", "status"):
@@ -2780,6 +2794,12 @@ class ProfilePanel(ttk.Frame):
         else:
             self.canvas.create_rectangle(x, y, x + w, y + h, fill=t, outline=self.th["accent"] if st == "accent" else self.th["border"])
 
+    @staticmethod
+    def rr(c, x1, y1, x2, y2, r, fill):
+        pts = [x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r, x2, y2 - r, x2, y2,
+               x2 - r, y2, x1 + r, y2, x1, y2, x1, y2 - r, x1, y1 + r, x1, y1]
+        return c.create_polygon(pts, smooth=True, fill=fill, outline="")
+
     def d_standings(self, x, y, w, h):
         c, th = self.canvas, self.th
         bg = th["background"]
@@ -2792,6 +2812,12 @@ class ProfilePanel(ttk.Frame):
         if smode == "ticker":
             self.d_ticker(x, y, w, h)
             return
+        if self.v["st_classcount"].get() and self.game != "iracing":
+            cx_ = x + 16 + self.f_b.measure({"lmu": "LMU", "rf2": "rF2"}.get(self.game, "iR")) + 14
+            for cname, cnt_, ccol in (("HYPERCAR", 8, "#ff4d4d"), ("LMGT3", 14, "#2fd27e")):
+                c.create_rectangle(cx_, y + 12, cx_ + 3, y + 20, fill=ccol, outline="")
+                c.create_text(cx_ + 7, y + 16, text=f"{cname} {cnt_}", fill=th["dim"], anchor="w", font=self.f_t)
+                cx_ += 7 + self.f_t.measure(f"{cname} {cnt_}") + 10
         n = max(4, min(14, int(self.num("rows", 12))))
         idxs = [0, 1, 2, 5, 6, 7, 8, 9] if smode == "compact" else list(range(n))
         if smode == "compact":
@@ -2814,7 +2840,15 @@ class ProfilePanel(ttk.Frame):
             c.create_rectangle(x + 4, yy, x + w - 4, yy + rh - 1, fill=fill, outline=th["me"] if me else "")
             for k, (kx, cw) in xs.items():
                 if k == "pos":
-                    c.create_text(kx + cw - 4, mid, text=str(i + 1), fill=th["text"], anchor="e", font=self.f_t)
+                    pc = "#f2f4f8"
+                    if self.v.get("st_poscol") is not None and self.v["st_poscol"].get() and i in (2, 4):
+                        pc = "#2ee26d" if i == 2 else "#ff5a4f"      # пример смены позиции
+                    elif self.v.get("st_battle") is not None and self.v["st_battle"].get() and i in (5, 6):
+                        pc = "#ffd23f"                                # пример борьбы: машина и тот, кто её атакует
+                    sq = min(max(self.f_t.measure("00") + 8, rh - 8), cw)
+                    ex = kx + cw - 3
+                    self.rr(c, ex - sq, mid - (rh - 8) // 2, ex, mid + (rh - 8) // 2, 5, pc)
+                    c.create_text(ex - sq / 2, mid, text=str(i + 1), fill="#10141a", font=self.f_t)
                 elif k == "delta":
                     d = (0, 1, -1, 0, 2, 0, -1)[i % 7]
                     if d:
@@ -2834,10 +2868,22 @@ class ProfilePanel(ttk.Frame):
                     c.create_oval(kx + 3, mid - 5, kx + 13, mid + 5, outline=tyres[i % 3], width=2)
                 elif k == "name":
                     c.create_text(kx + 2, mid, text=name, fill=th["text"], anchor="w", font=self.f_t)
+                    if self.game == "iracing" and self.v["st_radio"].get() and i == 7:
+                        rx = kx + 2 + self.f_t.measure(name.upper()) + 22
+                        c.create_rectangle(rx - 2, mid - 6, rx + 2, mid + 1, fill=th["accent"], outline="")
+                        c.create_arc(rx - 5, mid - 4, rx + 5, mid + 5, start=180, extent=180, style="arc", outline=th["accent"])
+                        c.create_line(rx, mid + 5, rx, mid + 8, fill=th["accent"])
+                        c.create_line(rx - 3, mid + 8, rx + 3, mid + 8, fill=th["accent"])
+                        c.create_arc(rx + 5, mid - 6, rx + 11, mid + 2, start=-50, extent=100, style="arc", outline=th["accent"])
+                    if self.v["st_pitinfo"].get() and i in (1, 4, 8, 10):
+                        c.create_text(kx + cw - 2, mid, text=("К%d · %dс" % (18 + i, 28 + i)) if i != 4 else "К22 · 14с", anchor="e",
+                                      fill=th["accent"] if i == 4 else th["dim"], font=self.f_t)
                 elif k == "irat":
                     self.irat_chips(kx + cw - 2, mid, i, rh, forecast=True)
                 elif k in ("ahead", "lead"):
-                    c.create_text(kx + cw - 2, mid, text="+%.1f" % (i * (3.7 if k == "lead" else 1.1)), fill=th["dim"], anchor="e", font=self.f_t)
+                    fight = k == "ahead" and i == 6 and self.v["st_battle"].get()
+                    c.create_text(kx + cw - 2, mid, text="+0.1" if fight else "+%.1f" % (i * (3.7 if k == "lead" else 1.1)),
+                                  fill="#ffd23f" if fight else th["dim"], anchor="e", font=self.f_b if fight else self.f_t)
                 elif k in ("best", "last"):
                     c.create_text(kx + cw - 2, mid, text="1:41.%03d" % (230 + i * 17 + (40 if k == "last" else 0)), fill=th["dim"], anchor="e", font=self.f_t)
                 elif k == "fuel":
@@ -3107,6 +3153,22 @@ class ProfilePanel(ttk.Frame):
             px, py = pts[0], pts[1]
             c.create_rectangle(px - 2, py - 9, px + 2, py + 9, fill="#ffffff", outline="#111111")
             c.create_text(px + 22, py, text="СТАРТ", fill=th["text"], font=self.f_t)
+        def outward(idx, dist):                                # точка снаружи от трассы в вершине idx (в экранных координатах предпросмотра)
+            px, py = pts[idx * 2], pts[idx * 2 + 1]
+            dx, dy = px - ccx, py - ccy
+            n_ = math.hypot(dx, dy) or 1.0
+            return px + dx / n_ * dist, py + dy / n_ * dist
+        if self.v["map_turns"].get():                          # номера поворотов на полной карте
+            for num_, idx in enumerate((6, 14, 24, 32, 42, 52), 1):
+                tx_, ty_ = outward(idx, 15)
+                c.create_oval(tx_ - 7, ty_ - 7, tx_ + 7, ty_ + 7, fill=th["panel"], outline=th["dim"])
+                c.create_text(tx_, ty_, text=str(num_), fill=th["text"], font=self.f_t)
+        lane = [outward(i, 10) for i in (55, 56, 57, 58, 59)]       # пит-лейн у линии старта/финиша
+        c.create_line(*[v for p_ in lane for v in p_], fill="#39414f", width=3, dash=(4, 3))
+        if self.v["map_pit"].get():
+            for (qx, qy), qc in ((lane[1], "#9aa4b5"), (lane[3], "#ff4d4d")):
+                c.create_oval(qx - 5, qy - 5, qx + 5, qy + 5, fill=qc, outline="")
+            c.create_text(lane[2][0] + 14, lane[2][1] + 2, text="ПИТ", fill=th["dim"], anchor="w", font=self.f_t)
         dot = max(3, min(12, int(self.num("map_dot", 6)))) * 0.8
         if nums:
             dot = max(dot, 6.5)
@@ -3301,7 +3363,7 @@ class ProfilePanel(ttk.Frame):
 
     def d_alerts(self, x, y, w, h):
         c, th = self.canvas, self.th
-        for i, (bg, fg, tx) in enumerate((("#c62828", "#ffffff", "ШТРАФ  (1)"), ("#f2b705", "#111111", "ЖЁЛТЫЙ ФЛАГ"), ("#1e5aa8", "#ffffff", "ПОСЛЕДНИЙ КРУГ"))):
+        for i, (bg, fg, tx) in enumerate((("#c62828", "#ffffff", "ШТРАФ  (1)"), ("#c62828", "#ffffff", "ПИТ-СТОП: ТОПЛИВА МЕНЬШЕ КРУГА"), ("#1e5aa8", "#ffffff", "ПОСЛЕДНИЙ КРУГ"))):
             hh = (h - 8) / 3
             yy = y + i * (hh + 4)
             self.panel(x, yy, w, hh, fill=bg, r=6)

@@ -40,6 +40,19 @@ def run_reader(steps, car=1):
     return [c for c in out["cars"] if c["key"] == car]
 
 
+class IracingRadio(unittest.TestCase):
+    def test_radio_flag_on_talking_car(self):
+        r = O.IracingReader(source=lambda: None)
+        raw = patch_raw(T.build(5, 0.3, 40.0), RadioTransmitCarIdx=(0, 1, "i"))
+        r._src = lambda: raw
+        cars = {c["key"]: c for c in r.read()["cars"]}
+        self.assertTrue(cars[1]["radio"])
+        self.assertFalse(cars[2]["radio"])
+        raw = patch_raw(T.build(6, 0.31, 40.0), RadioTransmitCarIdx=(0, -1, "i"))
+        r._src = lambda: raw
+        self.assertFalse(any(c["radio"] for c in r.read()["cars"]))
+
+
 class IracingStatus(unittest.TestCase):
     def test_in_world_has_no_status(self):
         c = run_reader([(3, 0)] * 3)
@@ -188,6 +201,85 @@ class LapLogTests(unittest.TestCase):
         self.assertEqual(ll.best(), (98.0, None))
         ll.update(self.frame(1, 0, key="s2"))
         self.assertEqual(ll.laps, [])
+
+
+class CornerTests(unittest.TestCase):
+    @staticmethod
+    def rounded_rect(W=300, H=140, r=35, step=3.0):
+        import math
+        pts, x, y, h = [], 0.0, 0.0, 0.0
+        for kind, v in (("L", W / 2 - r), ("A", 0), ("L", H - 2 * r), ("A", 0), ("L", W - 2 * r), ("A", 0), ("L", H - 2 * r), ("A", 0), ("L", W / 2 - r)):
+            if kind == "L":
+                for _ in range(int(v / step)):
+                    pts.append((x, y)); x += math.cos(h) * step; y += math.sin(h) * step
+            else:
+                n = int(math.pi / 2 * r / step)
+                for _ in range(n):
+                    pts.append((x, y)); x += math.cos(h) * step; y += math.sin(h) * step; h += (math.pi / 2) / n
+        return pts
+
+    def test_four_corners_in_order(self):
+        cs = O.detect_corners(self.rounded_rect())
+        self.assertEqual([c[1] for c in cs], [1, 2, 3, 4])
+        self.assertEqual([c[0] for c in cs], sorted(c[0] for c in cs))
+
+    def test_gentle_bend_is_not_a_corner(self):
+        import math
+        R, n = 2000.0, 1200
+        arc = [(R * math.cos(2 * math.pi * i / n), R * math.sin(2 * math.pi * i / n)) for i in range(n)]
+        self.assertEqual(O.detect_corners(arc), [])
+
+
+class FuelPitWarnTests(unittest.TestCase):
+    def run_engine(self, laps_fuel, thr):
+        eng = O.AlertEngine()
+        me = {"player": True, "garage": False, "in_pits": False, "penalties": 0, "flag": 0, "wheels": None, "laps": 5}
+        frame = {"cars": [me], "session_start": 1, "track": "T", "kind": "RACE", "yellow": 0, "game_phase": 5, "rain": 0.0, "max_laps": 0}
+        old = O.fuel_calc.compute
+        O.fuel_calc.compute = lambda *a, **k: {"laps_fuel": laps_fuel}
+        try:
+            eng.update(frame, {"fuel_pit_laps": thr})
+        finally:
+            O.fuel_calc.compute = old
+        return eng.active()
+
+    def test_pit_warning(self):
+        it = self.run_engine(0.7, 1.0)
+        self.assertEqual(it[0][0], 4)
+        self.assertIn("ПИТ-СТОП", it[0][1])
+        self.assertNotIn("ПИТ-СТОП", self.run_engine(1.4, 1.0)[0][1])      # 1.4 круга — ещё обычное «мало топлива»
+        self.assertNotIn("ПИТ-СТОП", self.run_engine(0.7, 0)[0][1])         # порог 0 — выключено
+
+
+class PitLogTests(unittest.TestCase):
+    def test_stop_lap_and_duration(self):
+        pl = O.PitLog()
+        car = lambda pit, laps: {"session_start": 1, "kind": "RACE", "cars": [{"key": 7, "in_pits": pit, "laps": laps}]}
+        pl.update(car(False, 23), now=100)
+        self.assertIsNone(pl.info(7, now=100))
+        pl.update(car(True, 23), now=110)                       # заехал на 24-м круге
+        self.assertEqual(pl.info(7, now=115), (24, 5.0, True))
+        pl.update(car(False, 24), now=142)                      # выехал: стоял 32 с
+        self.assertEqual(pl.info(7, now=150), (24, 32.0, False))
+        pl.update(car(True, 24), now=200); pl.update(car(False, 24), now=201)   # помеха 1 с — не стоп
+        self.assertEqual(pl.info(7, now=300)[0:2], (24, 32.0))
+        pl.update({"session_start": 1, "kind": "QUALIFY", "cars": []}, now=1)
+        pl.update({"session_start": 2, "kind": "RACE", "cars": []}, now=2)
+        self.assertIsNone(pl.info(7))                            # новая сессия — сброс
+
+
+class PosEventTests(unittest.TestCase):
+    def test_gain_and_loss(self):
+        me = types.SimpleNamespace(_pe={}, POS_HOLD=O.Overlay.POS_HOLD)
+        f = {"session_start": 1}
+        O.Overlay.pos_events(me, f, "ALL", {"a": 1, "b": 2})                 # первый кадр — только запоминаем
+        ev = O.Overlay.pos_events(me, f, "ALL", {"a": 2, "b": 1})            # поменялись местами
+        self.assertEqual(ev, {"a": -1, "b": 1})
+        ev = O.Overlay.pos_events(me, f, "ALL", {"a": 2, "b": 1})            # подсветка держится
+        self.assertEqual(ev, {"a": -1, "b": 1})
+        me._pe[("ALL", "a")][2] -= 60                                         # прошло больше POS_HOLD
+        self.assertEqual(O.Overlay.pos_events(me, f, "ALL", {"a": 2, "b": 1}), {"b": 1})
+        self.assertEqual(O.Overlay.pos_events(me, {"session_start": 2}, "ALL", {"a": 2, "b": 1}), {})   # новая сессия — сброс
 
 
 @unittest.skipUnless(os.environ.get("DISPLAY") or os.name == "nt", "нет экрана — самопроверку панелей пропускаем")

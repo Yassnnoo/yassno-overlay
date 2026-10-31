@@ -64,7 +64,7 @@ def build(tick, pct2, speed):
              ("SteeringWheelAngle",4,1),("SteeringWheelAngleMax",4,1),("FuelLevel",4,1),("FuelLevelPct",4,1),
              ("WaterTemp",4,1),("OilTemp",4,1),("Lap",2,1),("IsOnTrack",1,1),("IsInGarage",1,1),("Lat",5,1),("Lon",5,1),
              ("CarIdxLapDistPct",4,8),("CarIdxLapCompleted",2,8),("CarIdxTrackSurface",2,8),("CarIdxOnPitRoad",1,8),
-             ("CarIdxPosition",2,8),("CarIdxSessionFlags",3,8),("CarLeftRight",2,1),("CarIdxBestLapTime",4,8),("CarIdxLastLapTime",4,8),
+             ("CarIdxPosition",2,8),("CarIdxSessionFlags",3,8),("CarLeftRight",2,1),("RadioTransmitCarIdx",2,1),("CarIdxBestLapTime",4,8),("CarIdxLastLapTime",4,8),
              ("LFtempL",4,1),("LFtempM",4,1),("LFtempR",4,1),("LFwearM",4,1),("LFpressure",4,1)]
     size = {0:1,1:1,2:4,3:4,4:4,5:8}
     off = 0; table = []
@@ -77,7 +77,7 @@ def build(tick, pct2, speed):
                 code = {1:"?",2:"i",3:"I",4:"f",5:"d"}[t]
                 struct.pack_into("<"+code, data, o+idx*size[t], val); return
     put("SessionTime", 123.4); put("SessionNum",1); put("SessionState",4); put("SessionTimeRemain",604800.0)
-    put("PlayerCarIdx",2); put("Speed",speed); put("RPM",6400.0); put("Gear",4); put("Throttle",0.7); put("Brake",0.1)
+    put("RadioTransmitCarIdx",-1); put("PlayerCarIdx",2); put("Speed",speed); put("RPM",6400.0); put("Gear",4); put("Throttle",0.7); put("Brake",0.1)
     put("Clutch",1.0); put("SteeringWheelAngle",0.5); put("SteeringWheelAngleMax",3.9); put("FuelLevel",30.0); put("FuelLevelPct",0.5)
     put("WaterTemp",90.0); put("OilTemp",100.0); put("Lap",3); put("IsOnTrack",True)
     put("Lat",50.437+pct2*0.01); put("Lon",5.971+pct2*0.02)
