@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "2.5.52"
+APP_VERSION = "2.5.55"
 import argparse
 import bisect
 import collections
@@ -1018,6 +1018,56 @@ def screen_bounds(w):
         except Exception:
             pass
     return 0, 0, int(w.winfo_screenwidth()), int(w.winfo_screenheight())
+
+
+_MUTEX = []
+
+
+def single_instance(wait=4.0):
+    """Один оверлей на пользователя. Старый экземпляр после перезапуска из лаунчера даём до <wait> секунд, чтобы закрыться."""
+    if os.name != "nt":
+        return True
+    try:
+        import ctypes
+        k = ctypes.WinDLL("kernel32", use_last_error=True)
+        k.CreateMutexW.restype = ctypes.c_void_p
+        k.CloseHandle.argtypes = [ctypes.c_void_p]
+        end = time.monotonic() + wait
+        while True:
+            h = k.CreateMutexW(None, False, "Local\\YassnoOverlayMain")
+            if h and ctypes.get_last_error() != 183:
+                _MUTEX.append(h)                                # держим до конца процесса
+                return True
+            if h:
+                k.CloseHandle(h)
+            if time.monotonic() > end:
+                return False
+            time.sleep(0.3)
+    except Exception:
+        return True
+
+
+def monitor_rects(w):
+    """Прямоугольники всех мониторов (x0, y0, x1, y1); если определить нельзя — один экран."""
+    rects = []
+    if os.name == "nt":
+        try:
+            import ctypes
+            from ctypes import wintypes
+            u = ctypes.windll.user32
+            proto = ctypes.WINFUNCTYPE(ctypes.c_int, wintypes.HMONITOR, wintypes.HDC, ctypes.POINTER(wintypes.RECT), wintypes.LPARAM)
+
+            def cb(hm, hdc, rc, lp):
+                r = rc.contents
+                rects.append((int(r.left), int(r.top), int(r.right), int(r.bottom)))
+                return 1
+            u.EnumDisplayMonitors(None, None, proto(cb), 0)
+        except Exception:
+            rects = []
+    if not rects:
+        x0, y0, cw, ch = screen_bounds(w)
+        rects = [(x0, y0, x0 + cw, y0 + ch)]
+    return rects
 
 
 def screen_signature(w):
@@ -5410,8 +5460,10 @@ class Overlay:
         """Магнит в режиме перемещения: края окна прилипают к краям экрана и к соседним окнам оверлея."""
         try:
             w, h = win.winfo_width(), win.winfo_height()
-            sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
-            xs, ys = [0, sw], [0, sh]
+            xs, ys = [], []
+            for mx0, my0, mx1, my1 in monitor_rects(win):          # края каждого монитора (тройной экран, второй монитор слева — отрицательные координаты)
+                xs += [mx0, mx1]
+                ys += [my0, my1]
             others = [self.root] + [x.top for x in self.subs]
             for o in others:
                 if o is win or not o.winfo_viewable():
@@ -6264,6 +6316,9 @@ def main():
     stop = threading.Event()
     threading.Thread(target=poller, args=(stop, a.hz, make_demo_source(a.game if a.game in ("rf2", "iracing") else "lmu") if a.demo else None, a.game),
                      daemon=True).start()
+    if not a.selftest and not single_instance():
+        print("Оверлей уже запущен (второй экземпляр рисовал бы окна поверх первого — отсюда «двоение» и мерцание). Закрываюсь.")
+        sys.exit(0)
     ov = Overlay(cfg, logo_dir)
     try:
         sw, sh = ov.root.winfo_screenwidth(), ov.root.winfo_screenheight()

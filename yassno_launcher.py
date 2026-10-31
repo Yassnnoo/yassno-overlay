@@ -31,7 +31,7 @@ import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import colorchooser, filedialog, messagebox, ttk
 
-APP_VERSION = "2.5.52"
+APP_VERSION = "2.5.55"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -181,7 +181,6 @@ def http_get(url, timeout=20):
 #  rFactor 2: плагин разделяемой памяти (rF2SharedMemoryMapPlugin)
 # ---------------------------------------------------------------------------
 RF2_DLL = "rFactor2SharedMemoryMapPlugin64.dll"
-RF2_PLUGIN_API = "https://api.github.com/repos/TheIronWolfModding/rF2SharedMemoryMapPlugin/releases/latest"
 
 
 def steam_libraries():
@@ -261,44 +260,74 @@ def rf2_enable_json(root):
         json.dump(data, f, indent=1)
 
 
-def rf2_download_dll(dest):
-    """Скачивает последний релиз плагина с GitHub автора (TheIronWolfModding) и достаёт из архива dll."""
+RF2_PLUGIN_PAGE = "https://github.com/TheIronWolfModding/rF2SharedMemoryMapPlugin#download"
+
+
+def rf2_find_local_plugin():
+    """Ищет уже скачанный плагин: папка «Загрузки» (rf2_sm_tools*.zip или сама dll)."""
+    bundled = os.path.join(HERE, "plugins", RF2_DLL)            # плагин, который лежит прямо в папке программы
+    if os.path.isfile(bundled):
+        return bundled
+    home = os.path.expanduser("~")
+    best = ""
+    for folder in (os.path.join(home, "Downloads"), os.path.join(home, "Desktop"), HERE):
+        for pat in ("rf2_sm_tools*.zip", "rF2SharedMemoryMapPlugin*.zip", RF2_DLL):
+            for f in glob.glob(os.path.join(folder, pat)):
+                if os.path.isfile(f) and (not best or os.path.getmtime(f) > os.path.getmtime(best)):
+                    best = f
+    return best
+
+
+def rf2_install_from(src, dest):
+    """Кладёт rFactor2SharedMemoryMapPlugin64.dll в dest — из самой dll или из zip (в том числе вложенного)."""
     import io
-    info = json.loads(http_get(RF2_PLUGIN_API, 25).decode("utf-8"))
-    assets = [a for a in info.get("assets", []) if str(a.get("name", "")).lower().endswith(".zip")]
-    if not assets:
-        raise RuntimeError("В последнем релизе плагина нет zip-архива.")
-    url = assets[0]["browser_download_url"]
-    if not url.startswith("https://github.com/TheIronWolfModding/rF2SharedMemoryMapPlugin/"):
-        raise RuntimeError("Неожиданный адрес скачивания.")
-    req = urllib.request.Request(url, headers={"User-Agent": "yassno-overlay-updater"})
-    with urllib.request.urlopen(req, timeout=60) as r:
-        blob = r.read(60_000_000)
-    with zipfile.ZipFile(io.BytesIO(blob)) as z:
-        names = [n for n in z.namelist() if os.path.basename(n) == RF2_DLL]
-        if not names:
-            raise RuntimeError("В архиве плагина нет " + RF2_DLL)
-        os.makedirs(os.path.dirname(dest), exist_ok=True)
-        with open(dest, "wb") as f:
-            f.write(z.read(names[0]))
-    return info.get("tag_name", "")
+
+    def from_zip(zf, depth=0):
+        for n in zf.namelist():
+            if os.path.basename(n) == RF2_DLL:
+                return zf.read(n)
+        if depth < 2:
+            for n in zf.namelist():
+                if n.lower().endswith(".zip") and zf.getinfo(n).file_size < 40_000_000:
+                    try:
+                        with zipfile.ZipFile(io.BytesIO(zf.read(n))) as inner:
+                            data = from_zip(inner, depth + 1)
+                        if data:
+                            return data
+                    except zipfile.BadZipFile:
+                        pass
+        return None
+
+    if src.lower().endswith(".zip"):
+        with zipfile.ZipFile(src) as z:
+            data = from_zip(z)
+        if not data:
+            raise RuntimeError("В этом архиве нет " + RF2_DLL + " (возможно, это исходный код, а не готовый плагин).")
+    else:
+        data = open(src, "rb").read()
+    if data[:2] != b"MZ":
+        raise RuntimeError("Файл не похож на dll.")
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    with open(dest, "wb") as f:
+        f.write(data)
 
 
-def rf2_setup(root, parent=None):
-    """Полная настройка: dll на месте + включён в JSON. Возвращает текст итога."""
+def rf2_setup(root, src=""):
+    """Полная настройка: dll на месте (из файла src, если её нет) + плагин включён в JSON. Возвращает текст итога."""
     if os.name == "nt" and "rfactor2.exe" in process_names():
         raise RuntimeError("rFactor 2 сейчас запущен — закройте игру: при выходе она перезаписывает настройки плагинов.")
     dll_path = os.path.join(root, "Plugins", RF2_DLL)
     lines = []
     if not os.path.isfile(dll_path):
-        tag = rf2_download_dll(dll_path)
-        lines.append(f"Плагин скачан с GitHub автора ({tag}) в Plugins.")
+        if not src:
+            raise RuntimeError("Нет файла плагина.")
+        rf2_install_from(src, dll_path)
+        lines.append("Плагин скопирован в Plugins (" + os.path.basename(src) + ").")
     else:
         lines.append("Файл плагина уже на месте.")
     rf2_enable_json(root)
     lines.append("В CustomPluginVariables.JSON плагин включён (Enabled = 1).")
     return "\n".join(lines)
-
 
 
 def safe_rel(p):
@@ -1734,7 +1763,7 @@ class ProfilePanel(ttk.Frame):
         if self.game == "rf2":
             pb = ttk.Button(bar2, text="Настроить плагин rF2", command=self.setup_rf2_plugin)
             pb.pack(side="left")
-            Tip(pb, "Находит rFactor 2 в библиотеках Steam, скачивает плагин разделяемой памяти (если его нет) и включает его. Игру перед этим закройте.")
+            Tip(pb, "Находит rFactor 2 в библиотеках Steam, ставит плагин разделяемой памяти из скачанного архива (если его нет) и включает его. Игру перед этим закройте.")
         for w_, t_ in ((self.btn_move, "Окна можно двигать мышью и растягивать за угол. Края экрана и соседние окна притягивают (Shift — без магнита)."),
                        (jb, "Что оверлей писал в процессе работы — для поиска проблем.")):
             Tip(w_, t_)
@@ -2294,13 +2323,28 @@ class ProfilePanel(ttk.Frame):
         if dll and on:
             mb_info("rFactor 2", f"Плагин уже установлен и включён.\n\n{root}")
             return
-        if not mb_yesno("rFactor 2", f"Папка игры:\n{root}\n\n" + ("Плагин на месте" if dll else "Плагина нет — скачаю с GitHub автора (TheIronWolfModding)") +
-                        (", но выключен — включу.\n" if dll else " и включу.\n") + "\nСтарый CustomPluginVariables.JSON сохранится как .bak. Продолжить?"):
+        src = ""
+        if not dll:
+            src = rf2_find_local_plugin()
+            if src:
+                what = "Плагин из папки программы" if os.path.dirname(src).endswith("plugins") else "Нашёл скачанный плагин"
+                if not mb_yesno("rFactor 2", f"Папка игры:\n{root}\n\n{what}:\n{src}\n\nУстановить и включить? Старый CustomPluginVariables.JSON сохранится как .bak."):
+                    return
+            else:
+                if mb_yesno("rFactor 2", "Готового плагина на компьютере не нашёл. Автор раздаёт его архивом rf2_sm_tools_*.zip по ссылке на странице проекта "
+                            "(на GitHub лежит только исходный код).\n\nОткрыть страницу? Скачайте архив и нажмите кнопку ещё раз — я найду его в «Загрузках»."):
+                    webbrowser.open(RF2_PLUGIN_PAGE)
+                    return
+                src = filedialog.askopenfilename(title="Файл плагина (rf2_sm_tools zip или rFactor2SharedMemoryMapPlugin64.dll)",
+                                                 filetypes=[("Плагин", "*.zip *.dll"), ("Все файлы", "*.*")])
+                if not src:
+                    return
+        elif not mb_yesno("rFactor 2", f"Папка игры:\n{root}\n\nПлагин на месте, но выключен — включу. Старый CustomPluginVariables.JSON сохранится как .bak. Продолжить?"):
             return
         try:
-            res = rf2_setup(root)
+            res = rf2_setup(root, src)
         except Exception as e:
-            mb_error("rFactor 2", f"Не получилось: {e}\n\nМожно поставить вручную — инструкция в README.txt.")
+            mb_error("rFactor 2", f"Не получилось: {e}")
             return
         mb_info("rFactor 2", res + "\n\nЗапустите rFactor 2 — оверлей увидит данные.")
 

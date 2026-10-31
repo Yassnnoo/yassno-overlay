@@ -1,6 +1,6 @@
 {
- "version": "2.5.52",
- "notes": "Авто-настройка плагина rFactor 2",
+ "version": "2.5.55",
+ "notes": "Защита от двойного запуска оверлея",
  "files": [
   "README.txt",
   "diagnose.cmd",

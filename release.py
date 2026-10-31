@@ -90,6 +90,9 @@ def main():
         os.makedirs(dst, exist_ok=True)
         for f in CODE:
             shutil.copyfile(os.path.join(SRC, f), os.path.join(dst, f))
+    if os.path.isdir(os.path.join(SRC, "plugins")):
+        for dst in (PKG, DEPLOY):
+            shutil.copytree(os.path.join(SRC, "plugins"), os.path.join(dst, "plugins"), dirs_exist_ok=True)
     if os.path.isdir(os.path.join(SRC, "logos")):
         shutil.copytree(os.path.join(SRC, "logos"), os.path.join(PKG, "logos"), dirs_exist_ok=True)
     shutil.copytree(os.path.join(SRC, "tests"), os.path.join(PKG, "tests"), dirs_exist_ok=True, ignore=shutil.ignore_patterns("__pycache__"))
