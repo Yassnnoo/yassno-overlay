@@ -31,7 +31,7 @@ import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import colorchooser, filedialog, messagebox, ttk
 
-APP_VERSION = "2.5.51"
+APP_VERSION = "2.5.52"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -175,6 +175,130 @@ def http_get(url, timeout=20):
     with urllib.request.urlopen(req, timeout=timeout) as r:
         data = r.read(8_000_000)
     return data
+
+
+# ---------------------------------------------------------------------------
+#  rFactor 2: плагин разделяемой памяти (rF2SharedMemoryMapPlugin)
+# ---------------------------------------------------------------------------
+RF2_DLL = "rFactor2SharedMemoryMapPlugin64.dll"
+RF2_PLUGIN_API = "https://api.github.com/repos/TheIronWolfModding/rF2SharedMemoryMapPlugin/releases/latest"
+
+
+def steam_libraries():
+    """Папки библиотек Steam (из реестра и libraryfolders.vdf)."""
+    roots = []
+    try:
+        import winreg
+        for hive, sub, val in ((winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam", "SteamPath"),
+                               (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Valve\Steam", "InstallPath")):
+            try:
+                with winreg.OpenKey(hive, sub) as k:
+                    roots.append(str(winreg.QueryValueEx(k, val)[0]).replace("/", "\\"))
+            except OSError:
+                pass
+    except ImportError:
+        pass
+    roots += [r"C:\Program Files (x86)\Steam", r"C:\Program Files\Steam"]
+    libs = []
+    for r in roots:
+        if r and r not in libs:
+            libs.append(r)
+        vdf = os.path.join(r, "steamapps", "libraryfolders.vdf")
+        try:
+            txt = open(vdf, encoding="utf-8", errors="ignore").read()
+        except OSError:
+            continue
+        for m in re.finditer(r'"path"\s+"([^"]+)"', txt):
+            q = m.group(1).replace("\\\\", "\\")
+            if q not in libs:
+                libs.append(q)
+    return libs
+
+
+def find_rf2_dir():
+    """Папка rFactor 2: рядом с запущенной игрой не ищем — берём из библиотек Steam."""
+    for lib in steam_libraries():
+        d = os.path.join(lib, "steamapps", "common", "rFactor 2")
+        if os.path.isdir(os.path.join(d, "Bin64")) or os.path.isdir(os.path.join(d, "Plugins")):
+            return d
+    return ""
+
+
+def rf2_json_path(root):
+    return os.path.join(root, "UserData", "player", "CustomPluginVariables.JSON")
+
+
+def rf2_plugin_state(root):
+    """(dll_есть, включён) для папки rFactor 2."""
+    dll = os.path.isfile(os.path.join(root, "Plugins", RF2_DLL))
+    on = False
+    try:
+        data = json.load(open(rf2_json_path(root), encoding="utf-8-sig"))
+        ent = data.get(RF2_DLL) or {}
+        on = any(str(k).strip() == "Enabled" and int(v) == 1 for k, v in ent.items())
+    except Exception:
+        pass
+    return dll, on
+
+
+def rf2_enable_json(root):
+    """Ставит Enabled=1 для плагина (ключ у плагина с пробелом: " Enabled"), старый файл сохраняет как .bak."""
+    path = rf2_json_path(root)
+    data = {}
+    if os.path.isfile(path):
+        try:
+            data = json.load(open(path, encoding="utf-8-sig"))
+        except Exception:
+            raise RuntimeError("CustomPluginVariables.JSON не читается — исправьте файл вручную или удалите его.")
+        shutil.copyfile(path, path + ".bak")
+    ent = data.setdefault(RF2_DLL, {})
+    for k in list(ent):
+        if str(k).strip() == "Enabled":
+            del ent[k]
+    ent[" Enabled"] = 1
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=1)
+
+
+def rf2_download_dll(dest):
+    """Скачивает последний релиз плагина с GitHub автора (TheIronWolfModding) и достаёт из архива dll."""
+    import io
+    info = json.loads(http_get(RF2_PLUGIN_API, 25).decode("utf-8"))
+    assets = [a for a in info.get("assets", []) if str(a.get("name", "")).lower().endswith(".zip")]
+    if not assets:
+        raise RuntimeError("В последнем релизе плагина нет zip-архива.")
+    url = assets[0]["browser_download_url"]
+    if not url.startswith("https://github.com/TheIronWolfModding/rF2SharedMemoryMapPlugin/"):
+        raise RuntimeError("Неожиданный адрес скачивания.")
+    req = urllib.request.Request(url, headers={"User-Agent": "yassno-overlay-updater"})
+    with urllib.request.urlopen(req, timeout=60) as r:
+        blob = r.read(60_000_000)
+    with zipfile.ZipFile(io.BytesIO(blob)) as z:
+        names = [n for n in z.namelist() if os.path.basename(n) == RF2_DLL]
+        if not names:
+            raise RuntimeError("В архиве плагина нет " + RF2_DLL)
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        with open(dest, "wb") as f:
+            f.write(z.read(names[0]))
+    return info.get("tag_name", "")
+
+
+def rf2_setup(root, parent=None):
+    """Полная настройка: dll на месте + включён в JSON. Возвращает текст итога."""
+    if os.name == "nt" and "rfactor2.exe" in process_names():
+        raise RuntimeError("rFactor 2 сейчас запущен — закройте игру: при выходе она перезаписывает настройки плагинов.")
+    dll_path = os.path.join(root, "Plugins", RF2_DLL)
+    lines = []
+    if not os.path.isfile(dll_path):
+        tag = rf2_download_dll(dll_path)
+        lines.append(f"Плагин скачан с GitHub автора ({tag}) в Plugins.")
+    else:
+        lines.append("Файл плагина уже на месте.")
+    rf2_enable_json(root)
+    lines.append("В CustomPluginVariables.JSON плагин включён (Enabled = 1).")
+    return "\n".join(lines)
+
 
 
 def safe_rel(p):
@@ -1606,7 +1730,11 @@ class ProfilePanel(ttk.Frame):
         sb_.pack(side="left", padx=(0, 6))
         Tip(sb_, "Запускает демо со всеми панелями и пишет, всё ли отрисовалось без ошибок.")
         jb = ttk.Button(bar2, text="Журнал", command=self.show_log)
-        jb.pack(side="left")
+        jb.pack(side="left", padx=(0, 6))
+        if self.game == "rf2":
+            pb = ttk.Button(bar2, text="Настроить плагин rF2", command=self.setup_rf2_plugin)
+            pb.pack(side="left")
+            Tip(pb, "Находит rFactor 2 в библиотеках Steam, скачивает плагин разделяемой памяти (если его нет) и включает его. Игру перед этим закройте.")
         for w_, t_ in ((self.btn_move, "Окна можно двигать мышью и растягивать за угол. Края экрана и соседние окна притягивают (Shift — без магнита)."),
                        (jb, "Что оверлей писал в процессе работы — для поиска проблем.")):
             Tip(w_, t_)
@@ -2152,6 +2280,29 @@ class ProfilePanel(ttk.Frame):
         else:
             self.say("Сохранено. Изменения применятся при следующем запуске оверлея.")
         self.app.refresh_status()
+
+    def setup_rf2_plugin(self):
+        root = find_rf2_dir()
+        if not root:
+            root = filedialog.askdirectory(title="Папка rFactor 2 (где лежат Bin64 и Plugins)") or ""
+            if not root:
+                return
+        if not (os.path.isdir(os.path.join(root, "Bin64")) or os.path.isdir(os.path.join(root, "Plugins"))):
+            mb_error("rFactor 2", "В выбранной папке нет Bin64 / Plugins — это не папка rFactor 2.")
+            return
+        dll, on = rf2_plugin_state(root)
+        if dll and on:
+            mb_info("rFactor 2", f"Плагин уже установлен и включён.\n\n{root}")
+            return
+        if not mb_yesno("rFactor 2", f"Папка игры:\n{root}\n\n" + ("Плагин на месте" if dll else "Плагина нет — скачаю с GitHub автора (TheIronWolfModding)") +
+                        (", но выключен — включу.\n" if dll else " и включу.\n") + "\nСтарый CustomPluginVariables.JSON сохранится как .bak. Продолжить?"):
+            return
+        try:
+            res = rf2_setup(root)
+        except Exception as e:
+            mb_error("rFactor 2", f"Не получилось: {e}\n\nМожно поставить вручную — инструкция в README.txt.")
+            return
+        mb_info("rFactor 2", res + "\n\nЗапустите rFactor 2 — оверлей увидит данные.")
 
     def launch(self, mode):
         if not self.save(quiet=True):
