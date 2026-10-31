@@ -31,7 +31,7 @@ import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import colorchooser, filedialog, messagebox, ttk
 
-APP_VERSION = "2.5.44"
+APP_VERSION = "2.5.51"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -1301,6 +1301,53 @@ class Toggle(tk.Frame):
             self.lbl.config(fg=UI_FG if on else UI_DIM)
         except tk.TclError:
             pass
+
+
+AC_TITLES = [("AC", "Assetto Corsa", "Память игры: твоя машина, положения соперников на трассе (радар). Имён, классов и времён соперников нет."),
+             ("ACC", "Assetto Corsa Competizione", "Память игры и Broadcasting API: твоя машина, таблица, релатив, радар, отрывы и времена всех машин."),
+             ("EVO", "Assetto Corsa EVO", "Память игры (с версии 0.6): твоя машина. Соперники пока не подтверждены — игра в раннем доступе.")]
+
+
+_PV_LOGOS = {}
+
+
+def pv_logo(slug, size):
+    """Цветной логотип марки для предпросмотра (те же файлы, что рисует оверлей)."""
+    key = (slug, size)
+    if key not in _PV_LOGOS:
+        pic = None
+        try:
+            from PIL import Image, ImageTk
+            fp = os.path.join(HERE, "logos", "c", slug + ".png")
+            if os.path.isfile(fp):
+                pic = ImageTk.PhotoImage(Image.open(fp).convert("RGBA").resize((size, size), Image.LANCZOS))
+        except Exception:
+            pic = None
+        _PV_LOGOS[key] = pic
+    return _PV_LOGOS[key]
+
+
+class AcSoonPage(ttk.Frame):
+    """Единая страница семейства Assetto Corsa (AC, ACC, EVO): пока описание, поддержка появится после проверки на реальных играх."""
+
+    def __init__(self, parent, app):
+        super().__init__(parent, padding=18)
+        self.app = app
+        ttk.Label(self, text="Assetto Corsa: AC, ACC и EVO — одна плашка", style="Head.TLabel").pack(anchor="w")
+        ttk.Label(self, text="Оверлей будет сам определять, какая из трёх игр запущена, и работать с одним общим профилем настроек. "
+                             "Поддержка в разработке: формат данных игр нужно проверить на реальных запусках.",
+                  style="Dim.TLabel", wraplength=760, justify="left").pack(anchor="w", pady=(6, 14))
+        for code, name, text in AC_TITLES:
+            box = tk.Frame(self, bg=UI_PANEL, highlightthickness=1, highlightbackground=UI_BORDER)
+            box.pack(fill="x", pady=4)
+            tk.Label(box, text=code, bg=UI_PANEL, fg="#e22226", font=("Segoe UI Semibold", 14), width=5).pack(side="left", padx=(10, 4), pady=10)
+            col = tk.Frame(box, bg=UI_PANEL)
+            col.pack(side="left", fill="x", expand=True, pady=8)
+            tk.Label(col, text=name, bg=UI_PANEL, fg=UI_FG, font=("Segoe UI Semibold", 11), anchor="w").pack(fill="x")
+            tk.Label(col, text=text, bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 10), anchor="w", justify="left", wraplength=640).pack(fill="x")
+        ttk.Label(self, text="Во всех трёх сработают панели по данным твоей машины: ввод и шифт-лайт, спидометр, шины, двигатель, топливо, "
+                             "журнал кругов, дельта и предупреждения. Таблица и релатив — в ACC, радар — в ACC и AC.",
+                  style="Dim.TLabel", wraplength=760, justify="left").pack(anchor="w", pady=(14, 0))
 
 
 class GameTile(tk.Frame):
@@ -2578,7 +2625,12 @@ class ProfilePanel(ttk.Frame):
                     if d:
                         c.create_text(kx + 2, mid, text=("▲" if d > 0 else "▼") + str(abs(d)), fill="#2ee26d" if d > 0 else "#ff5a4f", anchor="w", font=self.f_t)
                 elif k == "logo":
-                    c.create_oval(kx + 2, mid - 5, kx + 12, mid + 5, fill=self.CLS[i % len(self.CLS)], outline="")
+                    ls = max(10, int(rh * 0.62))
+                    pic = pv_logo(("ferrari", "porsche", "toyota", "peugeot", "cadillac", "bmw", "alpine")[i % 7], ls)
+                    if pic is not None:
+                        c.create_image(kx + 2, mid, image=pic, anchor="w")
+                    else:
+                        c.create_oval(kx + 2, mid - 5, kx + 12, mid + 5, fill=self.CLS[i % len(self.CLS)], outline="")
                 elif k == "num":
                     c.create_rectangle(kx, yy + 2, kx + cw - 4, yy + rh - 3, fill=mix(bg, "#ffffff", 0.10), outline="")
                     c.create_rectangle(kx, yy + 3, kx + 2, yy + rh - 4, fill=self.CLS[i % len(self.CLS)], outline="")
@@ -3708,7 +3760,7 @@ def export_lap_csv(path, lap):
 
 
 STRIPS = [("spd", "Скорость, км/ч", [("spd", "", None, 1.0)], None),
-          ("pedals", "Газ и тормоз, %", [("thr", "газ", "#2ee26d", 100.0), ("brk", "тормоз", "#ff3b30", 100.0)], (0.0, 100.0)),
+          ("pedals", "Газ, тормоз и сцепление, %", [("thr", "газ", "#2ee26d", 100.0), ("brk", "тормоз", "#ff3b30", 100.0), ("clu", "сцепление", "#4a90ff", 100.0)], (0.0, 100.0)),
           ("steer", "Руль, %", [("str", "", None, 100.0)], (-100.0, 100.0)),
           ("gear", "Передача", [("gear", "", None, 1.0)], None),
           ("rpm", "Обороты, rpm", [("rpm", "", None, 1.0)], None),
@@ -4306,7 +4358,7 @@ class TelemetryView(ttk.Frame):
                         if lap:
                             v = lap.at(col, d)
                             if v is not None:
-                                s = f"{v * sc:.0f}" if col in ("spd", "rpm", "gear", "thr", "brk", "str") or abs(v * sc) >= 100 else f"{v * sc:.1f}"
+                                s = f"{v * sc:.0f}" if col in ("spd", "rpm", "gear", "thr", "brk", "clu", "str") or abs(v * sc) >= 100 else f"{v * sc:.1f}"
                                 parts.append((label + " " if label else "") + s + (tag.lower() if False else ""))
             txt = tr(title.split(",")[0]) + ":  " + "  |  ".join(parts)
             c.create_text(L + 8, y0 + 8, text=txt, fill=UI_FG, anchor="w", font=("Segoe UI Semibold", 9), tags="cur")
@@ -5404,12 +5456,28 @@ class App:
         self.panels = {}
         tiles = ttk.Frame(self.root, padding=(14, 10, 14, 0))
         tiles.pack(fill="x")
-        GameTile(tiles, tr("ИГРА"), lambda: None, blue=True, static=True).pack(side="left", padx=(0, 8), anchor="s")
+        lead = GameTile(tiles, tr("ИГРА"), lambda: None, blue=True, static=True)
+        lead.pack(side="left", padx=(0, 8), anchor="s")
         self.tiles = {}
+
+        def _fit_tiles(e=None, st={"on": True}):             # на узком окне синяя плитка «ИГРА» убирается — остальным хватает места
+            need = 1500
+            if e is not None and e.widget is tiles:
+                want = e.width >= need
+                if want != st["on"]:
+                    st["on"] = want
+                    if want:
+                        lead.pack(side="left", padx=(0, 8), anchor="s", before=tiles.pack_slaves()[0])
+                    else:
+                        lead.pack_forget()
+        tiles.bind("<Configure>", _fit_tiles)
         for game, name in GAMES.items():
             t = GameTile(tiles, name, lambda g=game: self.select_game(g), game=game)
             t.pack(side="left", padx=(0, 8), anchor="s")
             self.tiles[game] = t
+        t = GameTile(tiles, "Assetto Corsa", self.show_ac, game="ac")
+        t.pack(side="left", padx=(0, 8), anchor="s")
+        self.tiles["ac"] = t
         ttk.Button(tiles, text="Остановить оверлей", command=self.stop_overlay).pack(side="right", anchor="s", pady=(0, 2))
         ttk.Button(tiles, text="▶ Запустить игру", style="Accent.TButton", command=lambda: self.launch_game()).pack(side="right", anchor="s", padx=(0, 10), pady=(0, 2))
 
@@ -5441,7 +5509,10 @@ class App:
             self.panels[game] = p
         self.settings_page = SettingsPage(self.holder, self)
         self.stats_page = StatsPage(self.holder, self)
-        if self.view == "settings":
+        self.ac_page = AcSoonPage(self.holder, self)
+        if self.view == "ac":
+            self.show_ac()
+        elif self.view == "settings":
             self.show_settings()
         elif self.view == "stats":
             self.show_stats()
@@ -5463,6 +5534,7 @@ class App:
                 pass
         self.settings_page.pack_forget()
         self.stats_page.pack_forget()
+        self.ac_page.pack_forget()
         for g, p in self.panels.items():
             if g == game:
                 p.pack(fill="both", expand=True)
@@ -5470,11 +5542,21 @@ class App:
                 p.pack_forget()
         self.update_tiles()
 
+    def show_ac(self):
+        self.view = "ac"
+        for p in self.panels.values():
+            p.pack_forget()
+        self.settings_page.pack_forget()
+        self.stats_page.pack_forget()
+        self.ac_page.pack(fill="both", expand=True)
+        self.update_tiles()
+
     def show_settings(self):
         self.view = "settings"
         for p in self.panels.values():
             p.pack_forget()
         self.stats_page.pack_forget()
+        self.ac_page.pack_forget()
         self.settings_page.pack(fill="both", expand=True)
         self.update_tiles()
 
@@ -5483,6 +5565,7 @@ class App:
         for p in self.panels.values():
             p.pack_forget()
         self.settings_page.pack_forget()
+        self.ac_page.pack_forget()
         self.stats_page.pack(fill="both", expand=True)
         self.stats_page.reload()
         self.update_tiles()
@@ -5491,7 +5574,7 @@ class App:
         for g, t in self.tiles.items():
             t.set_state(g == self.view, g == self.detected)
         for g, p in self.panels.items():                    # левый список — от выбранной игры, подсветка — по текущей странице
-            if g == self.selected:
+            if g == self.selected and self.view != "ac":
                 p.nav.pack(fill="both", expand=True)
                 p.mark_view(self.view)
             else:
@@ -5551,6 +5634,9 @@ class App:
             p.say(text)
 
     def launch_game(self, game=None):
+        if game is None and self.view == "ac":
+            mb_info("Assetto Corsa", "Поддержка Assetto Corsa пока в разработке — запускать оверлей рано.")
+            return
         game = game or self.selected
         if self.detected == game:
             self.say("Игра уже запущена.")
@@ -5660,7 +5746,7 @@ class App:
                 self.last_auto_game = None
                 if self.close_var.get() and r.running() and r.auto:
                     r.stop()
-        if game and changed and self.view not in ("settings", "stats"):
+        if game and changed and self.view not in ("settings", "stats", "ac"):
             self.select_game(game)
         self.refresh_status()
 

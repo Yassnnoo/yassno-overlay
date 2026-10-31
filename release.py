@@ -63,7 +63,7 @@ def main():
     vp = os.path.join(SRC, "version.json")
     v = json.load(open(vp, encoding="utf-8"))
     v["version"], v["notes"] = ver, notes
-    for need in ("yassno_readers.py", "yassno_svgmap.py"):
+    for need in ("yassno_readers.py", "yassno_svgmap.py", "logos/tile_ac_on.png", "logos/tile_ac_off.png", "logos/peugeot.png", "logos/genesis.png", "logos/ginetta.png", "logos/ligier.png") + tuple("logos/c/%s.png" % n for n in ("ferrari","porsche","bmw","mclaren","astonmartin","chevrolet","lamborghini","ford","lexus","mercedes","toyota","peugeot","cadillac","alpine","genesis","ginetta","ligier")):
         if need not in v["files"]:
             v["files"].append(need)
     v["files"] = sorted(set(v["files"]))
@@ -90,6 +90,8 @@ def main():
         os.makedirs(dst, exist_ok=True)
         for f in CODE:
             shutil.copyfile(os.path.join(SRC, f), os.path.join(dst, f))
+    if os.path.isdir(os.path.join(SRC, "logos")):
+        shutil.copytree(os.path.join(SRC, "logos"), os.path.join(PKG, "logos"), dirs_exist_ok=True)
     shutil.copytree(os.path.join(SRC, "tests"), os.path.join(PKG, "tests"), dirs_exist_ok=True, ignore=shutil.ignore_patterns("__pycache__"))
     shutil.copyfile(os.path.join(SRC, "release.py"), os.path.join(PKG, "release.py"))
     zp = os.path.join(OUT, f"yassno-overlay-{ver}.zip")

@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "2.5.44"
+APP_VERSION = "2.5.51"
 import argparse
 import bisect
 import collections
@@ -924,9 +924,10 @@ BRANDS = [(("ferrari",), "F", "#cd101a", "ferrari"), (("porsche",), "P", "#c41e3
           (("aston",), "AM", "#00a080", "astonmartin"), (("corvette", "chevrolet"), "C", "#ebc300", "chevrolet"),
           (("lamborghini",), "L", "#cdaa46", "lamborghini"), (("ford", "mustang"), "F", "#2a62c8", "ford"),
           (("lexus",), "L", "#aab0ba", "lexus"), (("mercedes",), "M", "#96a0aa", "mercedes"),
-          (("toyota",), "T", "#d71428", "toyota"), (("peugeot",), "P", "#0055a5", ""),
+          (("toyota",), "T", "#d71428", "toyota"), (("peugeot",), "P", "#0055a5", "peugeot"),
           (("cadillac",), "C", "#af9155", "cadillac"), (("alpine",), "A", "#005ac8", "alpine"),
-          (("oreca", "ligier"), "O", "#6e7887", "")]
+          (("ligier",), "L", "#2d6cdf", "ligier"), (("genesis",), "G", "#b08d57", "genesis"),
+          (("ginetta",), "G", "#f59c0d", "ginetta"), (("oreca",), "O", "#6e7887", "")]
 
 # ключ, заголовок, ширина (в «нулях» шрифта), выравнивание
 COLS = [("pos", "ПОЗ", 2.6, "e"), ("delta", "", 2.8, "w"), ("logo", "", 2.8, "w"),
@@ -5645,6 +5646,17 @@ class Overlay:
         if key in self._logos:
             return self._logos[key]
         photo = None
+        cpath = os.path.join(self.logo_dir, "c", slug + ".png") if (self.logo_dir and slug) else None
+        if cpath and os.path.exists(cpath):                    # цветной логотип, как в игре
+            try:
+                from PIL import Image, ImageTk
+                im = Image.open(cpath).convert("RGBA")
+                photo = ImageTk.PhotoImage(im.resize((size, size), Image.LANCZOS))
+            except Exception:
+                photo = None
+            if photo is not None:
+                self._logos[key] = photo
+                return photo
         path = os.path.join(self.logo_dir, slug + ".png") if (self.logo_dir and slug) else None
         if path and os.path.exists(path):
             try:
