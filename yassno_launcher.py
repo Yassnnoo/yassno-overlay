@@ -31,7 +31,7 @@ import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import colorchooser, filedialog, messagebox, ttk
 
-APP_VERSION = "2.5.62"
+APP_VERSION = "2.5.64"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -424,7 +424,7 @@ DEFAULTS.update({"map_ir_svg": True, "weather_view": "cards", "map_style": "clas
 DEFAULTS.update({"tyres": False, "pitplan": False, "gaps": False, "engine": False, "engine_view": "table", "delta_sec_bar": True,
                  "sesstime": False, "clock": False, "speedo": False, "laplog": False, "laplog_count": 5, "laplog_best": True, "laplog_delta": True, "laplog_temp": True,
                  "laplog_ref": "prev", "laplog_newest": True, "speedo_view": "arc", "speedo_max": 340, "clock_seconds": True, "st_session": True, "st_timer": True, "st_clock": True, "st_poscol": True, "st_battle": True, "st_classcount": True, "st_pitinfo": True, "st_radio": True,
-                 "win_style": "classic", "theme_mode": "dark", "op_bg_only": True})        # эти панели по умолчанию выключены
+                 "win_style": "classic", "theme_mode": "dark", "op_bg_only": True, "op_all": 0.94})        # эти панели по умолчанию выключены
 POS_KEYS = ["x", "y", "rel_x", "rel_y", "ped_x", "ped_y", "map_x", "map_y", "radar_x", "radar_y",
             "wx_x", "wx_y", "lights_x", "lights_y", "lim_x", "lim_y", "fuel_x", "fuel_y",
             "delta_x", "delta_y", "alerts_x", "alerts_y", "tyres_x", "tyres_y", "pitplan_x", "pitplan_y", "gaps_x", "gaps_y", "engine_x", "engine_y", "sesstime_x", "sesstime_y", "clock_x", "clock_y", "speedo_x", "speedo_y", "laplog_x", "laplog_y"]
@@ -1885,9 +1885,10 @@ class ProfilePanel(ttk.Frame):
         if text in TIPS:
             Tip(t_.lbl, TIPS[text])
 
-    def slider(self, parent, r, label, var, lo, hi, fmt):
+    def slider(self, parent, r, label, var, lo, hi, fmt, cmd=None):
         r = self.lab(parent, r, label)
-        ttk.Scale(parent, from_=lo, to=hi, variable=var, length=150).grid(row=r, column=1, sticky="w", pady=2)
+        sc = ttk.Scale(parent, from_=lo, to=hi, variable=var, length=150, **({"command": cmd} if cmd else {}))
+        sc.grid(row=r, column=1, sticky="w", pady=2)
         try:
             is_size = fmt(1.5).endswith("×")
         except Exception:
@@ -1901,6 +1902,19 @@ class ProfilePanel(ttk.Frame):
         lb = ttk.Label(parent, text="", style="Dim.TLabel", width=7)
         lb.grid(row=r, column=2, sticky="w", padx=(8, 0))
         self.value_lbls.append((var, lb, fmt))
+
+    def sync_op_all(self, _=None):
+        """Общий ползунок непрозрачности: выставляет её у всех панелей; потом любую можно поправить отдельно."""
+        try:
+            val = round(max(0.2, min(1.0, float(self.v["op_all"].get()))), 2)
+        except (tk.TclError, ValueError):
+            return
+        for k in OP_DEFAULT:
+            if k in ("radar", "lights", "limiter"):          # эти панели общий ползунок не трогает
+                continue
+            var = self.v.get("op_" + k)
+            if var is not None and abs(float(var.get()) - val) > 1e-6:
+                var.set(val)
 
     @staticmethod
     def _clamp_var(var, lo, hi):
@@ -1980,6 +1994,7 @@ class ProfilePanel(ttk.Frame):
             self.tg(f, None, "Записывать статистику сессий", self.v["stats"])
             self.mcombo(f, "Тема оверлеев", "theme_mode")
             self.mcombo(f, "Стиль окон", "win_style", width=34)
+            self.slider(f, None, "Непрозрачность всех панелей", self.v["op_all"], 0.2, 1.0, pct, cmd=self.sync_op_all)
             self.tg(f, None, "Прозрачность только у фона окон (текст чёткий)", self.v["op_bg_only"])
             self.mcombo(f, "Раскладки окон", "layout_mode", width=34)
             self.lay_info = ttk.Label(f, text="", style="Dim.TLabel", justify="left", wraplength=440)
