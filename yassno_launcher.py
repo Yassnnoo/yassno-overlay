@@ -31,7 +31,7 @@ import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import colorchooser, filedialog, messagebox, ttk
 
-APP_VERSION = "2.5.64"
+APP_VERSION = "2.5.65"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -423,7 +423,7 @@ DEFAULTS.update({"map_ir_svg": True, "weather_view": "cards", "map_style": "clas
                  **{"hg_" + k: True for k, _ in ELEMENTS if k not in ("standings", "shiftlight")}})
 DEFAULTS.update({"tyres": False, "pitplan": False, "gaps": False, "engine": False, "engine_view": "table", "delta_sec_bar": True,
                  "sesstime": False, "clock": False, "speedo": False, "laplog": False, "laplog_count": 5, "laplog_best": True, "laplog_delta": True, "laplog_temp": True,
-                 "laplog_ref": "prev", "laplog_newest": True, "speedo_view": "arc", "speedo_max": 340, "clock_seconds": True, "st_session": True, "st_timer": True, "st_clock": True, "st_poscol": True, "st_battle": True, "st_classcount": True, "st_pitinfo": True, "st_radio": True,
+                 "laplog_ref": "prev", "laplog_newest": True, "speedo_view": "arc", "speedo_max": 340, "clock_seconds": True, "st_session": True, "st_timer": True, "st_clock": True, "st_poscol": True, "st_battle": True, "st_pitinfo": True, "st_radio": True,
                  "win_style": "classic", "theme_mode": "dark", "op_bg_only": True, "op_all": 0.94})        # эти панели по умолчанию выключены
 POS_KEYS = ["x", "y", "rel_x", "rel_y", "ped_x", "ped_y", "map_x", "map_y", "radar_x", "radar_y",
             "wx_x", "wx_y", "lights_x", "lights_y", "lim_x", "lim_y", "fuel_x", "fuel_y",
@@ -2028,7 +2028,6 @@ class ProfilePanel(ttk.Frame):
                                                          ("st_clock", "Локальное время")], self.v, ncols=1)
             self.toggles(self.card("Выделение в таблице", R), [("st_poscol", "Смена позиции: зелёный — выиграл, красный — потерял"),
                                                                ("st_battle", "Борьба (до 0,2 с): жёлтым"),
-                                                               ("st_classcount", "Число пилотов по классам в шапке"),
                                                                ("st_pitinfo", "Пит-стоп у фамилии: круг и время (гонка)")]
                         + ([("st_radio", "Рация: значок у говорящего")] if self.game == "iracing" else []), self.v, ncols=1)
         elif key == "relative":
@@ -2827,12 +2826,6 @@ class ProfilePanel(ttk.Frame):
         if smode == "ticker":
             self.d_ticker(x, y, w, h)
             return
-        if self.v["st_classcount"].get() and self.game != "iracing":
-            cx_ = x + 16 + self.f_b.measure({"lmu": "LMU", "rf2": "rF2"}.get(self.game, "iR")) + 14
-            for cname, cnt_, ccol in (("HYPERCAR", 8, "#ff4d4d"), ("LMGT3", 14, "#2fd27e")):
-                c.create_rectangle(cx_, y + 12, cx_ + 3, y + 20, fill=ccol, outline="")
-                c.create_text(cx_ + 7, y + 16, text=f"{cname} {cnt_}", fill=th["dim"], anchor="w", font=self.f_t)
-                cx_ += 7 + self.f_t.measure(f"{cname} {cnt_}") + 10
         n = max(4, min(14, int(self.num("rows", 12))))
         idxs = [0, 1, 2, 5, 6, 7, 8, 9] if smode == "compact" else list(range(n))
         if smode == "compact":
@@ -3175,8 +3168,8 @@ class ProfilePanel(ttk.Frame):
             return px + dx / n_ * dist, py + dy / n_ * dist
         if self.v["map_turns"].get():                          # номера поворотов на полной карте
             for num_, idx in enumerate((6, 14, 24, 32, 42, 52), 1):
-                tx_, ty_ = outward(idx, 15)
-                c.create_oval(tx_ - 7, ty_ - 7, tx_ + 7, ty_ + 7, fill=th["panel"], outline=th["dim"])
+                tx_, ty_ = outward(idx, 13)
+                c.create_oval(tx_ - 5, ty_ - 5, tx_ + 5, ty_ + 5, fill=th["panel"], outline=th["dim"])
                 c.create_text(tx_, ty_, text=str(num_), fill=th["text"], font=self.f_t)
         lane = [outward(i, 10) for i in (55, 56, 57, 58, 59)]       # пит-лейн у линии старта/финиша
         c.create_line(*[v for p_ in lane for v in p_], fill="#39414f", width=3, dash=(4, 3))

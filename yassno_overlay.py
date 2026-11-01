@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "2.5.64"
+APP_VERSION = "2.5.65"
 import argparse
 import bisect
 import collections
@@ -2130,7 +2130,7 @@ class MapWindow(RelativeWindow):
         if getattr(self, "_corner_key", None) != key:
             self._corner_key, self._corners = key, detect_corners(loop)
         n_ = len(sp)
-        rr = max(7, int(self.rh * 0.42))
+        rr0 = max(5, int(self.rh * 0.30))
         for idx, num, _sgn in self._corners:
             i = idx % n_
             a, b = sp[(i - 4) % n_], sp[(i + 4) % n_]
@@ -2140,6 +2140,7 @@ class MapWindow(RelativeWindow):
             cross = (mx - a[0]) * (b[1] - my) - (my - a[1]) * (b[0] - mx)    # знак поворота уже на экране (учтены поворот и зеркало карты)
             side_ = -1.0 if cross > 0 else 1.0
             nx, ny = -ty / tn * side_, tx / tn * side_
+            rr = max(rr0, self.f_turn.measure(str(num)) // 2 + 3)       # круг не уже цифры (двузначные номера)
             px, py = mx + nx * (rr + 11), my + ny * (rr + 11)
             px = min(max(px, gx0 + rr + 1), gx0 + side - rr - 1)
             py = min(max(py, gy0 + rr + 1), gy0 + side - rr - 1)
@@ -3923,6 +3924,14 @@ class DeltaWindow(SimpleWindow):
         c.create_line(mid, cy - bh // 2 - 3, mid, cy + bh // 2 + 3, fill=FG, width=2)
 
     def draw(self, frame):
+        m = getattr(self.main, "_m", self.main)
+        wait = bool(m.locked and delta_tracker.best is None and delta_tracker.last is None)
+        if wait != getattr(m, "delta_wait", False):          # нет круга-эталона — окно полностью прозрачное
+            m.delta_wait = wait
+            m.set_alpha()
+        self.draw_view(frame)
+
+    def draw_view(self, frame):
         if self._view.startswith("t:"):
             return self.draw_theme(frame)
         if self._view in ("sectors", "sectors_nb"):
@@ -4780,7 +4789,7 @@ class Overlay:
         for k, v in (("delta", True), ("alerts", True), ("tyres", False), ("pitplan", False), ("gaps", False), ("engine", False),
                      ("sesstime", False), ("clock", False), ("speedo", False), ("laplog", False), ("laplog_count", 5), ("laplog_best", True), ("laplog_delta", True),
                      ("laplog_temp", True), ("laplog_ref", "prev"), ("laplog_newest", True), ("speedo_view", "arc"), ("speedo_max", 340), ("st_session", True), ("st_timer", True), ("st_clock", True),
-                     ("op_bg_only", True), ("map_pit", True), ("map_turns", True), ("st_poscol", True), ("st_battle", True), ("st_classcount", True), ("st_pitinfo", True), ("st_radio", True),
+                     ("op_bg_only", True), ("map_pit", True), ("map_turns", True), ("st_poscol", True), ("st_battle", True), ("st_pitinfo", True), ("st_radio", True),
                      ("delta_show_session", True), ("delta_show_mine", True), ("delta_show_pred", True)):
             cfg.setdefault(k, v)
         self.logo_dir = logo_dir
@@ -5086,6 +5095,8 @@ class Overlay:
     def hid(self, on):
         """Скрыто ли окно <on> сейчас: по горячей клавише или из-за гаража (настройка hg_<окно>, у стендинга hide_garage)."""
         if self.user_hidden or getattr(self, "nogame", False):
+            return True
+        if on == "delta" and getattr(self, "delta_wait", False):
             return True
         if not getattr(self, "garage", False):
             return False
@@ -6075,21 +6086,6 @@ class Overlay:
         c.create_rectangle(0, y, W, y + self.h_group, fill=HDR_BG, outline="")
         c.create_rectangle(14, gy - 7, 18, gy + 7, fill=class_color(group_name) if class_mode else ACCENT, outline="")
         c.create_text(28, gy, text=group_name, fill=FG, anchor="w", font=self.bold)
-        if not class_mode and self.cfg.get("st_classcount", True):
-            cnt = {}
-            for x in group:
-                cnt[x["cls"]] = cnt.get(x["cls"], 0) + 1
-            if len(cnt) > 1:
-                cx = 28 + self.bold.measure(group_name) + 18
-                for cname, n in sorted(cnt.items(), key=lambda kv: -kv[1]):
-                    if cname == "UNKNOWN":
-                        continue
-                    tx = f"{cname[:10]} {n}"
-                    if cx + self.small.measure(tx) + 22 > W - 150:
-                        break
-                    c.create_rectangle(cx, gy - 5, cx + 4, gy + 5, fill=class_color(cname), outline="")
-                    c.create_text(cx + 9, gy, text=tx, fill=DIM, anchor="w", font=self.small)
-                    cx += 9 + self.small.measure(tx) + 14
         count_txt = cars_word(len(group))
         if len(cars) > len(group):                       # часть машин спрятана фильтром «только мой класс»
             count_txt += f"   •   ВСЕГО В СЕССИИ {len(cars)}"
