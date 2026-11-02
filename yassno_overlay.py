@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "2.5.65"
+APP_VERSION = "2.5.67"
 import argparse
 import bisect
 import collections
@@ -2583,32 +2583,8 @@ class RadarWindow(RelativeWindow):
                           "side": abs(fwd) < 6.0 and abs(left) < 4.6})
         return me, items
 
-    def fast_behind(self, frame):
-        """Ближайшая сзади машина другого класса, которая быстрее по лучшему кругу: (класс, метров) или None."""
-        if not frame or not self.main.cfg.get("radar_fast", True):
-            return None
-        L = frame.get("track_len") or 0.0
-        me = next((x for x in frame["cars"] if x["player"]), None)
-        if not me or me["garage"] or me["in_pits"] or L <= 0:
-            return None
-        pm = next((v for v in (me.get("best"), me.get("est_lap")) if v and 20.0 < v < 1200.0), 0.0)
-        if not pm:
-            return None
-        best = None
-        for car in frame["cars"]:
-            if car["player"] or car["garage"] or car["in_pits"] or car.get("cls") == me.get("cls"):
-                continue
-            pc = next((v for v in (car.get("best"), car.get("est_lap")) if v and 20.0 < v < 1200.0), 0.0)
-            if not pc or pc > pm * 0.97:
-                continue
-            db = (me["lap_dist"] - car["lap_dist"]) % L
-            if db < 450.0 and (best is None or db < best[1]):
-                best = (car.get("cls", ""), db)
-        return best
-
     def tick(self, frame, ver):
         m = self.main
-        self._warn = self.fast_behind(frame)
         self._ir = bool(frame and frame.get("game") == "iracing")
         me, items = self.scan_ir(frame) if self._ir else self.scan(frame)
         rng = self.range_m()
@@ -2617,8 +2593,6 @@ class RadarWindow(RelativeWindow):
             target = 0.0
         elif not m.locked:
             target = 0.75                                    # при перемещении окна радар виден всегда
-        elif self._warn:
-            target = 0.97
         elif me is None or near >= rng * 1.15:
             target = 0.0
         elif not m.cfg.get("radar_fade", True):
@@ -2635,7 +2609,7 @@ class RadarWindow(RelativeWindow):
             self.top.attributes("-alpha", a)
         if a > 0.0 or self._sig is None:
             isig = tuple((it["kind"], int(it["dy"]), int(it["d"])) for it in items) if self._ir else int(time.time() * 30)
-            sig = (ver, m.cfg["font"], m.locked, rng, isig, (self._warn[0], int(self._warn[1] / 10), int(time.time() * 3) % 2) if self._warn else None)
+            sig = (ver, m.cfg["font"], m.locked, rng, isig, None)
             if sig != self._sig:
                 self._sig = sig
                 (self.draw_ir if self._ir else self.draw)(me, items)
@@ -2702,17 +2676,6 @@ class RadarWindow(RelativeWindow):
                 c.create_text(cx + W * 0.26 + 8, yn + sgn * ch * 0.4, text="%d м" % round(it["d"]), fill="#ffd23a",
                               font=self.main.small, anchor="w")
         c.create_rectangle(cx - cw / 2, cy - ch / 2, cx + cw / 2, cy + ch / 2, fill="#ffffff", outline="")
-        self.draw_warn(c, W)
-
-    def draw_warn(self, c, W):
-        """Мигающая рамка и подпись, когда сзади приближается более быстрый класс."""
-        w = getattr(self, "_warn", None)
-        if not w:
-            return
-        col = "#ff9f1a" if int(time.time() * 3) % 2 == 0 else "#ffd23a"
-        c.create_rectangle(3, 3, W - 3, W - 3, fill="", outline=col, width=4)
-        c.create_text(W / 2, 16, text="БЫСТРЕЕ СЗАДИ", fill=col, font=self.main.small)
-        c.create_text(W / 2, W - 14, text="%s  %d м" % (w[0][:10], round(w[1])), fill=col, font=self.main.small)
 
     def _car_poly(self, cx, cy, k, ux, uy, hl, hw):
         """Прямоугольник: центр (cx, cy), ось вперёд (ux, uy) в экранных координатах (y вниз)."""
@@ -2767,7 +2730,6 @@ class RadarWindow(RelativeWindow):
         poly = self._car_poly(cx, cy, k, 0.0, -1.0, self.CAR_L / 2, self.CAR_W / 2)
         c.create_polygon(*poly, fill="#ffffff", outline=ACCENT, width=2)
         c.create_line(poly[0], poly[1], poly[2], poly[3], fill=ACCENT, width=3)
-        self.draw_warn(c, W)
 
 
 class WeatherWindow(RelativeWindow):

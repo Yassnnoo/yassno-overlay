@@ -100,24 +100,6 @@ class Radar(unittest.TestCase):
     def frame(self, others):
         return {"game": "iracing", "track_len": 5000.0, "side_state": 0, "cars": [self.car(0, 1000, "GT3", 100.0, True)] + others}
 
-    def test_fast_class_behind_warns(self):
-        w = O.RadarWindow.fast_behind(self.fake, self.frame([self.car(1, 800, "GTP", 92.0)]))
-        self.assertEqual(w[0], "GTP")
-        self.assertAlmostEqual(w[1], 200.0)
-
-    def test_same_class_slower_far_or_off_do_not_warn(self):
-        fb = lambda fr: O.RadarWindow.fast_behind(self.fake, fr)
-        self.assertIsNone(fb(self.frame([self.car(1, 800, "GT3", 92.0)])))      # свой класс
-        self.assertIsNone(fb(self.frame([self.car(1, 800, "GTP", 99.0)])))      # почти такой же темп
-        self.assertIsNone(fb(self.frame([self.car(1, 100, "GTP", 90.0)])))      # далеко (900 м)
-        self.fake.main.cfg["radar_fast"] = False
-        self.assertIsNone(fb(self.frame([self.car(1, 800, "GTP", 90.0)])))      # выключено в настройках
-
-    def test_wraps_around_start_line(self):
-        fr = self.frame([self.car(1, 4900, "GTP", 90.0)])
-        fr["cars"][0]["lap_dist"] = 100.0
-        self.assertAlmostEqual(O.RadarWindow.fast_behind(self.fake, fr)[1], 200.0)
-
     def test_scan_ir_sides_and_distances(self):
         fr = self.frame([self.car(1, 1004, "GT3", 100.0), self.car(2, 1030, "GT3", 100.0), self.car(3, 972, "GT3", 100.0)])
         fr["side_state"] = 2                                                     # машина слева

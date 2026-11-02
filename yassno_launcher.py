@@ -31,7 +31,7 @@ import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import colorchooser, filedialog, messagebox, ttk
 
-APP_VERSION = "2.5.65"
+APP_VERSION = "2.5.67"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -414,7 +414,7 @@ DEFAULTS = {**{k: True for k, _ in ELEMENTS}, "font": 13, "family": "", "rows": 
             "radar_range": 40, "fuel_reserve": 0.0, "fuel_pit_laps": 1.0, "fuel_avg": 5,
             "rel_ahead": 3, "rel_behind": 3, "ped_seconds": 8, "shift_start": 82.0, "shift_flash": 98.0, "speed_mph": False,
             "map_wind": True, "map_dot": 6, "map_mirror": False, "map_rot": 0,
-            "radar_arcs": True, "radar_fade": True, "radar_fast": True, "lights_hold": 4,
+            "radar_arcs": True, "radar_fade": True, "lights_hold": 4,
             "map_nums": True, "map_pit": True, "map_turns": True, "map_sectors": True, "fuel_ve": True,
             "app_racelab": False, "app_simhub": False, "app_crewchief": False, "app_tradingpaints": False, "stats": True,
             "stand_mode": "table", "ticker_w": 1000, "ticker_speed": 70, "map_mode": "full", "map_radius": 500,
@@ -1007,7 +1007,7 @@ EN.update({
     "Подробная": "Detailed", "Компактная: шины рисунком": "Compact: tyres drawn",
     "Акцент (заголовки, таймер)": "Accent (headers, timer)", "Основной текст": "Main text", "Второстепенный текст": "Secondary text",
     "Панели и шапки": "Panels and headers", "Фон таблицы": "Table background", "Рамки": "Borders", "Моя строка": "My row",
-    "Газ": "Throttle", "Тормоз": "Brake", "Сцепление": "Clutch",
+    "Газ": "Throttle", "Газ, тормоз и сцепление": "Throttle, brake and clutch", "Тормоз": "Brake", "Сцепление": "Clutch",
     "Главная таблица. Колонки включаются и выключаются переключателями ниже, предпросмотр показывает результат.":
         "The main standings table. Switch columns on and off below; the preview shows the result.",
     "Сколько машин впереди и позади, какие колонки показывать, размер и прозрачность. Всегда без разделения по классам.":
@@ -1389,7 +1389,6 @@ TIPS = {
     "Размер радара": "Масштаб окна радара.",
     "Дальность, м": "На каком расстоянии от тебя радар начинает показывать машины.",
     "Плавное проявление при приближении": "Машина появляется на радаре постепенно, а не резко.",
-    "Предупреждать, если сзади быстрая машина другого класса (рамка мигает)": "Если сзади приближается машина более быстрого класса — радар мигает рамкой и пишет «БЫСТРЕЕ СЗАДИ».",
     "Красные дуги, когда машина сбоку": "Красные дуги по краю радара, если соперник рядом сбоку.",
     "Вид": "Как выглядит панель. Меняется сразу в предпросмотре.",
     "Вид руля": "Рисунок руля в панели ввода.",
@@ -2076,7 +2075,7 @@ class ProfilePanel(ttk.Frame):
             if self.game == "iracing":
                 sc = self.card("Как это выглядит", R)
                 self.radar_scn = "all"
-                for i, (code, lab) in enumerate((("left", "Машина слева"), ("fast", "Быстрая сзади"), ("both", "Спереди и сзади"),
+                for i, (code, lab) in enumerate((("left", "Машина слева"), ("both", "Спереди и сзади"),
                                                  ("none", "Никого рядом"), ("all", "Всё сразу"))):
                     ttk.Button(sc, text=lab, command=lambda n=code: self.radar_scenario(n)).grid(row=i // 2, column=i % 2, sticky="w", padx=(0, 8), pady=2)
                 ttk.Label(sc, text="Нажми — предпросмотр слева покажет, как радар выглядит в этой ситуации.", style="Dim.TLabel",
@@ -2085,7 +2084,6 @@ class ProfilePanel(ttk.Frame):
             if self.game != "iracing":
                 self.tg(g, None, "Красные дуги, когда машина сбоку", self.v["radar_arcs"])
             self.tg(g, None, "Плавное проявление при приближении", self.v["radar_fade"])
-            self.tg(g, None, "Предупреждать, если сзади быстрая машина другого класса (рамка мигает)", self.v["radar_fast"])
         elif key == "weather":
             f = main_card()
             self.slider(f, None, "Размер", self.v["scale_weather"], 0.5, 2.5, mult)
@@ -2987,7 +2985,6 @@ class ProfilePanel(ttk.Frame):
         items = {"all": [{"kind": "L", "dy": 1.5 + 3 * sw_, "d": 0.0}, {"kind": "R", "dy": -2.5 - 3 * sw_, "d": 0.0},
                          {"kind": "F", "dy": 26.0 + 5 * sw_, "d": 21.0 + 5 * sw_}, {"kind": "B", "dy": -30.0 + 5 * sw_, "d": 25.0 - 5 * sw_}],
                  "left": [{"kind": "L", "dy": 1.5 + 4 * sw_, "d": 0.0}],
-                 "fast": [{"kind": "B", "dy": -28.0 + 8 * (sw_ + 1) / 2, "d": 22.0 - 8 * (sw_ + 1) / 2}],
                  "both": [{"kind": "F", "dy": 18.0 + 4 * sw_, "d": 13.0 + 4 * sw_}, {"kind": "B", "dy": -24.0 + 4 * sw_, "d": 19.0 - 4 * sw_}],
                  "none": []}.get(scn, [])
         img = glow_image(c, W, H, bg, ir_radar_blobs(W, H, cx, cy, ch, cw, items, 40.0), 2 if W > 120 else 1)
@@ -2999,11 +2996,6 @@ class ProfilePanel(ttk.Frame):
         c.create_line(mx, y + 5, mx, y + h - 5, fill="#aab4c2")
         c.create_rectangle(mx - cw * sc / 2, y + h / 2 - ch * sc / 2, mx + cw * sc / 2, y + h / 2 + ch * sc / 2, fill="#ffffff", outline="")
         c.create_text(mx, y + h - 3, text=f"{self.v['radar_range'].get()} м", fill=th["dim"], font=self.f_t)
-        if scn == "fast" and self.v["radar_fast"].get():
-            col = "#ff9f1a" if int(time.time() * 3) % 2 == 0 else "#ffd23a"
-            c.create_rectangle(x + 3, y + 3, x + w - 3, y + h - 3, fill="", outline=col, width=3)
-            c.create_text(mx, y + 14, text="БЫСТРЕЕ СЗАДИ", fill=col, font=self.f_t)
-            c.create_text(mx, y + h - 14, text="LMP2  33 м", fill=col, font=self.f_t)
 
     def radar_scenario(self, name):
         self.radar_scn = name
@@ -4328,7 +4320,7 @@ class TelemetryView(ttk.Frame):
         for k, name, _, _ in STRIPS:
             v = tk.BooleanVar(value=k in self.on)
             self.strip_vars[k] = v
-            menu.add_checkbutton(label=tr(name.split(",")[0]), variable=v, command=self.strips_changed)
+            menu.add_checkbutton(label=tr(", ".join(name.split(", ")[:-1]) or name), variable=v, command=self.strips_changed)
         mb.pack(side="left")
         self.legend = ttk.Label(bar, text=tr("Колесо — масштаб, перетаскивание — сдвиг, двойной щелчок — весь круг"), style="Dim.TLabel")
         self.legend.pack(side="left", padx=12)
