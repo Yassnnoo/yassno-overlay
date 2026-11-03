@@ -31,7 +31,7 @@ import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import colorchooser, filedialog, messagebox, ttk
 
-APP_VERSION = "2.5.67"
+APP_VERSION = "2.5.70"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -424,7 +424,7 @@ DEFAULTS.update({"map_ir_svg": True, "weather_view": "cards", "map_style": "clas
 DEFAULTS.update({"tyres": False, "pitplan": False, "gaps": False, "engine": False, "engine_view": "table", "delta_sec_bar": True,
                  "sesstime": False, "clock": False, "speedo": False, "laplog": False, "laplog_count": 5, "laplog_best": True, "laplog_delta": True, "laplog_temp": True,
                  "laplog_ref": "prev", "laplog_newest": True, "speedo_view": "arc", "speedo_max": 340, "clock_seconds": True, "st_session": True, "st_timer": True, "st_clock": True, "st_poscol": True, "st_battle": True, "st_pitinfo": True, "st_radio": True,
-                 "win_style": "classic", "theme_mode": "dark", "op_bg_only": True, "op_all": 0.94})        # эти панели по умолчанию выключены
+                 "win_style": "classic", "theme_mode": "dark", "op_bg_only": True, "op_all": 0.94, "lmu_menu_hide": True})        # эти панели по умолчанию выключены
 POS_KEYS = ["x", "y", "rel_x", "rel_y", "ped_x", "ped_y", "map_x", "map_y", "radar_x", "radar_y",
             "wx_x", "wx_y", "lights_x", "lights_y", "lim_x", "lim_y", "fuel_x", "fuel_y",
             "delta_x", "delta_y", "alerts_x", "alerts_y", "tyres_x", "tyres_y", "pitplan_x", "pitplan_y", "gaps_x", "gaps_y", "engine_x", "engine_y", "sesstime_x", "sesstime_y", "clock_x", "clock_y", "speedo_x", "speedo_y", "laplog_x", "laplog_y"]
@@ -1596,6 +1596,7 @@ class ProfilePanel(ttk.Frame):
         self.wxc = {k: tk.BooleanVar(value=k not in st["wx_hide"]) for k, _ in WX_CARDS}
         self.pedc = {k: tk.BooleanVar(value=k not in st["ped_hide"]) for k, _ in PED_PARTS}
         self.theme = {k: tk.StringVar(value=st["theme"][k]) for k in THEME_DEFAULT}
+        self._base = {k: st[k] for k in self.sync_keys() if k in st}      # что было в профиле, когда мы его читали
         self.page = "general"
         self.rows_ui = {}                               # ключ страницы -> виджеты строки списка
         self.swatches = []                              # (ключ цвета, виджет-образец) текущей страницы
@@ -1990,6 +1991,8 @@ class ProfilePanel(ttk.Frame):
             ttk.Combobox(f, textvariable=self.v["family"], values=fams, state="readonly", width=24).grid(row=r, column=1, columnspan=2, sticky="w", pady=4)
             self.spin(f, None, "Размер шрифта", "font", 8, 28)
             self.tg(f, None, "Скрывать оверлей, когда машина в гараже", self.v["hide_garage"])
+            if self.game == "lmu":
+                self.tg(f, None, "Скрывать оверлей в меню LMU (пока не загрузились на трассу)", self.v["lmu_menu_hide"])
             self.tg(f, None, "Записывать статистику сессий", self.v["stats"])
             self.mcombo(f, "Тема оверлеев", "theme_mode")
             self.mcombo(f, "Стиль окон", "win_style", width=34)
@@ -2265,6 +2268,39 @@ class ProfilePanel(ttk.Frame):
         except (tk.TclError, ValueError):
             return default
 
+    @staticmethod
+    def sync_keys():
+        """Настройки, которые оверлей сам меняет в игре (окно режима перемещения, колесо мыши, меню): вкл/выкл панелей, размеры, виды."""
+        return [k for k, _ in ELEMENTS] + list(SCALE_DEFAULT) + list(MODES)
+
+    def merge_external(self, st):
+        """Если оверлей изменил профиль, пока открыт лаунчер, не затираем это старыми значениями: берём из файла всё,
+        что в лаунчере вы не трогали."""
+        try:
+            disk = read_json(profile_path(self.game))
+        except Exception:
+            return st
+        same = lambda a, b: abs(a - b) < 1e-6 if isinstance(a, (int, float)) and isinstance(b, (int, float)) and not isinstance(a, bool) else a == b
+        for k in self.sync_keys():
+            if k not in st or k not in disk or k not in self._base:
+                continue
+            if same(st[k], self._base[k]) and not same(disk[k], self._base[k]):
+                st[k] = disk[k]
+                self._base[k] = disk[k]
+                var = self.v.get(k)
+                try:
+                    if var is None:
+                        continue
+                    if k in MODES:
+                        var.set(self.mode_label(k, disk[k]))
+                    else:
+                        var.set(disk[k])
+                except (tk.TclError, ValueError):
+                    pass
+        if self.game == "lmu":
+            st["lights"] = False
+        return st
+
     def collect(self):
         st = {}
         lim = lambda x, lo, hi: max(lo, min(hi, x))
@@ -2317,7 +2353,9 @@ class ProfilePanel(ttk.Frame):
 
     def save(self, quiet=False):
         try:
-            save_settings(self.game, self.collect())
+            st = self.merge_external(self.collect())
+            save_settings(self.game, st)
+            self._base = {k: st[k] for k in self.sync_keys() if k in st}
         except OSError as e:
             mb_error("Не удалось сохранить", str(e))
             return False

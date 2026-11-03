@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "2.5.67"
+APP_VERSION = "2.5.70"
 import argparse
 import bisect
 import collections
@@ -4751,7 +4751,7 @@ class Overlay:
         for k, v in (("delta", True), ("alerts", True), ("tyres", False), ("pitplan", False), ("gaps", False), ("engine", False),
                      ("sesstime", False), ("clock", False), ("speedo", False), ("laplog", False), ("laplog_count", 5), ("laplog_best", True), ("laplog_delta", True),
                      ("laplog_temp", True), ("laplog_ref", "prev"), ("laplog_newest", True), ("speedo_view", "arc"), ("speedo_max", 340), ("st_session", True), ("st_timer", True), ("st_clock", True),
-                     ("op_bg_only", True), ("map_pit", True), ("map_turns", True), ("st_poscol", True), ("st_battle", True), ("st_pitinfo", True), ("st_radio", True),
+                     ("op_bg_only", True), ("lmu_menu_hide", True), ("map_pit", True), ("map_turns", True), ("st_poscol", True), ("st_battle", True), ("st_pitinfo", True), ("st_radio", True),
                      ("delta_show_session", True), ("delta_show_mine", True), ("delta_show_pred", True)):
             cfg.setdefault(k, v)
         self.logo_dir = logo_dir
@@ -5568,8 +5568,22 @@ class Overlay:
             me = next((c for c in frame["cars"] if c["player"]), None)
             hide = bool(me and me["garage"] and me["speed"] < 1.0
                         and (frame["kind"] != "RACE" or me["laps"] == 0))
-            if frame.get("in_realtime") is False:          # rFactor 2: игрок в мониторе (экран гаража)
+            lmu_menu = frame.get("game") == "lmu" and self.cfg.get("lmu_menu_hide", True)
+            if frame.get("in_realtime") is False and frame.get("game") != "lmu":      # rFactor 2: игрок в мониторе (экран гаража)
                 hide = True
+            if lmu_menu and (not frame["cars"] or not me):      # LMU в меню: машин нет или игрока в списке нет
+                hide = True
+            if frame.get("game") == "lmu":
+                st = (frame.get("options_location"), len(frame["cars"]), bool(me), bool(hide))
+                if st != getattr(self, "_ol_seen", None):               # пишем смену состояния в logs\lmu-state.log — для разбора, если оверлей ведёт себя странно
+                    self._ol_seen = st
+                    try:
+                        os.makedirs(os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs"), exist_ok=True)
+                        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs", "lmu-state.log"), "a", encoding="utf-8") as fh:
+                            fh.write(f"{time.strftime('%H:%M:%S')} options_location={st[0]} машин={st[1]} игрок={'да' if st[2] else 'нет'} "
+                                     f"сессия={frame.get('label')} трасса={frame.get('track')!r} скрыто={'да' if st[3] else 'нет'}\n")
+                    except OSError:
+                        pass
         self.garage = hide
         self.hidden = hide or self.user_hidden or self.nogame
         hs = (self.hid("standings"),) + tuple(self.hid(w.ON) for w in self.subs)
