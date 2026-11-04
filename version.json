@@ -1,6 +1,6 @@
 {
- "version": "2.5.87",
- "notes": "Esc в LMU: диагностика в logs/lmu-state.log (какое окно сверху, сработала ли пауза)",
+ "version": "2.5.88",
+ "notes": "Руль: если красивый руль не рисуется, причина пишется в logs/wheel.log",
  "files": [
   "README.txt",
   "diagnose.cmd",

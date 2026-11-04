@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "2.5.87"
+APP_VERSION = "2.5.88"
 import argparse
 import bisect
 import collections
@@ -279,12 +279,13 @@ try:
     IR_SVG = svgmap.IrSvgMaps(os.path.join(MAP_DIR, "svg"))
 except Exception:                                    # нет файла или сломан — работаем по траектории игрока
     svgmap, IR_SVG = None, None
+WHEEL_WHY = ""
 try:
     import yassno_wheels as wheels                   # рисованные руля (нужен PIL); нет файла или PIL — рисуем плоскими фигурами
     if not wheels.OK:
-        wheels = None
-except Exception:
-    wheels = None
+        WHEEL_WHY, wheels = "PIL не импортируется (Image/ImageDraw/ImageFilter)", None
+except Exception as _e:
+    WHEEL_WHY, wheels = f"yassno_wheels: {type(_e).__name__}: {_e}", None
 RUNTIME = {"ir_svg": True}                           # переключатель «схема трассы iRacing» (ставится из настроек карты)
 
 
@@ -1979,6 +1980,18 @@ class PedalsWindow(RelativeWindow):
             c.create_line(mid, cy - h // 2 - 3, mid, cy + h // 2 + 3, fill=G, width=2)
             c.create_text(mid, cy + h // 2 + int(self.u * 0.5), text=f"{angle:+.0f}°", fill=DIM, font=self.main.small)
             return
+        if not getattr(Overlay, "_wlogged", False) and (wheels is None and WHEEL_WHY or wheels is not None and self.style not in wheels.STYLES):
+            if wheels is not None:
+                WHY = f"вид руля «{self.style}» не из списка {wheels.STYLES}"
+            else:
+                WHY = WHEEL_WHY
+            Overlay._wlogged = True
+            try:
+                os.makedirs(os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs"), exist_ok=True)
+                with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs", "wheel.log"), "a", encoding="utf-8") as fh:
+                    fh.write(f"{time.strftime('%H:%M:%S')} красивый руль выключен: {WHY}; python={sys.executable}\n")
+            except OSError:
+                pass
         if wheels is not None and self.style in wheels.STYLES:      # красивый руль-картинка (PIL); при любой ошибке падаем на плоский
             try:
                 from PIL import ImageTk
@@ -1992,8 +2005,17 @@ class PedalsWindow(RelativeWindow):
                     photo = cache[key] = ImageTk.PhotoImage(wheels.render(self.style, size, key[2]))
                 c.create_image(x + r + 2, cy, image=photo)
                 return
-            except Exception:
+            except Exception as _e:
                 wheels_fail = True
+                if not getattr(Overlay, "_wlogged", False):
+                    Overlay._wlogged = True
+                    try:
+                        import traceback as _tb
+                        os.makedirs(os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs"), exist_ok=True)
+                        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs", "wheel.log"), "a", encoding="utf-8") as fh:
+                            fh.write(f"{time.strftime('%H:%M:%S')} руль-картинка не получилась: {_tb.format_exc()}\n")
+                    except OSError:
+                        pass
         wx = x + r + 2
         a = math.radians(angle)
         ca, sa = math.cos(a), math.sin(a)
