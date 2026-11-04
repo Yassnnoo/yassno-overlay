@@ -37,7 +37,7 @@ try:
 except Exception:
     wheels = None
 
-APP_VERSION = "2.5.77"
+APP_VERSION = "2.5.78"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -422,7 +422,7 @@ DEFAULTS = {**{k: True for k, _ in ELEMENTS}, "font": 13, "family": "", "rows": 
             "rel_ahead": 3, "rel_behind": 3, "ped_seconds": 8, "shift_start": 82.0, "shift_flash": 98.0, "speed_mph": False,
             "map_wind": True, "map_dot": 6, "map_mirror": False, "map_rot": 0,
             "radar_arcs": True, "radar_fade": True, "lights_hold": 4,
-            "map_nums": True, "map_pit": True, "map_turns": True, "map_sectors": True, "fuel_ve": True,
+            "map_nums": True, "map_pit": True, "map_turns": True, "map_brake": True, "map_sectors": True, "fuel_ve": True,
             "app_racelab": False, "app_simhub": False, "app_crewchief": False, "app_tradingpaints": False, "stats": True,
             "stand_mode": "table", "ticker_w": 1000, "ticker_speed": 70, "map_mode": "full", "map_radius": 500,
             "map_headup": True, "delta_ref": "best", "delta_range": 1.0, "delta_view": "full", "delta_theme": "full", "delta_show_session": True, "delta_show_mine": True, "delta_show_pred": True, "tyres_view": "table", "layout_mode": "off", "wheel_style": "round"}
@@ -2071,6 +2071,7 @@ class ProfilePanel(ttk.Frame):
             g = self.card("На карте", R)
             self.tg(g, None, "Номера мест на машинах", self.v["map_nums"])
             self.tg(g, None, "Номера поворотов (полная карта)", self.v["map_turns"])
+            self.tg(g, None, "Точки торможения лучшего круга (полная карта)", self.v["map_brake"])
             self.tg(g, None, "Машины на пит-лейне", self.v["map_pit"])
             self.tg(g, None, "Сектора и отметка старта/финиша", self.v["map_sectors"])
             self.tg(g, None, "Компас ветра в углу", self.v["map_wind"])
@@ -3224,6 +3225,15 @@ class ProfilePanel(ttk.Frame):
                 tx_, ty_ = outward(idx, 13)
                 c.create_oval(tx_ - 5, ty_ - 5, tx_ + 5, ty_ + 5, fill=th["panel"], outline=th["dim"])
                 c.create_text(tx_, ty_, text=str(num_), fill=th["text"], font=self.f_t)
+        if self.v["map_brake"].get():                          # точки торможения лучшего круга: красные чёрточки поперёк трассы
+            for idx in (3, 17, 30, 47):
+                bx_, by_ = pts[idx * 2], pts[idx * 2 + 1]
+                ax_, ay_ = pts[((idx - 3) % 60) * 2], pts[((idx - 3) % 60) * 2 + 1]
+                cx_, cy_ = pts[((idx + 3) % 60) * 2], pts[((idx + 3) % 60) * 2 + 1]
+                tn_ = math.hypot(cx_ - ax_, cy_ - ay_) or 1.0
+                nx_, ny_ = -(cy_ - ay_) / tn_ * 8, (cx_ - ax_) / tn_ * 8
+                c.create_line(bx_ - nx_, by_ - ny_, bx_ + nx_, by_ + ny_, fill="#0a0a0a", width=5, capstyle="round")
+                c.create_line(bx_ - nx_, by_ - ny_, bx_ + nx_, by_ + ny_, fill="#ff3b30", width=3, capstyle="round")
         lane = [outward(i, 10) for i in (55, 56, 57, 58, 59)]       # пит-лейн у линии старта/финиша
         c.create_line(*[v for p_ in lane for v in p_], fill="#39414f", width=3, dash=(4, 3))
         if self.v["map_pit"].get():
@@ -4100,6 +4110,9 @@ STRIPS = [("spd", "Скорость, км/ч", [("spd", "", None, 1.0)], None),
           ("gear", "Передача", [("gear", "", None, 1.0)], None),
           ("rpm", "Обороты, rpm", [("rpm", "", None, 1.0)], None),
           ("delta", "Дельта B − A, с", [], None),
+          ("dpedals", "Разница газа и тормоза B − A, %", [], (-100.0, 100.0)),
+          ("dstr", "Разница руля B − A, %", [], (-100.0, 100.0)),
+          ("dspd", "Разница скорости B − A, км/ч", [], None),
           ("tyret", "Температура шин, °C", [(f"tt{i}", w, c, 1.0) for i, (w, c) in enumerate(zip(WHEELS_, ("#ff5a4f", "#4da3ff", "#ffc107", "#2ee26d")))], None),
           ("tyrep", "Давление шин, кПа", [(f"tp{i}", w, c, 1.0) for i, (w, c) in enumerate(zip(WHEELS_, ("#ff5a4f", "#4da3ff", "#ffc107", "#2ee26d")))], None),
           ("braket", "Температура тормозов, °C", [(f"bt{i}", w, c, 1.0) for i, (w, c) in enumerate(zip(WHEELS_, ("#ff5a4f", "#4da3ff", "#ffc107", "#2ee26d")))], None),
@@ -4107,6 +4120,8 @@ STRIPS = [("spd", "Скорость, км/ч", [("spd", "", None, 1.0)], None),
           ("temps", "Вода и масло, °C", [("wat", "вода", "#4da3ff", 1.0), ("oil", "масло", "#ffc107", 1.0)], None)]
 STRIP_DEFAULT = ["spd", "pedals", "steer", "gear", "rpm", "delta"]
 COL_A, COL_B = "#4da3ff", "#ff9f1a"
+# каналы-разницы: что вычитаем (колонка, цвет, множитель); работают, когда выбраны оба круга
+DIFF_STRIPS = {"dpedals": [("thr", "#2ee26d", 100.0), ("brk", "#ff3b30", 100.0)], "dstr": [("str", "#ffc107", 100.0)], "dspd": [("spd", "#ff5a4f", 1.0)]}
 
 
 def nice_step(span, target=8):
@@ -4556,7 +4571,7 @@ class TelemetryView(ttk.Frame):
 
     # ---- график
     def active_strips(self):
-        return [s for s in STRIPS if s[0] in self.on and (s[0] != "delta" or (self.A and self.B))]
+        return [s for s in STRIPS if s[0] in self.on and (not (s[0] == "delta" or s[0] in DIFF_STRIPS) or (self.A and self.B))]
 
     def redraw(self):
         c = self.cv
@@ -4597,7 +4612,7 @@ class TelemetryView(ttk.Frame):
                 lo, hi = min(vals), max(vals)
                 if key == "gear":
                     lo, hi = 0, max(hi, 1) + 0.5
-                elif key == "delta":
+                elif key == "delta" or key == "dspd":
                     m = max(abs(lo), abs(hi), 0.05)
                     lo, hi = -m, m
                 else:
@@ -4612,7 +4627,7 @@ class TelemetryView(ttk.Frame):
             c.create_line(L, py(mid), W - R, py(mid), fill=UI_BORDER, dash=(2, 4))
             for v, yy, an in ((hi, y0 + 7, "e"), (lo, y1 - 7, "e")):
                 c.create_text(L - 5, yy, text=f"{v:.0f}" if abs(hi - lo) > 8 else f"{v:.2f}", fill=UI_DIM, anchor=an, font=("Segoe UI", 8))
-            if key == "delta":
+            if key == "delta" or key in DIFF_STRIPS:
                 c.create_line(L, py(0), W - R, py(0), fill=UI_DIM)
             for dist, ys, col, vv, dashed in [(cv_[0], cv_[1], cv_[2], cv_[3], cv_[4]) for cv_ in curves]:
                 self.poly(c, dist, ys, px, py, x0, x1, ndraw, col, dashed)
@@ -4624,6 +4639,18 @@ class TelemetryView(ttk.Frame):
     def strip_curves(self, key, series, a, b):
         """[(дистанции, значения (экранные), цвет, значения для масштаба, штрих)]"""
         out = []
+        if key in DIFF_STRIPS:
+            if a and b:
+                for col, color, sc in DIFF_STRIPS[key]:
+                    ds, ys = [], []
+                    for i in range(0, a.n, max(1, a.n // 800)):
+                        dd = a.c["d"][i]
+                        vb = b.at(col, dd)
+                        if vb is not None:
+                            ds.append(dd)
+                            ys.append((vb - a.c[col][i]) * sc)
+                    out.append((ds, ys, color, ys, False))
+            return out
         if key == "delta":
             if a and b:
                 ds, ys = [], []
@@ -4682,7 +4709,13 @@ class TelemetryView(ttk.Frame):
         for i, (key, title, series, fixed) in enumerate(strips):
             y0 = T + i * sh
             parts = []
-            if key == "delta":
+            if key in DIFF_STRIPS:
+                for col, color, sc in DIFF_STRIPS[key]:
+                    va, vb = (a.at(col, d) if a else None), (b.at(col, d) if b else None)
+                    if va is not None and vb is not None:
+                        lab = {"thr": "газ ", "brk": "тормоз "}.get(col, "")
+                        parts.append(f"{lab}{(vb - va) * sc:+.0f}")
+            elif key == "delta":
                 tb = b.at("t", d) if b else None
                 ta = a.at("t", d) if a else None
                 if tb is not None and ta is not None:

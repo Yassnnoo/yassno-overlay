@@ -315,6 +315,46 @@ class MicroSectorTests(unittest.TestCase):
         self.assertIn("HY", b["all"])
 
 
+class BrakeTrackerTests(unittest.TestCase):
+    L = 4000.0
+
+    def frame(self, lap, dist, brk, last=0.0, pit=False):
+        return {"cars": [{"key": 0, "player": True, "cls": "HY", "vehicle": "v", "laps": lap, "lap_dist": dist % self.L, "in_pits": pit,
+                          "garage": False, "last": last, "pos": (dist * 0.1, 5.0)}],
+                "track_len": self.L, "track": "T", "inputs": {"brk": brk, "thr": 0.0}}
+
+    def drive(self, tr, lap, last=0.0, brake_at=(500.0, 2000.0), pit=False):
+        d = 0.0
+        while d < self.L - 1:
+            b = 0.9 if any(a <= d < a + 120 for a in brake_at) else 0.0
+            tr.update(self.frame(lap, d, b, last, pit))
+            d += 5.0
+
+    def test_points_of_best_lap(self):
+        tr = O.BrakeTracker()
+        self.drive(tr, 1)
+        self.drive(tr, 2, last=90.0)
+        self.drive(tr, 3, last=89.0, brake_at=(800.0, 2500.0, 3300.0))
+        tr.update(self.frame(4, 0.0, 0.0, last=88.0))
+        self.assertEqual(len(tr.points), 3)                 # лучший круг — третий, у него три торможения
+        self.assertAlmostEqual(tr.points[0][2], 800.0, delta=8)
+
+    def test_slower_lap_does_not_replace(self):
+        tr = O.BrakeTracker()
+        self.drive(tr, 1)
+        self.drive(tr, 2, last=90.0)
+        self.drive(tr, 3, last=95.0, brake_at=(100.0,))
+        tr.update(self.frame(4, 0.0, 0.0, last=95.0))
+        self.assertEqual(len(tr.points), 2)
+
+    def test_pit_lap_ignored(self):
+        tr = O.BrakeTracker()
+        self.drive(tr, 1, pit=True)
+        self.drive(tr, 2, last=90.0, pit=True)
+        tr.update(self.frame(3, 0.0, 0.0, last=90.0, pit=True))
+        self.assertEqual(tr.points, [])
+
+
 class PosEventTests(unittest.TestCase):
     def test_gain_and_loss(self):
         me = types.SimpleNamespace(_pe={}, POS_HOLD=O.Overlay.POS_HOLD)

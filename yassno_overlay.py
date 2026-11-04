@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "2.5.77"
+APP_VERSION = "2.5.78"
 import argparse
 import bisect
 import collections
@@ -2062,7 +2062,7 @@ class MapWindow(RelativeWindow):
         if self.mode() != self._mode or ((not cf.get("map_frame", True)) and self._mode != "linear") != self._bare:
             self.build()
         sig = (cf.get("map_style", "classic"), cf.get("map_one_color", False), cf.get("map_frame", True), ver // 2, cf["font"], self.main.locked, cf.get("map_rot", 0), cf.get("map_mirror", False),
-               cf.get("map_radius", 500), cf.get("map_headup", True), cf.get("map_pit", True), cf.get("map_turns", True), int(time.time() * 8))
+               cf.get("map_radius", 500), cf.get("map_headup", True), cf.get("map_pit", True), cf.get("map_turns", True), cf.get("map_brake", True), len(brake_tracker.points), int(time.time() * 8))
         if sig != self._sig:
             self._sig = sig
             self.draw(frame)
@@ -2144,6 +2144,20 @@ class MapWindow(RelativeWindow):
             x0, y0, ux, uy = tick(0, 13, "#ffffff", 6)
             tick(0, 13, "#111111", 2)
             c.create_text(x0 + uy * 34, y0 - ux * 34, text="СТАРТ", fill=FG, font=self.f_num)
+
+    def draw_brakes(self, c, sp, rot, mirror, to_screen):
+        """Красные чёрточки поперёк трассы — где вы начали тормозить на лучшем круге."""
+        pts = to_screen(self.transform([(x, z) for x, z, _d in brake_tracker.points], rot, mirror))
+        n_ = len(sp)
+        for bx, by in pts:
+            i = min(range(n_), key=lambda k: (sp[k][0] - bx) ** 2 + (sp[k][1] - by) ** 2)
+            a, b = sp[(i - 3) % n_], sp[(i + 3) % n_]
+            tx, ty = b[0] - a[0], b[1] - a[1]
+            tn = math.hypot(tx, ty) or 1.0
+            nx, ny = -ty / tn * 9, tx / tn * 9
+            mx, my = sp[i]
+            c.create_line(mx - nx, my - ny, mx + nx, my + ny, fill="#0a0a0a", width=5, capstyle="round")
+            c.create_line(mx - nx, my - ny, mx + nx, my + ny, fill="#ff3b30", width=3, capstyle="round")
 
     def draw_turns(self, c, sp, loop, gx0, gy0, side):
         """Номера поворотов на полной карте: кружок с цифрой снаружи от вершины поворота."""
@@ -2273,6 +2287,8 @@ class MapWindow(RelativeWindow):
                 self.draw_marks(c, sp, sec)
                 if m.cfg.get("map_turns", True):
                     self.draw_turns(c, sp, loop, gx0, gy0, side)
+                if m.cfg.get("map_brake", True) and brake_tracker.points:
+                    self.draw_brakes(c, sp, rot, mirror, to_screen)
             else:
                 step = max(1, len(sp) // 700)
                 c.create_line(*[v for p in sp[::step] for v in p], fill=ACCENT, width=3, capstyle="round", joinstyle="round")
@@ -3281,6 +3297,60 @@ class MicroTracker:
         return out, cur
 
 
+class BrakeTracker:
+    """Точки торможения на лучшем круге: где (на карте) вы начали давить на тормоз перед поворотом."""
+    ON_LEVEL, OFF_LEVEL, REARM_M = 0.30, 0.08, 70.0
+
+    def __init__(self):
+        self.reset(None)
+
+    def reset(self, key):
+        self.key = key
+        self.points, self.best_t = [], None            # точки лучшего круга: (x, z, пройдено по кругу)
+        self.lap, self.cur, self.clean = None, [], False
+        self.armed, self.low, self.prev = True, 0.0, None
+
+    def update(self, frame):
+        me = next((c for c in frame["cars"] if c["player"]), None) if frame else None
+        length = frame.get("track_len", 0.0) if frame else 0.0
+        inp = frame.get("inputs") if frame else None
+        if not me or length < 500.0 or not frame.get("track") or not inp:
+            return
+        key = (frame["track"], me["vehicle"])
+        if key != self.key:
+            self.reset(key)
+        lap, dist = me["laps"], me["lap_dist"]
+        pit = bool(me["in_pits"] or me.get("garage"))
+        if self.lap is None or lap < self.lap:
+            self.lap, self.cur, self.clean = lap, [], not pit
+            self.armed, self.low = True, 0.0
+        elif lap > self.lap:
+            lt = me["last"]
+            if self.clean and lap == self.lap + 1 and 15.0 < lt < 1800.0 and len(self.cur) >= 1 and (self.best_t is None or lt < self.best_t):
+                self.best_t, self.points = lt, list(self.cur)
+            self.lap, self.cur, self.clean = lap, [], not pit
+            self.armed, self.low = True, 0.0
+        step = 0.0
+        if self.prev is not None:
+            step = (dist - self.prev) % length
+            if step > length / 2.0:
+                step = 0.0
+        self.prev = dist
+        if pit or step >= 200.0:
+            self.clean = False
+            return
+        brk = float(inp.get("brk", 0.0))
+        if brk < self.OFF_LEVEL:
+            self.low += step
+            if self.low >= self.REARM_M:
+                self.armed = True
+        else:
+            self.low = 0.0
+            if brk >= self.ON_LEVEL and self.armed and me["pos"] != (0.0, 0.0):
+                self.cur.append((me["pos"][0], me["pos"][1], dist))
+                self.armed = False
+
+
 class DeltaTracker:
     """Дельта к лучшему (или прошлому) кругу: время на каждом отрезке круга сравнивается с эталоном."""
     STEP = 4.0
@@ -3682,6 +3752,7 @@ class LapLog:
 
 delta_tracker, stint_tracker, gap_tracker, alert_engine = DeltaTracker(), StintTracker(), GapTracker(), AlertEngine()
 micro_tracker = MicroTracker()
+brake_tracker = BrakeTracker()
 def draw_radio_icon(c, x, cy, col):
     """Маленький микрофон: капсула, дужка, ножка + волны."""
     c.create_rectangle(x - 2, cy - 6, x + 2, cy + 1, fill=col, outline="")
@@ -5001,7 +5072,7 @@ class Overlay:
         for k, v in (("delta", True), ("alerts", True), ("tyres", False), ("pitplan", False), ("gaps", False), ("engine", False),
                      ("sesstime", False), ("clock", False), ("speedo", False), ("laplog", False), ("micro", False), ("micro_n", 20), ("laplog_count", 5), ("laplog_best", True), ("laplog_delta", True),
                      ("laplog_temp", True), ("laplog_ref", "prev"), ("laplog_newest", True), ("speedo_view", "arc"), ("speedo_max", 340), ("st_session", True), ("st_timer", True), ("st_clock", True),
-                     ("op_bg_only", True), ("lmu_menu_hide", True), ("map_pit", True), ("map_turns", True), ("st_poscol", True), ("st_battle", True), ("st_pitinfo", True), ("st_radio", True),
+                     ("op_bg_only", True), ("lmu_menu_hide", True), ("map_pit", True), ("map_turns", True), ("map_brake", True), ("st_poscol", True), ("st_battle", True), ("st_pitinfo", True), ("st_radio", True),
                      ("delta_show_session", True), ("delta_show_mine", True), ("delta_show_pred", True)):
             cfg.setdefault(k, v)
         self.logo_dir = logo_dir
@@ -5087,6 +5158,8 @@ class Overlay:
         self.menu.add_checkbutton(label="Карта: отразить зеркально", variable=self.mirror_var, command=self.mirror_map)
         self.menu.add_command(label="Карта: крупнее", command=lambda: self.scale_map(+0.15))
         self.menu.add_command(label="Карта: мельче", command=lambda: self.scale_map(-0.15))
+        self.mbrake_var = tk.BooleanVar(value=bool(cfg.get("map_brake", True)))
+        self.menu.add_checkbutton(label="Карта: точки торможения лучшего круга", variable=self.mbrake_var, command=self.toggle_mbrake)
         self.menu.add_command(label="Карта: стереть и записать заново", command=mapper.clear)
         self.stand_var = tk.BooleanVar(value=bool(cfg.get("standings", True)))
         self.menu.add_checkbutton(label="Таблица (стендинг)", variable=self.stand_var, command=self.toggle_standings)
@@ -5605,6 +5678,10 @@ class Overlay:
                 w.top.deiconify()
         for win in [self.root] + [w.top for w in self.subs]:
             win.update_idletasks()               # пусть система применит новые координаты до сохранения
+        self.save()
+
+    def toggle_mbrake(self):
+        self.cfg["map_brake"] = bool(self.mbrake_var.get())
         self.save()
 
     def toggle_cols(self):
@@ -6640,6 +6717,7 @@ class Overlay:
                     delta_tracker.update(frame, self.cfg.get("delta_ref", "best"))
                     _gn = game_now()
                     micro_tracker.update(frame, _gn if _gn is not None else frame["elapsed"])
+                    brake_tracker.update(frame)
                     stint_tracker.update(frame)
                     lap_log.update(frame)
                     pit_log.update(frame)
@@ -6981,6 +7059,7 @@ def main():
                         mapper.loop = [(500 * math.cos(t) + 130 * math.cos(3 * t + .4), 330 * math.sin(t) + 90 * math.sin(2 * t))
                                        for t in (2 * math.pi * i / 400 for i in range(400))]
                         mapper.laps, mapper.status = mapper.MAX_LAPS, "ready"
+                    brake_tracker.points = [(mapper.loop[i][0], mapper.loop[i][1], 0.0) for i in (30, 120, 200, 310)]
                     ov.map.build()
                     ov.map.draw(state["frame"])
                     ov.map.top.geometry("+1300+300")
