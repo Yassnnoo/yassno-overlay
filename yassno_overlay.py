@@ -17,7 +17,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
 Параметры:  --rows 12     сколько строк показывать
             --font 13     размер шрифта
             --alpha 0.94  прозрачность (0.3 ... 1.0)
-            --hz 30       как часто читать память игры
+            --hz 60       как часто читать память игры
             --game auto   auto / lmu / rf2 / iracing — какую игру читать (по умолчанию определяется сама)
             --logos DIR   папка с логотипами марок (png)
             --unlock      запустить в режиме перемещения
@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "2.5.79"
+APP_VERSION = "2.5.80"
 import argparse
 import bisect
 import collections
@@ -1788,7 +1788,7 @@ class PedalsWindow(RelativeWindow):
         self.led_h = int(u * 0.62) if m.cfg.get("shiftlight", True) else 0
         self.height = int(u * 3.7) + self.led_h
         self.gear_w, self.speed_w = int(u * 1.7), int(u * 2.5)
-        self.wheel_d = int(self.height * 0.94)
+        self.wheel_d = int(self.height * 0.86)
         self.graph_w = int(u * 8.2)
         self.bar_w, self.bar_gap = int(u * 0.55), int(u * 0.14)
         hide = m.cfg.get("ped_hide", [])
@@ -1812,7 +1812,7 @@ class PedalsWindow(RelativeWindow):
         self._sig = None
 
     def tick(self, frame, ver):
-        sig = (ver, self.main.cfg["font"], self.main.locked, self.led_h, int(time.time() * 20), tuple(sorted(self.hide)), self.style)
+        sig = (ver, self.main.cfg["font"], self.main.locked, self.led_h, int(time.time() * 40), tuple(sorted(self.hide)), self.style)
         if sig != self._sig:
             self._sig = sig
             self.draw(frame)
@@ -1861,7 +1861,8 @@ class PedalsWindow(RelativeWindow):
             x += self.gear_w
         if "speed" not in hide:
             mph = bool(m.cfg.get("speed_mph", False))
-            kph = f"{me['speed'] * (2.23694 if mph else 3.6):.0f}" if me else "0"
+            _pl = bool(me and me["in_pits"] and not me["garage"])               # на пит-лейне скорость с десятыми
+            kph = f"{me['speed'] * (2.23694 if mph else 3.6):.{1 if _pl else 0}f}" if me else "0"
             sx = x + self.speed_w // 2
             c.create_text(sx, cy - int(u * 0.28), text=kph, fill=FG, font=self.f_speed)
             c.create_line(sx - int(u * 0.5), cy + int(u * 0.22), sx + int(u * 0.5), cy + int(u * 0.22), fill=BORDER)
@@ -4365,7 +4366,8 @@ class SpeedoWindow(SimpleWindow):
         except Exception:
             d = None
         g = inp["gear"] if inp else 0
-        return {"spd": me["speed"] * (2.23694 if mph else 3.6) if me else 0.0,
+        return {"dec": bool(me and me["in_pits"] and not me["garage"]),
+                "spd": me["speed"] * (2.23694 if mph else 3.6) if me else 0.0,
                 "gear": "-" if not inp else "R" if g < 0 else "N" if g == 0 else str(g),
                 "rpm": inp["rpm"] if inp else 0.0, "max": (inp["max_rpm"] if inp else 0.0) or 1.0,
                 "thr": inp["thr"] if inp else 0.0, "brk": inp["brk"] if inp else 0.0,
@@ -4415,7 +4417,7 @@ class SpeedoWindow(SimpleWindow):
         if v["brk"] > 0.01:
             c.create_arc(*b2, start=295, extent=110 * min(1, v["brk"]), style="arc", outline="#ff3b30", width=w2)
         c.create_text(cx, cy - u * 0.2, text=v["gear"], fill=self.INK if v["live"] else DIM, font=self.f_g)
-        c.create_text(cx, cy + u * 0.1, text=f"{v['spd']:.0f}", fill=self.INK, font=self.f_s)
+        c.create_text(cx, cy + u * 0.1, text=f"{v['spd']:.1f}" if v.get("dec") else f"{v['spd']:.0f}", fill=self.INK, font=self.f_s)
         c.create_text(cx, cy + u * 0.23, text="MPH" if v["mph"] else "KPH", fill=self.INK2, font=self.f_t)
         if v["fuel"] is not None:
             c.create_text(cx, cy + u * 0.35, text=f"{v['fuel']:.1f} L", fill=self.INK, font=self.f_t)
@@ -4514,7 +4516,7 @@ class SpeedoWindow(SimpleWindow):
         a = 225 - 270 * min(1.0, v["rpm"] / top)
         self.needle(c, cx, cy, r * 0.30, r * 0.86, a)
         self.hub(c, cx, cy, r * 0.27, text=v["gear"], col="#ffffff" if v["live"] else "#7b8794")
-        c.create_text(cx, cy + r * 0.52, text=f"{v['spd']:.0f}", fill=self.INK, font=self.f_s)
+        c.create_text(cx, cy + r * 0.52, text=f"{v['spd']:.1f}" if v.get("dec") else f"{v['spd']:.0f}", fill=self.INK, font=self.f_s)
         c.create_text(cx, cy + r * 0.72, text="MPH" if v["mph"] else "KPH", fill=self.INK2, font=self.f_t)
         c.create_text(cx, cy + r * 0.86, text="x1000 rpm", fill=self.INK2, font=self.f_t)
 
@@ -4535,7 +4537,7 @@ class SpeedoWindow(SimpleWindow):
             c.create_rectangle(lx, 8, lx + lw, 8 + H * 0.2, fill=col if lit else self.LTRACK, outline="")
         cy = H * 0.62
         c.create_text(W * 0.09, cy, text=v["gear"], fill=self.AMB if v["live"] else self.INK2, font=self.f_g)
-        c.create_text(W * 0.5, cy - 2, text=f"{v['spd']:.0f}", fill=self.INK, font=self.f_s)
+        c.create_text(W * 0.5, cy - 2, text=f"{v['spd']:.1f}" if v.get("dec") else f"{v['spd']:.0f}", fill=self.INK, font=self.f_s)
         c.create_text(W * 0.5 + self.f_s.measure("000") / 2 + 8, cy + H * 0.16, text="MPH" if v["mph"] else "KPH", fill=self.INK2, anchor="w", font=self.f_t)
         for i, (val, col) in enumerate(((v["thr"], "#2ee26d"), (v["brk"], "#ff3b30"))):
             bx = W - 16 - i * 14
@@ -6760,7 +6762,7 @@ class Overlay:
                     SELFTEST.append(_t)
             self.canvas.delete("all")
             self.canvas.create_text(10, 10, text=f"Ошибка отрисовки: {e}", fill=RED, anchor="nw")
-        self.root.after(40, self.tick)
+        self.root.after(20, self.tick)
 
 
 # =========================================================================
@@ -6904,7 +6906,7 @@ def main():
     ap.add_argument("--rows", type=int)
     ap.add_argument("--font", type=int)
     ap.add_argument("--alpha", type=float)
-    ap.add_argument("--hz", type=float, default=30.0, help="как часто читать память игры (по умолчанию 30)")
+    ap.add_argument("--hz", type=float, default=60.0, help="как часто читать память игры (по умолчанию 60)")
     ap.add_argument("--game", choices=["auto", "lmu", "rf2", "iracing"], default="auto", help="какую игру читать")
     ap.add_argument("--logos", help="папка с логотипами марок (png)")
     ap.add_argument("--unlock", action="store_true", help="запустить в режиме перемещения")
