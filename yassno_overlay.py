@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "2.5.70"
+APP_VERSION = "2.5.75"
 import argparse
 import bisect
 import collections
@@ -279,6 +279,12 @@ try:
     IR_SVG = svgmap.IrSvgMaps(os.path.join(MAP_DIR, "svg"))
 except Exception:                                    # нет файла или сломан — работаем по траектории игрока
     svgmap, IR_SVG = None, None
+try:
+    import yassno_wheels as wheels                   # рисованные руля (нужен PIL); нет файла или PIL — рисуем плоскими фигурами
+    if not wheels.OK:
+        wheels = None
+except Exception:
+    wheels = None
 RUNTIME = {"ir_svg": True}                           # переключатель «схема трассы iRacing» (ставится из настроек карты)
 
 
@@ -1040,10 +1046,10 @@ DEFAULT_THEME = {"accent": "#f2b705", "text": "#eef1f5", "dim": "#8791a0", "pane
                  "background": "#0b0e13", "border": "#2a3140", "me": "#4da3ff",
                  "throttle": "#2ee26d", "brake": "#ff3b30", "clutch": "#4a90ff"}
 ELEMENTS = ("standings", "relative", "pedals", "shiftlight", "trackmap", "radar", "weather", "lights", "limiter", "fuel",
-            "delta", "alerts", "tyres", "pitplan", "gaps", "engine", "sesstime", "clock", "speedo", "laplog")
+            "delta", "alerts", "tyres", "pitplan", "gaps", "engine", "sesstime", "clock", "speedo", "laplog", "micro")
 LAYOUT_POS = ("x", "y", "rel_x", "rel_y", "ped_x", "ped_y", "map_x", "map_y", "radar_x", "radar_y", "wx_x", "wx_y",
               "lights_x", "lights_y", "lim_x", "lim_y", "fuel_x", "fuel_y", "delta_x", "delta_y", "alerts_x", "alerts_y",
-              "tyres_x", "tyres_y", "pitplan_x", "pitplan_y", "gaps_x", "gaps_y", "engine_x", "engine_y", "sesstime_x", "sesstime_y", "clock_x", "clock_y", "speedo_x", "speedo_y", "laplog_x", "laplog_y")
+              "tyres_x", "tyres_y", "pitplan_x", "pitplan_y", "gaps_x", "gaps_y", "engine_x", "engine_y", "sesstime_x", "sesstime_y", "clock_x", "clock_y", "speedo_x", "speedo_y", "laplog_x", "laplog_y", "micro_x", "micro_y")
 LAYOUT_SCALE = tuple("scale_" + e for e in ELEMENTS) + ("map_scale", "fuel_scale") + tuple("sx_" + e for e in ELEMENTS) + tuple("sy_" + e for e in ELEMENTS)
 LAYOUT_KEYS = ELEMENTS + ("stand_mode", "map_mode", "delta_view", "delta_theme", "tyres_view", "engine_view", "speedo_view", "speedo_max", "laplog_count", "laplog_best", "laplog_delta", "laplog_temp", "laplog_ref", "laplog_newest") + LAYOUT_POS + LAYOUT_SCALE
 SCREEN_KEYS = LAYOUT_POS + tuple("sx_" + e for e in ELEMENTS) + tuple("sy_" + e for e in ELEMENTS)
@@ -1291,7 +1297,7 @@ SCALE_SPEC = {"trackmap": ("map_scale", 0.5, 3.0, 1.0), "radar": ("radar_scale",
 OVERLAY_NAMES = {"standings": "Таблица", "relative": "Релатив", "pedals": "Ввод", "trackmap": "Карта", "radar": "Радар",
                  "weather": "Погода", "lights": "Огни", "limiter": "Лимитер", "fuel": "Топливо", "delta": "Дельта",
                  "alerts": "Предупреждения", "tyres": "Шины", "pitplan": "План пит-стопа", "gaps": "Отрывы",
-                 "engine": "Двигатель", "sesstime": "Время сессии", "clock": "Часы", "speedo": "Спидометр", "laplog": "Журнал кругов"}
+                 "engine": "Двигатель", "sesstime": "Время сессии", "clock": "Часы", "speedo": "Спидометр", "laplog": "Журнал кругов", "micro": "Микро-сектора"}
 
 
 EDGE = 9                                                        # ширина полосы у края окна, за которую его растягивают
@@ -1780,9 +1786,9 @@ class PedalsWindow(RelativeWindow):
         self.f_gear = tkfont.Font(family=fam, size=int(sz * 3.2), weight="bold")
         self.f_speed = tkfont.Font(family=fam, size=int(sz * 1.7), weight="bold")
         self.led_h = int(u * 0.62) if m.cfg.get("shiftlight", True) else 0
-        self.height = int(u * 3.3) + self.led_h
+        self.height = int(u * 3.7) + self.led_h
         self.gear_w, self.speed_w = int(u * 1.7), int(u * 2.5)
-        self.wheel_d = int(self.height * 0.62)
+        self.wheel_d = int(self.height * 0.94)
         self.graph_w = int(u * 8.2)
         self.bar_w, self.bar_gap = int(u * 0.55), int(u * 0.14)
         hide = m.cfg.get("ped_hide", [])
@@ -1932,6 +1938,21 @@ class PedalsWindow(RelativeWindow):
             c.create_line(mid, cy - h // 2 - 3, mid, cy + h // 2 + 3, fill=G, width=2)
             c.create_text(mid, cy + h // 2 + int(self.u * 0.5), text=f"{angle:+.0f}°", fill=DIM, font=self.main.small)
             return
+        if wheels is not None and self.style in wheels.STYLES:      # красивый руль-картинка (PIL); при любой ошибке падаем на плоский
+            try:
+                from PIL import ImageTk
+                size = max(24, self.wheel_d)
+                key = (self.style, size, int(round(angle)) % 360)
+                cache = self.__dict__.setdefault("_wimgs", {})
+                photo = cache.get(key)
+                if photo is None:
+                    if len(cache) > 400:
+                        cache.clear()
+                    photo = cache[key] = ImageTk.PhotoImage(wheels.render(self.style, size, key[2]))
+                c.create_image(x + r + 2, cy, image=photo)
+                return
+            except Exception:
+                wheels_fail = True
         wx = x + r + 2
         a = math.radians(angle)
         ca, sa = math.cos(a), math.sin(a)
@@ -3139,6 +3160,45 @@ class DeltaTracker:
         self.delta = self.pred = self.ref_t = None
         self.hist = collections.deque(maxlen=400)     # (время, дельта) — для мини-графика
         self.ref_name = ""
+        self.ref_pair = None
+        self.micro_prev = None                        # результат прошлого круга по микро-секторам (держим, пока идёт начало нового)
+        self.micro_key = None
+
+    @staticmethod
+    def _at(ds, ts, x):
+        """Время на отметке пути x по записи (ds — пройденный путь, ts — время)."""
+        i = bisect.bisect_left(ds, x)
+        if i <= 0:
+            return ts[0]
+        if i >= len(ds):
+            return ts[-1]
+        f = (x - ds[i - 1]) / max(1e-6, ds[i] - ds[i - 1])
+        return ts[i - 1] + (ts[i] - ts[i - 1]) * f
+
+    def micro(self, n):
+        """Список из n значений: на сколько секунд текущий круг быстрее (<0) или медленнее (>0) эталона в каждом куске круга
+        (куски равной длины); None — этот кусок ещё не проехан. Второй результат — номер текущего куска или None."""
+        ref = self.ref_pair
+        if not ref or len(self.cur) < 2 or n < 2:
+            return [None] * max(n, 0), None
+        ds, ts = ref
+        total = ds[-1]
+        if total < 100.0:
+            return [None] * n, None
+        cds = [d for d, _ in self.cur]
+        cts = [t for _, t in self.cur]
+        reach = cds[-1]
+        out = []
+        for i in range(n):
+            a, b = total * i / n, total * (i + 1) / n
+            if reach < b:
+                out.append(None)
+                continue
+            dc = self._at(cds, cts, b) - self._at(cds, cts, a)
+            dr = self._at(ds, ts, b) - self._at(ds, ts, a)
+            out.append(dc - dr)
+        cur = next((i for i, v in enumerate(out) if v is None), None)
+        return out, cur
 
     def update(self, frame, ref="best"):
         me = next((c for c in frame["cars"] if c["player"]), None) if frame else None
@@ -3202,6 +3262,7 @@ class DeltaTracker:
         if ref == "best" and use is None and self.last is not None:
             use, name = self.last, "к прошлому"
         self.ref_name = name
+        self.ref_pair = use
         if use is None or not self.cur:
             self.delta = self.pred = self.ref_t = None
             return
@@ -3597,6 +3658,58 @@ class SimpleWindow(RelativeWindow):
 
     def me(self, frame):
         return next((c for c in frame["cars"] if c["player"]), None) if frame else None
+
+
+class MicroWindow(SimpleWindow):
+    """Микро-сектора: круг режется на N равных кусков, каждый красится по сравнению с эталоном (лучший или прошлый круг)."""
+    POS, ON = ("micro_x", "micro_y"), "micro"
+    WIDTH, HEIGHT, HZ = 28.0, 2.6, 10
+    FULL = 0.15                                       # на столько секунд разница красит кусок полностью
+
+    def n(self):
+        try:
+            return max(5, min(40, int(self.main.cfg.get("micro_n", 20))))
+        except (TypeError, ValueError):
+            return 20
+
+    def values(self, frame):
+        n = self.n()
+        if not self.main.locked:                      # режим перемещения: образец
+            vals = [(-0.09, -0.04, 0.0, 0.05, 0.11, 0.02, -0.06, -0.12, 0.03, -0.02)[i % 10] for i in range(n)]
+            return vals[:max(1, n * 3 // 5)] + [None] * (n - max(1, n * 3 // 5)), max(1, n * 3 // 5)
+        return delta_tracker.micro(n)
+
+    def draw(self, frame):
+        m, c, W, H = self.main, self.canvas, self.width, self.height
+        c.delete("all")
+        if self.R:
+            draw_rrect(c, 0, 0, W - 1, H - 1, self.R, fill=HDR_BG, outline=BORDER)
+        else:
+            c.create_rectangle(0, 0, W - 1, H - 1, fill=HDR_BG, outline=BORDER)
+        n = self.n()
+        vals, cur = self.values(frame)
+        key = (n, delta_tracker.key)
+        if vals and all(v is not None for v in vals):
+            delta_tracker.micro_prev, delta_tracker.micro_key = list(vals), key       # круг закончен: запоминаем итог
+        prev = delta_tracker.micro_prev if delta_tracker.micro_key == key else None
+        pad, gap = 10, 2
+        bw = (W - 2 * pad - gap * (n - 1)) / n
+        top, bot = int(H * 0.30), int(H * 0.82)
+        for i in range(n):
+            v, dim = vals[i], False
+            if v is None and prev:
+                v, dim = prev[i], True                  # ещё не проехали — показываем, как было на прошлом круге
+            x0 = pad + i * (bw + gap)
+            if v is None:
+                col = "#2a3140"
+            else:
+                k = min(1.0, abs(v) / self.FULL)
+                base = GREEN if v < -0.005 else RED if v > 0.005 else "#8791a0"
+                col = _mix("#2a3140", base, (0.30 + 0.70 * k) * (0.45 if dim else 1.0))
+            c.create_rectangle(x0, top, x0 + bw, bot, fill=col, outline="")
+        if cur is not None and cur < n:
+            x = pad + cur * (bw + gap) + bw / 2
+            c.create_polygon(x - 4, 3, x + 4, 3, x, 9, fill=FG, outline="")
 
 
 class DeltaWindow(SimpleWindow):
@@ -4749,7 +4862,7 @@ class Overlay:
     def __init__(self, cfg, logo_dir=None):
         self.cfg = cfg
         for k, v in (("delta", True), ("alerts", True), ("tyres", False), ("pitplan", False), ("gaps", False), ("engine", False),
-                     ("sesstime", False), ("clock", False), ("speedo", False), ("laplog", False), ("laplog_count", 5), ("laplog_best", True), ("laplog_delta", True),
+                     ("sesstime", False), ("clock", False), ("speedo", False), ("laplog", False), ("micro", False), ("micro_n", 20), ("laplog_count", 5), ("laplog_best", True), ("laplog_delta", True),
                      ("laplog_temp", True), ("laplog_ref", "prev"), ("laplog_newest", True), ("speedo_view", "arc"), ("speedo_max", 340), ("st_session", True), ("st_timer", True), ("st_clock", True),
                      ("op_bg_only", True), ("lmu_menu_hide", True), ("map_pit", True), ("map_turns", True), ("st_poscol", True), ("st_battle", True), ("st_pitinfo", True), ("st_radio", True),
                      ("delta_show_session", True), ("delta_show_mine", True), ("delta_show_pred", True)):
@@ -4783,7 +4896,7 @@ class Overlay:
         self.canvas.pack()
         self._h = 0
         self.rel = self.ped = self.map = self.radar = self.weather = self.lights = self.limiter = self.fuel = None
-        self.delta = self.alerts = self.tyres = self.pitplan = self.gaps = self.engine = self.sesstime = self.clock = self.speedo = self.laplog = None
+        self.delta = self.alerts = self.tyres = self.pitplan = self.gaps = self.engine = self.sesstime = self.clock = self.speedo = self.laplog = self.micro = None
         self.subs = []                                   # дополнительные окна: релатив, ввод
         self.rebuild()
         cfg.setdefault("rel_x", cfg["x"] + self.width + 24)      # по умолчанию — справа от таблицы
@@ -4855,7 +4968,7 @@ class Overlay:
         self.new_vars = {}
         for key, label in (("delta", "Дельта к лучшему кругу"), ("alerts", "Предупреждения"),
                            ("tyres", "Шины и тормоза"), ("pitplan", "Пит-стоп и стинт"), ("gaps", "Соперники: гэпы и тренд"),
-                           ("engine", "Двигатель и расход"), ("sesstime", "Таймер сессии"), ("clock", "Локальное время"), ("speedo", "Спидометр"), ("laplog", "Журнал кругов")):
+                           ("engine", "Двигатель и расход"), ("sesstime", "Таймер сессии"), ("clock", "Локальное время"), ("speedo", "Спидометр"), ("laplog", "Журнал кругов"), ("micro", "Микро-сектора")):
             self.new_vars[key] = tk.BooleanVar(value=bool(cfg.get(key)))
             self.menu.add_checkbutton(label=label, variable=self.new_vars[key],
                                       command=lambda k=key: self._toggle_sub(getattr(self, k), self.new_vars[k]))
@@ -4977,8 +5090,12 @@ class Overlay:
         cfg.setdefault("laplog_y", max(0, cfg["y"] - 330))
         self.laplog = LapLogWindow(self)
         self.laplog.fit_on_screen()
+        cfg.setdefault("micro_x", cfg["delta_x"])
+        cfg.setdefault("micro_y", cfg["delta_y"] + self.delta.height + 8)
+        self.micro = MicroWindow(self)
+        self.micro.fit_on_screen()
         self.subs = [self.rel, self.ped, self.map, self.radar, self.weather, self.lights, self.limiter, self.fuel,
-                     self.delta, self.alerts, self.tyres, self.pitplan, self.gaps, self.engine, self.sesstime, self.clock, self.speedo, self.laplog]
+                     self.delta, self.alerts, self.tyres, self.pitplan, self.gaps, self.engine, self.sesstime, self.clock, self.speedo, self.laplog, self.micro]
         r.update_idletasks()
         self.apply_lock()
         self._sig = None
@@ -5337,7 +5454,8 @@ class Overlay:
                         sesstime_x=self.cfg["x"], sesstime_y=max(0, self.cfg["y"] - 90),
                         clock_x=self.cfg["x"] + self.sesstime.width + 16, clock_y=max(0, self.cfg["y"] - 90),
                         speedo_x=self.cfg["x"], speedo_y=max(0, self.cfg["y"] - 330),
-                        laplog_x=self.cfg["x"] + 260, laplog_y=max(0, self.cfg["y"] - 330))
+                        laplog_x=self.cfg["x"] + 260, laplog_y=max(0, self.cfg["y"] - 330),
+                        micro_x=self.cfg["delta_x"], micro_y=self.cfg["delta_y"] + self.delta.height + 8)
         for w in self.subs:
             w.top.geometry(f"+{self.cfg[w.POS[0]]}+{self.cfg[w.POS[1]]}")
             w.fit_on_screen()

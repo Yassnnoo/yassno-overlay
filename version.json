@@ -1,6 +1,6 @@
 {
- "version": "2.5.70",
- "notes": "Лаунчер не затирает вкл/выкл панелей, размеры и виды, изменённые в игре",
+ "version": "2.5.75",
+ "notes": "Руль ещё крупнее, панель ввода чуть выше",
  "files": [
   "README.txt",
   "diagnose.cmd",
@@ -54,6 +54,7 @@
   "yassno_launcher.py",
   "yassno_overlay.py",
   "yassno_readers.py",
-  "yassno_svgmap.py"
+  "yassno_svgmap.py",
+  "yassno_wheels.py"
  ]
 }

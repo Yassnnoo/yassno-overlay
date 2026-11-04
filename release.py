@@ -20,7 +20,7 @@ SRC = os.path.dirname(os.path.abspath(__file__))
 PKG = "/tmp/y/yassno-overlay"                      # папка, из которой собирается zip
 DEPLOY = "/mnt/user-data/outputs/deploy"           # то, что кладётся на ПК
 OUT = "/mnt/user-data/outputs"
-CODE = ["yassno_overlay.py", "yassno_launcher.py", "yassno_svgmap.py", "yassno_readers.py", "README.txt", "version.json"]
+CODE = ["yassno_overlay.py", "yassno_launcher.py", "yassno_svgmap.py", "yassno_readers.py", "yassno_wheels.py", "README.txt", "version.json"]
 
 
 def fail(msg):
@@ -63,7 +63,7 @@ def main():
     vp = os.path.join(SRC, "version.json")
     v = json.load(open(vp, encoding="utf-8"))
     v["version"], v["notes"] = ver, notes
-    for need in ("yassno_readers.py", "yassno_svgmap.py", "logos/tile_ac_on.png", "logos/tile_ac_off.png", "logos/peugeot.png", "logos/genesis.png", "logos/ginetta.png", "logos/ligier.png") + tuple("logos/c/%s.png" % n for n in ("ferrari","porsche","bmw","mclaren","astonmartin","chevrolet","lamborghini","ford","lexus","mercedes","toyota","peugeot","cadillac","alpine","genesis","ginetta","ligier")):
+    for need in ("yassno_readers.py", "yassno_wheels.py", "yassno_svgmap.py", "logos/tile_ac_on.png", "logos/tile_ac_off.png", "logos/peugeot.png", "logos/genesis.png", "logos/ginetta.png", "logos/ligier.png") + tuple("logos/c/%s.png" % n for n in ("ferrari","porsche","bmw","mclaren","astonmartin","chevrolet","lamborghini","ford","lexus","mercedes","toyota","peugeot","cadillac","alpine","genesis","ginetta","ligier")):
         if need not in v["files"]:
             v["files"].append(need)
     v["files"] = sorted(set(v["files"]))

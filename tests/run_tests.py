@@ -250,6 +250,34 @@ class PitLogTests(unittest.TestCase):
         self.assertIsNone(pl.info(7))                            # новая сессия — сброс
 
 
+class MicroSectorTests(unittest.TestCase):
+    def tracker(self, cur_speed, ref_speed=50.0, reach=1000.0, total=1000.0):
+        t = O.DeltaTracker()
+        t.ref_pair = ([0.0, total], [0.0, total / ref_speed])
+        t.cur = [(d, d / cur_speed) for d in range(0, int(reach) + 1, 4)]
+        return t
+
+    def test_faster_lap_all_negative(self):
+        vals, cur = self.tracker(55.0).micro(10)
+        self.assertEqual(len(vals), 10)
+        self.assertTrue(all(v is not None and v < 0 for v in vals))
+        self.assertIsNone(cur)
+
+    def test_slower_positive_and_unreached_none(self):
+        vals, cur = self.tracker(45.0, reach=520.0).micro(10)
+        self.assertTrue(all(v > 0 for v in vals[:5]))
+        self.assertTrue(all(v is None for v in vals[5:]))
+        self.assertEqual(cur, 5)
+
+    def test_no_reference(self):
+        t = O.DeltaTracker()
+        self.assertEqual(t.micro(8), ([None] * 8, None))
+
+    def test_sum_equals_total_delta(self):
+        vals, _ = self.tracker(40.0).micro(20)
+        self.assertAlmostEqual(sum(vals), 1000 / 40.0 - 1000 / 50.0, places=3)
+
+
 class PosEventTests(unittest.TestCase):
     def test_gain_and_loss(self):
         me = types.SimpleNamespace(_pe={}, POS_HOLD=O.Overlay.POS_HOLD)
