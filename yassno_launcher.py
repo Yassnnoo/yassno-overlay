@@ -41,7 +41,7 @@ try:
 except Exception:
     wheels = None
 
-APP_VERSION = "2.5.82"
+APP_VERSION = "2.5.83"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -1675,7 +1675,11 @@ class ProfilePanel(ttk.Frame):
         box = []
 
         def work():
-            res = {"local": None, "net": None, "net_err": ""}
+            res = {"local": None, "pack": None, "net": None, "net_err": ""}
+            try:
+                res["pack"] = setups.download_pack(root_dir, track, car)
+            except Exception as e:
+                res["net_err"] += f" набор: {type(e).__name__}: {e}"
             try:
                 if local_dirs:
                     res["local"] = setups.install_local(root_dir, track, car, local_dirs)
@@ -1698,6 +1702,10 @@ class ProfilePanel(ttk.Frame):
                 if n or k:
                     got = True
                     lines.append(f"Из своих папок: скачано {n}" + (f", уже были {k} (не тронуты)" if k else ""))
+            if r["pack"] and (r["pack"]["saved"] or r["pack"]["skipped"]):
+                got = True
+                n, k = len(r["pack"]["saved"]), len(r["pack"]["skipped"])
+                lines.append(f"Из набора лаунчера (HYMO): скачано {n}" + (f", уже были {k} (не тронуты)" if k else ""))
             if r["net"] is not None:
                 if r["net"]["ok"]:
                     got = True

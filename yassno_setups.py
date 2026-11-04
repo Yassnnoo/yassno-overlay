@@ -346,3 +346,46 @@ def download(settings_root, track, vehicle, tree_fn=None, get_fn=None):
     if skipped:
         msg += f", уже были {len(skipped)} (не тронуты)"
     return {"ok": True, "message": msg, "saved": saved, "skipped": skipped, "folder": dest}
+
+
+# --- Свой набор сетапов (HYMO, с разрешения автора), лежит в папке setups/ репозитория лаунчера ---
+PACK_REPO = "Yassnnoo/yassno-overlay"
+PACK_DIR = "setups"
+PACK_TREE_URL = f"https://api.github.com/repos/{PACK_REPO}/git/trees/main?recursive=1"
+PACK_RAW_URL = f"https://raw.githubusercontent.com/{PACK_REPO}/main/"
+PACK_KNOWN = ['HYMO 1.4.1 720S SEB CQ.svm', 'HYMO 1.4.1 720S SEB CR.svm', 'HYMO 1.4.1 720S SEB EQ.svm', 'HYMO 1.4.1 720S SEB ER.svm', 'HYMO 1.4.1 720S SEB WQ.svm', 'HYMO 1.4.1 720S SEB WR.svm', 'HYMO 1.4.1 AMR SEB CQ.svm', 'HYMO 1.4.1 AMR SEB CR.svm', 'HYMO 1.4.1 AMR SEB EQ.svm', 'HYMO 1.4.1 AMR SEB ER.svm', 'HYMO 1.4.1 AMR SEB WQ.svm', 'HYMO 1.4.1 AMR SEB WR.svm', 'HYMO 1.4.1 RCF SEB CQ.svm', 'HYMO 1.4.1 RCF SEB CR.svm', 'HYMO 1.4.1 RCF SEB EQ.svm', 'HYMO 1.4.1 RCF SEB ER.svm', 'HYMO 1.4.1 RCF SEB WQ.svm', 'HYMO 1.4.1 RCF SEB WR.svm']
+
+
+def download_pack(settings_root, track, vehicle, tree_fn=None, get_fn=None):
+    """Скачивает подходящие сетапы из папки setups/ репозитория лаунчера. Возвращает {'saved','skipped','folder'}."""
+    tree_fn = tree_fn or fetch_json
+    get_fn = get_fn or fetch_bytes
+    folder, key = track_folder(track), car_key(vehicle)
+    if not folder or not key:
+        return {"saved": [], "skipped": [], "folder": None}
+    try:
+        tree = tree_fn(PACK_TREE_URL)
+        names = [t["path"].split("/", 1)[1] for t in tree.get("tree", [])
+                 if t.get("type") == "blob" and t["path"].startswith(PACK_DIR + "/") and t["path"].count("/") == 1]
+        if not names:
+            raise ValueError("пусто")
+    except Exception:
+        names = list(PACK_KNOWN)
+    saved, skipped, dest = [], [], None
+    for n in sorted(names):
+        if not n.lower().endswith(".svm") or file_track(n) != folder or car_key(n) != key:
+            continue
+        if dest is None:
+            dest = settings_track_dir(settings_root, folder)
+            os.makedirs(dest, exist_ok=True)
+        target = os.path.join(dest, n)
+        if os.path.exists(target):
+            skipped.append(n)
+            continue
+        data = get_fn(PACK_RAW_URL + PACK_DIR + "/" + urllib.parse.quote(n))
+        if not looks_like_svm(data):
+            continue
+        with open(target, "wb") as f:
+            f.write(data)
+        saved.append(n)
+    return {"saved": saved, "skipped": skipped, "folder": dest}

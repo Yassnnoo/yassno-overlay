@@ -408,6 +408,16 @@ class SetupsTests(unittest.TestCase):
             self.assertTrue(res["ok"])
             self.assertEqual(len(res["saved"]), 2)
 
+    def test_pack(self):
+        import tempfile
+        body = b'VehicleClassSetting="GT3 McLaren_720S_GT3_Evo WEC2026"\n'
+        with tempfile.TemporaryDirectory() as d:
+            r = self.S.download_pack(d, "Sebring International Raceway", "McLaren 720S GT3 Evo",
+                                tree_fn=lambda u: (_ for _ in ()).throw(OSError("x")), get_fn=lambda u: body)
+            self.assertEqual(len(r["saved"]), 6)
+            r2 = self.S.download_pack(d, "Sebring", "McLaren 720S GT3 Evo", tree_fn=lambda u: (_ for _ in ()).throw(OSError("x")), get_fn=lambda u: body)
+            self.assertEqual((len(r2["saved"]), len(r2["skipped"])), (0, 6))
+
     def test_local_folder(self):
         import tempfile
         S = self.S
