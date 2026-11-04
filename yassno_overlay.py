@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "2.5.75"
+APP_VERSION = "2.5.76"
 import argparse
 import bisect
 import collections
@@ -4993,6 +4993,11 @@ class Overlay:
         for v, lab in (("off", "одна для всех"), ("session", "по типу сессии (практика / квала / гонка)"), ("class", "по классу машины")):
             lm.add_radiobutton(label=lab, variable=self.lmode_var, value=v, command=self.set_layouts)
         self.menu.add_cascade(label="Раскладки окон", menu=lm)
+        gm = tk.Menu(self.menu, tearoff=0)
+        self.grid_var = tk.IntVar(value=int(cfg.get("snap_grid", 0) or 0))
+        for v, lab in ((0, "выкл (только магнит к краям и центрам)"), (10, "10 px"), (20, "20 px"), (40, "40 px")):
+            gm.add_radiobutton(label=lab, variable=self.grid_var, value=v, command=self.set_snap_grid)
+        self.menu.add_cascade(label="Сетка при перемещении", menu=gm)
         self.hide_var = tk.BooleanVar(value=bool(cfg.get("hide_garage", True)))
         self.menu.add_checkbutton(label="Скрывать в гараже", variable=self.hide_var, command=self.toggle_hide)
         cols = tk.Menu(self.menu, tearoff=0)
@@ -5733,13 +5738,16 @@ class Overlay:
     SNAP = 12
 
     def snap_pos(self, win, nx, ny):
-        """Магнит в режиме перемещения: края окна прилипают к краям экрана и к соседним окнам оверлея."""
+        """Магнит в режиме перемещения: края и центр окна прилипают к краям/центрам мониторов и соседних окон,
+        иначе — к сетке (если включена). Пока магнит держит, показываем направляющие линии."""
         try:
             w, h = win.winfo_width(), win.winfo_height()
-            xs, ys = [], []
+            xs, ys, cxs, cys = [], [], [], []
             for mx0, my0, mx1, my1 in monitor_rects(win):          # края каждого монитора (тройной экран, второй монитор слева — отрицательные координаты)
                 xs += [mx0, mx1]
                 ys += [my0, my1]
+                cxs.append((mx0 + mx1) / 2)
+                cys.append((my0 + my1) / 2)
             others = [self.root] + [x.top for x in self.subs]
             for o in others:
                 if o is win or not o.winfo_viewable():
@@ -5747,17 +5755,109 @@ class Overlay:
                 ox, oy, ow, oh = o.winfo_x(), o.winfo_y(), o.winfo_width(), o.winfo_height()
                 xs += [ox, ox + ow]
                 ys += [oy, oy + oh]
-            def fit(pos, size, lines):
-                best, bd = pos, self.SNAP + 1
+                cxs.append(ox + ow / 2)
+                cys.append(oy + oh / 2)
+
+            def fit(pos, size, lines, centers):
+                best, bd, line = pos, self.SNAP + 1, None
                 for ln in lines:
                     for cand in (ln, ln - size):                # левый/верхний край к линии или правый/нижний к линии
                         d = abs(cand - pos)
                         if d < bd:
-                            best, bd = cand, d
-                return best
-            return fit(nx, w, xs), fit(ny, h, ys)
+                            best, bd, line = cand, d, ln
+                for c0 in centers:                              # центр окна к центру монитора / соседнего окна
+                    cand = int(round(c0 - size / 2))
+                    d = abs(cand - pos)
+                    if d < bd:
+                        best, bd, line = cand, d, c0
+                return int(round(best)), line
+            rx, lx = fit(nx, w, xs, cxs)
+            ry, ly = fit(ny, h, ys, cys)
+            g = int(self.cfg.get("snap_grid", 0) or 0)
+            if g > 0:                                           # сетка — только там, где магнит ни к чему не прилип
+                if lx is None:
+                    rx = int(round(nx / g)) * g
+                if ly is None:
+                    ry = int(round(ny / g)) * g
+            self.show_guides(lx, ly)
+            return rx, ry
         except tk.TclError:
             return nx, ny
+
+    def show_guides(self, lx, ly):
+        """Тонкие линии выравнивания поверх всех окон; сами гаснут, когда окно перестали двигать."""
+        try:
+            if lx is None and ly is None:
+                self.hide_guides()
+                return
+            rects = monitor_rects(self.root)
+            gx0, gy0 = min(r[0] for r in rects), min(r[1] for r in rects)
+            gx1, gy1 = max(r[2] for r in rects), max(r[3] for r in rects)
+            gw = getattr(self, "_guide", None)
+            if gw is None:
+                top = tk.Toplevel(self.root)
+                top.overrideredirect(True)
+                top.attributes("-topmost", True)
+                top.configure(bg=KEY)
+                try:
+                    top.attributes("-transparentcolor", KEY)
+                except tk.TclError:
+                    pass
+                cv = tk.Canvas(top, bg=KEY, highlightthickness=0, bd=0)
+                cv.pack(fill="both", expand=True)
+                gw = self._guide = (top, cv)
+            top, cv = gw
+            top.geometry(f"{gx1 - gx0}x{gy1 - gy0}+{gx0}+{gy0}")
+            cv.delete("all")
+            col = "#ff3b8d"
+            if lx is not None:
+                cv.create_line(lx - gx0, 0, lx - gx0, gy1 - gy0, fill=col, width=1, dash=(4, 3))
+            if ly is not None:
+                cv.create_line(0, ly - gy0, gx1 - gx0, ly - gy0, fill=col, width=1, dash=(4, 3))
+            top.deiconify()
+            top.attributes("-topmost", True)
+            if getattr(self, "_guide_job", None):
+                self.root.after_cancel(self._guide_job)
+            self._guide_job = self.root.after(700, self.hide_guides)
+        except tk.TclError:
+            pass
+
+    def hide_guides(self):
+        gw = getattr(self, "_guide", None)
+        if gw is not None:
+            try:
+                gw[0].withdraw()
+            except tk.TclError:
+                pass
+
+    def set_snap_grid(self):
+        self.cfg["snap_grid"] = int(self.grid_var.get())
+        self.save()
+
+    def check_screen(self):
+        """Сменились мониторы или разрешение прямо во время работы — берём раскладку для нового набора экранов."""
+        now = time.time()
+        if now < getattr(self, "_scr_next", 0):
+            return
+        self._scr_next = now + 3.0
+        try:
+            sig = screen_signature(self.root)
+        except tk.TclError:
+            return
+        if sig == self.screen_sig:
+            return
+        self.save()                                             # раскладка прежнего набора экранов уходит под прежней подписью
+        self.screen_sig = sig
+        self.screen_b = screen_bounds(self.root)
+        load_screen_layout(self.cfg, sig, self.screen_b)
+        self.root.geometry(f"+{self.cfg['x']}+{self.cfg['y']}")
+        for w in self.subs:
+            try:
+                w.top.geometry(f"+{self.cfg[w.POS[0]]}+{self.cfg[w.POS[1]]}")
+                w.fit_on_screen()
+            except Exception:
+                pass
+        self.save()
 
     def drag_end(self, e):
         if getattr(self, "_resizing", False):
@@ -6423,6 +6523,7 @@ class Overlay:
                     w.tick(frame, ver)
             gn = game_now()
             self.check_layout(frame)
+            self.check_screen()
             fast = 30 if self.stand_mode() == "ticker" else 4
             sig = (ver // 3, int(gn) if gn is not None else 0, int(time.time() * fast), self.locked,
                    self.cfg["rows"], self.cfg["font"], self.cfg.get("class_only", False))
@@ -6696,6 +6797,25 @@ def main():
             except Exception:
                 import traceback
                 SELFTEST.append(traceback.format_exc(limit=-3).strip())
+        def _grid():                                        # сетка и направляющие
+            try:
+                ov.cfg["snap_grid"] = 20
+                got = [ov.snap_pos(ov.ped.top, 100 + 31 * i, 100 + 23 * i) for i in range(1, 40)]
+                if not any(gx % 20 == 0 and gy % 20 == 0 for gx, gy in got):
+                    SELFTEST.append("сетка 20 px: не округляет (%s)" % got[:4])
+                ov.cfg["snap_grid"] = 0
+                ov.show_guides(300, 300)
+                ov.root.update()
+                ov.hide_guides()
+                ov.cfg["snap_grid"] = 0
+                ov.screen_sig = "тест"                      # смена набора экранов на лету должна вернуть настоящую подпись
+                ov._scr_next = 0
+                ov.check_screen()
+                if ov.screen_sig == "тест":
+                    SELFTEST.append("смена экранов на лету не обработана")
+            except Exception:
+                import traceback
+                SELFTEST.append(traceback.format_exc(limit=-3).strip())
         def _laps():                                        # журнал кругов: подкладываем круги и просим перерисовку
             lap_log.laps = [{"n": 10 + i, "t": 136.9 + (0.3, -0.2, 0.5, 0.1, -0.4, 0.2, 0.6)[i], "pit": i == 3,
                              "temp": 23.4 if i != 5 else None} for i in range(7)]
@@ -6734,6 +6854,7 @@ def main():
         ov.root.after(1350, _shot)
         ov.root.after(1200, _laps)
         ov.root.after(1500, _snap)
+        ov.root.after(1700, _grid)
         ov.root.after(3000, ov.toggle_lock)                 # вторая половина проверки — режим перемещения
         ov.root.after(6500, _finish)
     try:
