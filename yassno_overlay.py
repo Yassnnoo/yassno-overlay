@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "2.5.83"
+APP_VERSION = "2.5.85"
 import argparse
 import bisect
 import collections
@@ -397,6 +397,26 @@ def detect_corners(loop, window_m=24.0, min_turn_deg=28.0):
     if len(merged) > 1 and merged[0][1] == merged[-1][1] and ((merged[0][0] + n - merged[-1][0]) * step) < 35.0:
         merged.pop()                                                      # поворот через линию старта посчитан дважды
     return [(m[0], num + 1, m[1]) for num, m in enumerate(merged)]
+
+
+def lmu_foreground():
+    """True, если сверху окно Le Mans Ultimate (нужно, чтобы Esc в других программах не прятал оверлей)."""
+    try:
+        u = ctypes.windll.user32
+        h = u.GetForegroundWindow()
+        buf = ctypes.create_unicode_buffer(256)
+        u.GetWindowTextW(h, buf, 256)
+        t = buf.value.lower()
+        return "le mans" in t or "lmu" in t
+    except Exception:
+        return False
+
+
+def esc_down():
+    try:
+        return bool(ctypes.windll.user32.GetAsyncKeyState(0x1B) & 0x8000)
+    except Exception:
+        return False
 
 
 class TrackMapper:
@@ -5930,6 +5950,24 @@ class Overlay:
                 hide = True
             if lmu_menu and (not frame["cars"] or not me):      # LMU в меню: машин нет или игрока в списке нет
                 hide = True
+            if lmu_menu and frame.get("game") == "lmu" and me and sys.platform == "win32":      # онлайн: время не стоит — следим за клавишей Esc
+                dn = esc_down() and lmu_foreground()
+                if dn and not getattr(self, "_esc_prev", False):
+                    self._esc_menu = not getattr(self, "_esc_menu", False)
+                    self._esc_t = now
+                self._esc_prev = dn
+                if getattr(self, "_esc_menu", False):
+                    inp = frame.get("inputs") or {}
+                    if now - getattr(self, "_esc_t", now) > 1.5 and (inp.get("thr", 0) > 0.05 or inp.get("brk", 0) > 0.05):
+                        self._esc_menu = False                          # рассинхрон (меню закрыли мышью) — педали нажаты, значит едем
+                    else:
+                        hide = True
+            if lmu_menu and frame.get("game") == "lmu" and me:         # Esc / пауза в одиночной игре: время сессии и машины стоят на месте
+                sig = (frame.get("elapsed"), frame.get("player_elapsed"))
+                if sig != getattr(self, "_pz_sig", None):
+                    self._pz_sig, self._pz_t = sig, now
+                elif now - getattr(self, "_pz_t", now) > 0.7:
+                    hide = True
             if frame.get("game") == "lmu":
                 st = (frame.get("options_location"), len(frame["cars"]), bool(me), bool(hide))
                 if st != getattr(self, "_ol_seen", None):               # пишем смену состояния в logs\lmu-state.log — для разбора, если оверлей ведёт себя странно

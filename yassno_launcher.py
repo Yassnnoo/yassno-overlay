@@ -41,7 +41,7 @@ try:
 except Exception:
     wheels = None
 
-APP_VERSION = "2.5.84"
+APP_VERSION = "2.5.85"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -2117,7 +2117,7 @@ class ProfilePanel(ttk.Frame):
             self.spin(f, None, "Размер шрифта", "font", 8, 28)
             self.tg(f, None, "Скрывать оверлей, когда машина в гараже", self.v["hide_garage"])
             if self.game == "lmu":
-                self.tg(f, None, "Скрывать оверлей в меню LMU (пока не загрузились на трассу)", self.v["lmu_menu_hide"])
+                self.tg(f, None, "Скрывать оверлей в меню LMU и на паузе (Esc)", self.v["lmu_menu_hide"])
             self.tg(f, None, "Записывать статистику сессий", self.v["stats"])
             if self.game == "lmu" and setups is not None:
                 sc = self.card("Сетапы (бесплатные, из открытого репозитория)", R)
@@ -6424,15 +6424,16 @@ def log_error(text):
 
 
 def ensure_pillow(app):
-    """Без Pillow руль и логотипы рисуются упрощённо. Если его нет — тихо ставим в фоне (один раз), оверлей подхватит при следующем запуске."""
+    """Без Pillow руль и логотипы рисуются упрощённо. Если его нет — ставим в фоне (до 3 попыток), итог пишем в logs/pillow.log; оверлей подхватит при следующем запуске."""
     try:
         import PIL  # noqa: F401
         return
     except Exception:
         pass
-    if app.cfg.get("pil_tried"):
+    n = int(app.cfg.get("pil_tries", 0) or 0)
+    if n >= 3:
         return
-    app.cfg["pil_tried"] = True
+    app.cfg["pil_tries"] = n + 1
     try:
         app.save_cfg()
     except Exception:
@@ -6440,8 +6441,17 @@ def ensure_pillow(app):
 
     def work():
         try:
-            subprocess.run([sys.executable, "-m", "pip", "install", "pillow"], capture_output=True, timeout=300, creationflags=NO_WINDOW)
-        except Exception:
+            r = subprocess.run([sys.executable, "-m", "pip", "install", "pillow"], capture_output=True, timeout=300,
+                               creationflags=NO_WINDOW)
+            out = (r.stdout + r.stderr).decode("utf-8", "ignore")[-1500:]
+            msg = f"код {r.returncode}\n{out}"
+        except Exception as e:
+            msg = f"{type(e).__name__}: {e}"
+        try:
+            os.makedirs(os.path.join(HERE, "logs"), exist_ok=True)
+            with open(os.path.join(HERE, "logs", "pillow.log"), "a", encoding="utf-8") as fh:
+                fh.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} python={sys.executable}\n{msg}\n---\n")
+        except OSError:
             pass
     threading.Thread(target=work, daemon=True).start()
 
