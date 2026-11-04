@@ -41,7 +41,7 @@ try:
 except Exception:
     wheels = None
 
-APP_VERSION = "2.5.85"
+APP_VERSION = "2.5.86"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -6423,36 +6423,41 @@ def log_error(text):
         pass
 
 
-def ensure_pillow(app):
-    """Без Pillow руль и логотипы рисуются упрощённо. Если его нет — ставим в фоне (до 3 попыток), итог пишем в logs/pillow.log; оверлей подхватит при следующем запуске."""
+def pillow_ok():
     try:
-        import PIL  # noqa: F401
-        return
-    except Exception:
-        pass
-    n = int(app.cfg.get("pil_tries", 0) or 0)
-    if n >= 3:
-        return
-    app.cfg["pil_tries"] = n + 1
-    try:
-        app.save_cfg()
-    except Exception:
-        pass
+        from PIL import Image, ImageDraw, ImageFilter, ImageTk  # noqa: F401
+        return True, ""
+    except Exception as e:
+        return False, f"{type(e).__name__}: {e}"
 
-    def work():
-        try:
-            r = subprocess.run([sys.executable, "-m", "pip", "install", "pillow"], capture_output=True, timeout=300,
-                               creationflags=NO_WINDOW)
-            out = (r.stdout + r.stderr).decode("utf-8", "ignore")[-1500:]
-            msg = f"код {r.returncode}\n{out}"
-        except Exception as e:
-            msg = f"{type(e).__name__}: {e}"
+
+def ensure_pillow(app):
+    """При каждом запуске проверяем Pillow (с ImageTk). Нет — ставим в фоне (обычный pip, затем --user), итог пишем в logs/pillow.log;
+    оверлей подхватит при следующем запуске."""
+    ok, why = pillow_ok()
+    if ok:
+        return
+
+    def log(msg):
         try:
             os.makedirs(os.path.join(HERE, "logs"), exist_ok=True)
             with open(os.path.join(HERE, "logs", "pillow.log"), "a", encoding="utf-8") as fh:
                 fh.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} python={sys.executable}\n{msg}\n---\n")
         except OSError:
             pass
+
+    def work():
+        log(f"Pillow не найден ({why}), ставлю…")
+        for extra in ([], ["--user"]):
+            try:
+                r = subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", "pillow"] + extra, capture_output=True,
+                                   timeout=300, creationflags=NO_WINDOW)
+                log(f"pip {' '.join(extra)}: код {r.returncode}\n" + (r.stdout + r.stderr).decode("utf-8", "ignore")[-1200:])
+                if r.returncode == 0:
+                    break
+            except Exception as e:
+                log(f"pip {' '.join(extra)}: {type(e).__name__}: {e}")
+        log("после установки Pillow " + ("доступен — перезапустите оверлей" if pillow_ok()[0] else "всё ещё недоступен"))
     threading.Thread(target=work, daemon=True).start()
 
 

@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "2.5.85"
+APP_VERSION = "2.5.86"
 import argparse
 import bisect
 import collections
@@ -3384,6 +3384,7 @@ class DeltaTracker:
         self.best = self.last = None                  # (расстояния, времена)
         self.best_t = self.last_t = None
         self.cur, self.lap, self.t0, self.clean = [], None, None, False
+        self.pos_t = None
         self.acc, self.prev = 0.0, None               # пройдено с начала круга (не зависит от того, где у игры «ноль» дистанции)
         self.cuts, self.best_cuts, self.last_cuts = [], None, None      # времена конца S1 и S2 (от начала круга)
         self.best_time, self.last_time, self.psec = None, None, None
@@ -3463,6 +3464,7 @@ class DeltaTracker:
                             self.best_cuts, self.best_time = list(self.cuts), lt
             self.lap, self.t0, self.cur, self.clean = lap, now, [], not pit
             self.acc = 0.0
+            self.pos_t = now
             self.cuts, self.psec = [], me.get("sector")
         sec = me.get("sector")
         if self.psec is not None and sec != self.psec and len(self.cuts) < 2 and now - self.t0 > 8.0:
@@ -3484,10 +3486,11 @@ class DeltaTracker:
             step = 0.0
         if step > 0.0:
             self.acc += step
+            self.pos_t = now                                # момент, когда игра в последний раз обновила позицию
         if not self.cur:
             self.cur.append((0.0, 0.0))
         elif self.acc - self.cur[-1][0] >= self.STEP:
-            self.cur.append((self.acc, now - self.t0))
+            self.cur.append((self.acc, (self.pos_t if self.pos_t is not None else now) - self.t0))
         use, name = (self.best, "к лучшему") if ref == "best" else (self.last, "к прошлому")
         if ref == "best" and use is None and self.last is not None:
             use, name = self.last, "к прошлому"
@@ -3498,6 +3501,8 @@ class DeltaTracker:
             return
         ds, ts = use
         pos = self.acc
+        if self.pos_t is not None:                          # позиция в данных игры обновляется реже кадров — доезжаем по скорости до текущего момента
+            pos += max(0.0, min(0.3, now - self.pos_t)) * max(0.0, me["speed"])
         i = bisect.bisect_left(ds, pos)
         if i <= 0:
             rt = ts[0]
@@ -3507,7 +3512,9 @@ class DeltaTracker:
             f = (pos - ds[i - 1]) / max(1e-6, ds[i] - ds[i - 1])
             rt = ts[i - 1] + (ts[i] - ts[i - 1]) * f
         self.ref_t = ts[-1]
-        self.delta = (now - self.t0) - rt
+        raw = (now - self.t0) - rt
+        prev = self.delta
+        self.delta = raw if prev is None or abs(raw - prev) > 1.0 else prev + (raw - prev) * 0.4      # лёгкое сглаживание, чтобы цифры не дёргались
         self.pred = self.ref_t + self.delta
         self.hist.append((now, self.delta))
 
