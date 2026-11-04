@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "2.5.86"
+APP_VERSION = "2.5.87"
 import argparse
 import bisect
 import collections
@@ -410,6 +410,26 @@ def lmu_foreground():
         return "le mans" in t or "lmu" in t
     except Exception:
         return False
+
+
+def fg_title():
+    try:
+        u = ctypes.windll.user32
+        buf = ctypes.create_unicode_buffer(256)
+        u.GetWindowTextW(u.GetForegroundWindow(), buf, 256)
+        return buf.value
+    except Exception:
+        return "?"
+
+
+def state_log(text):
+    try:
+        d = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "lmu-state.log"), "a", encoding="utf-8") as fh:
+            fh.write(f"{time.strftime('%H:%M:%S')} {text}\n")
+    except OSError:
+        pass
 
 
 def esc_down():
@@ -5958,10 +5978,15 @@ class Overlay:
             if lmu_menu and (not frame["cars"] or not me):      # LMU в меню: машин нет или игрока в списке нет
                 hide = True
             if lmu_menu and frame.get("game") == "lmu" and me and sys.platform == "win32":      # онлайн: время не стоит — следим за клавишей Esc
-                dn = esc_down() and lmu_foreground()
+                raw = esc_down()
+                dn = raw and lmu_foreground()
+                if raw and not getattr(self, "_esc_raw", False):
+                    state_log(f"Esc нажат: окно сверху «{fg_title()}», считаю игрой={'да' if dn else 'нет'}")
+                self._esc_raw = raw
                 if dn and not getattr(self, "_esc_prev", False):
                     self._esc_menu = not getattr(self, "_esc_menu", False)
                     self._esc_t = now
+                    state_log(f"Esc: меню {'открыто' if self._esc_menu else 'закрыто'}")
                 self._esc_prev = dn
                 if getattr(self, "_esc_menu", False):
                     inp = frame.get("inputs") or {}
@@ -5975,6 +6000,12 @@ class Overlay:
                     self._pz_sig, self._pz_t = sig, now
                 elif now - getattr(self, "_pz_t", now) > 0.7:
                     hide = True
+                    if not getattr(self, "_pz_log", False):
+                        self._pz_log = True
+                        state_log("пауза: время в игре стоит — прячу оверлей")
+                if sig != getattr(self, "_pz_sig0", None):
+                    self._pz_sig0 = sig
+                    self._pz_log = False
             if frame.get("game") == "lmu":
                 st = (frame.get("options_location"), len(frame["cars"]), bool(me), bool(hide))
                 if st != getattr(self, "_ol_seen", None):               # пишем смену состояния в logs\lmu-state.log — для разбора, если оверлей ведёт себя странно
