@@ -41,7 +41,7 @@ try:
 except Exception:
     wheels = None
 
-APP_VERSION = "2.5.83"
+APP_VERSION = "2.5.84"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -6423,11 +6423,35 @@ def log_error(text):
         pass
 
 
+def ensure_pillow(app):
+    """Без Pillow руль и логотипы рисуются упрощённо. Если его нет — тихо ставим в фоне (один раз), оверлей подхватит при следующем запуске."""
+    try:
+        import PIL  # noqa: F401
+        return
+    except Exception:
+        pass
+    if app.cfg.get("pil_tried"):
+        return
+    app.cfg["pil_tried"] = True
+    try:
+        app.save_cfg()
+    except Exception:
+        pass
+
+    def work():
+        try:
+            subprocess.run([sys.executable, "-m", "pip", "install", "pillow"], capture_output=True, timeout=300, creationflags=NO_WINDOW)
+        except Exception:
+            pass
+    threading.Thread(target=work, daemon=True).start()
+
+
 def main():
     if not os.path.isfile(OVERLAY):
         print("Рядом с лаунчером нет", os.path.basename(OVERLAY))
     try:
         app = App()
+        ensure_pillow(app)
         app.root.report_callback_exception = lambda *exc: log_error("".join(traceback.format_exception(*exc)))
         app.root.mainloop()
     except Exception:
