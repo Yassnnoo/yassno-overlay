@@ -37,7 +37,7 @@ try:
 except Exception:
     wheels = None
 
-APP_VERSION = "2.5.78"
+APP_VERSION = "2.5.79"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -2745,6 +2745,8 @@ class ProfilePanel(ttk.Frame):
             ("lights", "Огни", 10, sh + 20, 200, 50, self.d_lights),
             ("limiter", "Лимитер", 10, sh + (80 if self.game != "lmu" else 20), 150, 40, self.d_limiter),
         ]
+        dl = next(t for t in layout if t[0] == "delta")
+        layout.append(("micro", "Микро-сектора", dl[2], dl[3] + dl[5] + 10, dl[4], 26, self.d_micro))      # под дельтой: в нижних рядах не помещалась
         if self.game == "lmu":
             layout = [t for t in layout if t[0] != "lights"]
         ph = max(int(float(c.cget("height"))), self.OV_H)
@@ -2762,15 +2764,18 @@ class ProfilePanel(ttk.Frame):
         yb = max(t[3] + t[5] for t in layout) + 12
         nat = {"tyres": {"compact": (150, 190), "wear": (260, 92)}.get(self.mode_val("tyres_view"), (200, 160)), "pitplan": (260, 168),
                "gaps": (270, 130), "engine": {"compact": (360, 34), "gauges": (170, 200)}.get(self.mode_val("engine_view"), (230, 200)),
-               "alerts": (240, 120), "sesstime": (190, 52), "clock": (170, 52), "speedo": self.speedo_size(), "laplog": self.laplog_size(True), "micro": (260, 30)}
+               "alerts": (240, 120), "sesstime": (190, 52), "clock": (170, 52), "speedo": self.speedo_size(), "laplog": self.laplog_size(True)}
         fns = {"tyres": self.d_tyres, "pitplan": self.d_pitplan, "gaps": self.d_gaps, "engine": self.d_engine, "alerts": self.d_alerts,
-               "sesstime": self.d_sesstime, "clock": self.d_clock, "speedo": self.d_speedo, "laplog": self.d_laplog, "micro": self.d_micro}
-        rows = [(("tyres", "pitplan", "gaps", "engine"), 0.656), (("alerts", "sesstime", "clock", "speedo", "laplog", "micro"), 0.52)]
+               "sesstime": self.d_sesstime, "clock": self.d_clock, "speedo": self.d_speedo, "laplog": self.d_laplog}
+        rows = [(("tyres", "pitplan", "gaps", "engine"), 0.656), (("alerts", "sesstime", "clock", "speedo", "laplog"), 0.52)]
         for keys, k in rows:
             x = 10
             rh_ = 0
             for key in keys:
                 dw, dh = nat[key]
+                if x > 10 and x + dw * k > self.PW - 6:                 # не влезает в ряд — переносим на следующую строку
+                    yb += rh_ + 10
+                    x, rh_ = 10, 0
                 self.compute_theme(key)
                 self.make_fonts(k)
                 before = set(c.find_all())
