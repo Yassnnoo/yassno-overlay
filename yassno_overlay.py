@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "2.5.76"
+APP_VERSION = "2.5.77"
 import argparse
 import bisect
 import collections
@@ -3142,6 +3142,145 @@ class FuelWindow(RelativeWindow):
 # =========================================================================
 # 4b. Новые панели: дельта, предупреждения, шины и тормоза, пит-стоп и стинт, гэпы
 # =========================================================================
+class MicroTracker:
+    """Время каждого куска круга у каждой машины в кадре: сравниваем свой кусок со своим лучшим и с лучшим в своём классе."""
+    G = 200                                           # опорных отметок на круге; куски любой длины считаются по ним
+
+    def __init__(self):
+        self.reset(None)
+
+    def reset(self, key):
+        self.key = key
+        self.cars = {}
+        self.laps = collections.deque(maxlen=800)     # (класс, моя ли, времена на отметках от начала круга)
+        self.best = {}                                # n -> {"all": {класс: [..]}, "own": [..]}
+        self.me, self.cls = None, None
+
+    def segs(self, rel, n):
+        G = self.G
+
+        def T(f):
+            pos = f * G
+            i = min(G - 1, int(pos))
+            return rel[i] + (rel[i + 1] - rel[i]) * (pos - i)
+        return [T((i + 1) / n) - T(i / n) for i in range(n)]
+
+    def ensure(self, n):
+        b = self.best.get(n)
+        if b is None:
+            b = self.best[n] = {"all": {}, "own": [None] * n}
+            for cls, mine, rel in self.laps:
+                self._add(b, n, cls, mine, rel)
+        return b
+
+    def _add(self, b, n, cls, mine, rel):
+        sg = self.segs(rel, n)
+        al = b["all"].setdefault(cls, [None] * n)
+        for i, v in enumerate(sg):
+            if v <= 0.0:
+                continue
+            if al[i] is None or v < al[i]:
+                al[i] = v
+            if mine and (b["own"][i] is None or v < b["own"][i]):
+                b["own"][i] = v
+
+    def commit(self, st, cls, mine):
+        arr = st["arr"]
+        if not st["valid"] or any(a is None for a in arr):
+            return
+        lt = arr[-1] - arr[0]
+        if not 15.0 < lt < 1800.0:
+            return
+        rel = [a - arr[0] for a in arr]
+        if any(rel[i + 1] < rel[i] for i in range(self.G)):
+            return
+        self.laps.append((cls, mine, rel))
+        for n, b in self.best.items():
+            self._add(b, n, cls, mine, rel)
+
+    def update(self, frame, now):
+        me = next((c for c in frame["cars"] if c["player"]), None) if frame else None
+        length = frame.get("track_len", 0.0) if frame else 0.0
+        if not me or length < 500.0 or not frame.get("track"):
+            return
+        key = (frame["track"], me["vehicle"])
+        if key != self.key:
+            self.reset(key)
+        self.me, self.cls = me["key"], me["cls"]
+        G = self.G
+        for c in frame["cars"]:
+            k, f = c["key"], (c["lap_dist"] % length) / length
+            pit = bool(c["in_pits"] or c.get("garage"))
+            st = self.cars.get(k)
+            if st is None:
+                self.cars[k] = {"f": f, "t": now, "arr": [None] * (G + 1), "valid": False}
+                continue
+            df, dt = f - st["f"], now - st["t"]
+            if pit or dt > 2.5 or dt < 0.0 or df >= 0.15 or -0.5 < df < -1e-6:
+                st["valid"] = False                       # бокс, зависание кадров, телепорт, задний ход — круг не считается
+                if df < -0.5:
+                    pass                                  # переход через линию ниже обработаем как обычно
+                else:
+                    st.update(f=f, t=now)
+                    continue
+            if df < -0.5:                                 # пересекли линию старта/финиша
+                share = (1.0 - st["f"]) / max(1e-9, (1.0 - st["f"]) + f)
+                tw = st["t"] + share * dt
+                arr = st["arr"]
+                j0 = int(st["f"] * G + 1e-6) + 1
+                for j in range(max(1, j0), G):
+                    fr = (j / G - st["f"]) / max(1e-9, 1.0 - st["f"])
+                    arr[j] = st["t"] + fr * (tw - st["t"])
+                arr[G] = tw
+                self.commit(st, c["cls"], c["player"])
+                st["arr"] = arr = [None] * (G + 1)
+                arr[0] = tw
+                st["valid"] = not pit
+                for j in range(1, int(f * G + 1e-6) + 1):
+                    arr[j] = tw + (j / G) / max(1e-9, f) * (now - tw)
+            elif df >= -1e-6:
+                arr = st["arr"]
+                j0 = int(st["f"] * G + 1e-6) + 1
+                for j in range(max(1, j0), int(f * G + 1e-6) + 1):
+                    if arr[j] is None:
+                        arr[j] = st["t"] + (j / G - st["f"]) / max(1e-9, df) * dt
+            st.update(f=f, t=now)
+
+    def mine(self, n):
+        """Масти кусков текущего круга игрока: 'P' лучший среди всех в классе, 'G' личный лучший, 'Y' хуже личного лучшего,
+        None — не проехан/круг не считается. Второй результат — номер текущего куска."""
+        st = self.cars.get(self.me)
+        if not st or not st["valid"] or st["arr"][0] is None:
+            return [None] * n, None
+        b = self.ensure(n)
+        al, ow = b["all"].get(self.cls), b["own"]
+        arr, G = st["arr"], self.G
+        rel = [(a - arr[0]) if a is not None else None for a in arr]
+
+        def T(p):
+            i = min(G - 1, int(p))
+            if rel[i] is None or rel[i + 1] is None:
+                return None
+            return rel[i] + (rel[i + 1] - rel[i]) * (p - i)
+        out = []
+        for i in range(n):
+            t0, t1 = T(i / n * G), T((i + 1) / n * G)
+            if t0 is None or t1 is None:
+                out.append(None)
+                continue
+            v = t1 - t0
+            ba = al[i] if al else None
+            bo = ow[i]
+            if ba is not None and v <= ba + 1e-4:
+                out.append("P")
+            elif bo is None or v <= bo + 1e-4:
+                out.append("G")
+            else:
+                out.append("Y")
+        cur = next((i for i, v in enumerate(out) if v is None), None)
+        return out, cur
+
+
 class DeltaTracker:
     """Дельта к лучшему (или прошлому) кругу: время на каждом отрезке круга сравнивается с эталоном."""
     STEP = 4.0
@@ -3542,6 +3681,7 @@ class LapLog:
 
 
 delta_tracker, stint_tracker, gap_tracker, alert_engine = DeltaTracker(), StintTracker(), GapTracker(), AlertEngine()
+micro_tracker = MicroTracker()
 def draw_radio_icon(c, x, cy, col):
     """Маленький микрофон: капсула, дужка, ножка + волны."""
     c.create_rectangle(x - 2, cy - 6, x + 2, cy + 1, fill=col, outline="")
@@ -3661,10 +3801,11 @@ class SimpleWindow(RelativeWindow):
 
 
 class MicroWindow(SimpleWindow):
-    """Микро-сектора: круг режется на N равных кусков, каждый красится по сравнению с эталоном (лучший или прошлый круг)."""
+    """Микро-сектора: круг режется на N равных кусков, каждый красится как в F1:
+    фиолетовый — лучший среди всех в классе, зелёный — личный лучший, жёлтый — хуже личного лучшего."""
     POS, ON = ("micro_x", "micro_y"), "micro"
     WIDTH, HEIGHT, HZ = 28.0, 2.6, 10
-    FULL = 0.15                                       # на столько секунд разница красит кусок полностью
+    COL = {"P": "#b84dff", "G": "#2ee26d", "Y": "#ffd23f"}
 
     def n(self):
         try:
@@ -3675,9 +3816,10 @@ class MicroWindow(SimpleWindow):
     def values(self, frame):
         n = self.n()
         if not self.main.locked:                      # режим перемещения: образец
-            vals = [(-0.09, -0.04, 0.0, 0.05, 0.11, 0.02, -0.06, -0.12, 0.03, -0.02)[i % 10] for i in range(n)]
-            return vals[:max(1, n * 3 // 5)] + [None] * (n - max(1, n * 3 // 5)), max(1, n * 3 // 5)
-        return delta_tracker.micro(n)
+            vals = ["G", "P", "G", "Y", "Y", "G", "P", "P", "Y", "G"]
+            k = max(1, n * 3 // 5)
+            return [vals[i % 10] for i in range(k)] + [None] * (n - k), k
+        return micro_tracker.mine(n)
 
     def draw(self, frame):
         m, c, W, H = self.main, self.canvas, self.width, self.height
@@ -3688,7 +3830,7 @@ class MicroWindow(SimpleWindow):
             c.create_rectangle(0, 0, W - 1, H - 1, fill=HDR_BG, outline=BORDER)
         n = self.n()
         vals, cur = self.values(frame)
-        key = (n, delta_tracker.key)
+        key = (n, micro_tracker.key)
         if vals and all(v is not None for v in vals):
             delta_tracker.micro_prev, delta_tracker.micro_key = list(vals), key       # круг закончен: запоминаем итог
         prev = delta_tracker.micro_prev if delta_tracker.micro_key == key else None
@@ -3700,12 +3842,7 @@ class MicroWindow(SimpleWindow):
             if v is None and prev:
                 v, dim = prev[i], True                  # ещё не проехали — показываем, как было на прошлом круге
             x0 = pad + i * (bw + gap)
-            if v is None:
-                col = "#2a3140"
-            else:
-                k = min(1.0, abs(v) / self.FULL)
-                base = GREEN if v < -0.005 else RED if v > 0.005 else "#8791a0"
-                col = _mix("#2a3140", base, (0.30 + 0.70 * k) * (0.45 if dim else 1.0))
+            col = "#2a3140" if v is None else _mix("#2a3140", self.COL[v], 0.45 if dim else 1.0)
             c.create_rectangle(x0, top, x0 + bw, bot, fill=col, outline="")
         if cur is not None and cur < n:
             x = pad + cur * (bw + gap) + bw / 2
@@ -6501,6 +6638,8 @@ class Overlay:
                 fuel_calc.update(frame)
                 try:
                     delta_tracker.update(frame, self.cfg.get("delta_ref", "best"))
+                    _gn = game_now()
+                    micro_tracker.update(frame, _gn if _gn is not None else frame["elapsed"])
                     stint_tracker.update(frame)
                     lap_log.update(frame)
                     pit_log.update(frame)

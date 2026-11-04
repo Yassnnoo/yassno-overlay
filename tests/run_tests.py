@@ -251,31 +251,68 @@ class PitLogTests(unittest.TestCase):
 
 
 class MicroSectorTests(unittest.TestCase):
-    def tracker(self, cur_speed, ref_speed=50.0, reach=1000.0, total=1000.0):
-        t = O.DeltaTracker()
-        t.ref_pair = ([0.0, total], [0.0, total / ref_speed])
-        t.cur = [(d, d / cur_speed) for d in range(0, int(reach) + 1, 4)]
+    L = 4000.0
+
+    def lap(self, tr, speeds, start=0.0, others=None, dt=0.05, upto=None):
+        """Один круг подряд (с продолжением с того же места); speeds — скорость на каждой четверти круга.
+        others: список (ключ, класс, множитель времени)."""
+        t = start
+        st = tr.__dict__.setdefault("_h", {"d": 0.0, "o": {}})
+        target = upto if upto is not None else (int(st["d"] // self.L) + 1) * self.L + 1.0
+        while st["d"] < target:
+            q = min(3, int((st["d"] % self.L) / (self.L / 4)))
+            st["d"] += speeds[q] * dt
+            cars = [{"key": 0, "cls": "HY", "player": True, "in_pits": False, "garage": False, "lap_dist": st["d"] % self.L, "vehicle": "v"}]
+            for k, cl, m in (others or []):
+                x = st["o"].get(k, 0.0)
+                x += speeds[min(3, int((x % self.L) / (self.L / 4)))] / m * dt
+                st["o"][k] = x
+                cars.append({"key": k, "cls": cl, "player": False, "in_pits": False, "garage": False, "lap_dist": x % self.L, "vehicle": "o"})
+            t += dt
+            tr.update({"cars": cars, "track_len": self.L, "track": "T"}, t)
         return t
 
-    def test_faster_lap_all_negative(self):
-        vals, cur = self.tracker(55.0).micro(10)
-        self.assertEqual(len(vals), 10)
-        self.assertTrue(all(v is not None and v < 0 for v in vals))
-        self.assertIsNone(cur)
+    def test_first_laps_colours(self):
+        tr = O.MicroTracker()
+        t = self.lap(tr, [50] * 4)                            # заход на круг: круг неполный, не считается
+        self.assertEqual(len(tr.laps), 0)
+        t = self.lap(tr, [50] * 4, t)
+        self.assertEqual(len(tr.laps), 1)
+        t = self.lap(tr, [50] * 4, t, upto=tr._h["d"] + self.L * 0.9)
+        vals, cur = tr.mine(4)
+        self.assertEqual(vals[:3], ["P", "P", "P"])           # история есть только своя, ничья лучше — равные куски
 
-    def test_slower_positive_and_unreached_none(self):
-        vals, cur = self.tracker(45.0, reach=520.0).micro(10)
-        self.assertTrue(all(v > 0 for v in vals[:5]))
-        self.assertTrue(all(v is None for v in vals[5:]))
-        self.assertEqual(cur, 5)
+    def test_slower_is_yellow_faster_is_purple(self):
+        tr = O.MicroTracker()
+        t = self.lap(tr, [50] * 4)
+        t = self.lap(tr, [50] * 4, t)
+        t = self.lap(tr, [62, 50, 50, 40], t, upto=tr._h["d"] + self.L * 0.98)
+        vals, cur = tr.mine(4)
+        self.assertEqual(vals[0], "P")                        # быстрее всего, что было
+        self.assertEqual(vals[1], "P")
+        t = self.lap(tr, [62, 50, 50, 40], t)                 # круг закончили — он теперь лучший
+        t = self.lap(tr, [50, 58, 50, 50], t, upto=tr._h["d"] + self.L * 0.8)
+        vals, _ = tr.mine(4)
+        self.assertEqual(vals[0], "Y")                        # хуже собственного лучшего куска
+        self.assertEqual(vals[1], "P")                        # быстрее лучшего
 
-    def test_no_reference(self):
-        t = O.DeltaTracker()
-        self.assertEqual(t.micro(8), ([None] * 8, None))
+    def test_pit_lap_not_counted(self):
+        tr = O.MicroTracker()
+        t = self.lap(tr, [50] * 4)
+        n0 = len(tr.laps)
+        tr.cars[0]["in_pits"] = True
+        tr.update({"cars": [{"key": 0, "cls": "HY", "player": True, "in_pits": True, "garage": False, "lap_dist": tr._h["d"] % self.L, "vehicle": "v"}], "track_len": self.L, "track": "T"}, t + 0.05)
+        t = self.lap(tr, [50] * 4, t + 0.05)
+        self.assertEqual(len(tr.laps), n0)                    # круг с заездом в боксы не пишется
 
-    def test_sum_equals_total_delta(self):
-        vals, _ = self.tracker(40.0).micro(20)
-        self.assertAlmostEqual(sum(vals), 1000 / 40.0 - 1000 / 50.0, places=3)
+    def test_other_class_does_not_matter(self):
+        tr = O.MicroTracker()
+        t = self.lap(tr, [50] * 4, others=[(7, "GT3", 1.0)])
+        t = self.lap(tr, [50] * 4, t, others=[(7, "GT3", 1.0)])
+        self.assertTrue(any(c == "GT3" for c, _, _ in tr.laps))
+        b = tr.ensure(4)
+        self.assertIn("GT3", b["all"])
+        self.assertIn("HY", b["all"])
 
 
 class PosEventTests(unittest.TestCase):
