@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "2.5.80"
+APP_VERSION = "2.5.81"
 import argparse
 import bisect
 import collections
@@ -5682,6 +5682,24 @@ class Overlay:
             win.update_idletasks()               # пусть система применит новые координаты до сохранения
         self.save()
 
+    def write_session(self, frame):
+        """Текущая трасса и машина — для кнопки «Скачать сетапы» в лаунчере (logs\\session.json). Пишем только при смене."""
+        try:
+            me = next((c for c in frame["cars"] if c["player"]), None)
+            if not me or not frame.get("track"):
+                return
+            data = {"game": frame.get("game"), "track": frame.get("track"), "vehicle": me.get("vehicle", ""),
+                    "model": me.get("model", ""), "cls": me.get("cls", "")}
+            if data == getattr(self, "_sess_data", None):
+                return
+            self._sess_data = data
+            d = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+            os.makedirs(d, exist_ok=True)
+            with open(os.path.join(d, "session.json"), "w", encoding="utf-8") as f:
+                json.dump(dict(data, t=int(time.time())), f, ensure_ascii=False)
+        except (OSError, TypeError, ValueError):
+            pass
+
     def toggle_mbrake(self):
         self.cfg["map_brake"] = bool(self.mbrake_var.get())
         self.save()
@@ -5923,6 +5941,9 @@ class Overlay:
                                      f"сессия={frame.get('label')} трасса={frame.get('track')!r} скрыто={'да' if st[3] else 'нет'}\n")
                     except OSError:
                         pass
+        if frame and time.time() >= getattr(self, "_sess_next", 0):
+            self._sess_next = time.time() + 2.0
+            self.write_session(frame)
         self.garage = hide
         self.hidden = hide or self.user_hidden or self.nogame
         hs = (self.hid("standings"),) + tuple(self.hid(w.ON) for w in self.subs)

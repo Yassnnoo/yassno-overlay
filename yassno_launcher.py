@@ -31,13 +31,17 @@ import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import colorchooser, filedialog, messagebox, ttk
 try:
+    import yassno_setups as setups                # бесплатные сетапы LMU из открытого репозитория
+except Exception:
+    setups = None
+try:
     import yassno_wheels as wheels            # рисованные руля для предпросмотра (нужен PIL)
     if not wheels.OK:
         wheels = None
 except Exception:
     wheels = None
 
-APP_VERSION = "2.5.80"
+APP_VERSION = "2.5.81"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -226,6 +230,15 @@ def find_rf2_dir():
     for lib in steam_libraries():
         d = os.path.join(lib, "steamapps", "common", "rFactor 2")
         if os.path.isdir(os.path.join(d, "Bin64")) or os.path.isdir(os.path.join(d, "Plugins")):
+            return d
+    return ""
+
+
+def find_lmu_settings():
+    """Папка UserData\\player\\Settings у Le Mans Ultimate: из библиотек Steam."""
+    for lib in steam_libraries():
+        d = os.path.join(lib, "steamapps", "common", "Le Mans Ultimate", "UserData", "player", "Settings")
+        if os.path.isdir(d):
             return d
     return ""
 
@@ -1625,6 +1638,61 @@ class ProfilePanel(ttk.Frame):
         lay = read_json(profile_path(self.game)).get("layouts")
         return sorted(lay) if isinstance(lay, dict) else []
 
+    def download_setups(self):
+        """Кнопка «Скачать сетапы»: трасса и машина — из logs\\session.json (пишет оверлей), файлы — из GitHub."""
+        info = getattr(self, "setup_info", None)
+
+        def say(t):
+            if info is not None:
+                try:
+                    info.config(text=t)
+                except tk.TclError:
+                    pass
+        sess = setups.read_session(LOGS)
+        if not sess or not sess.get("track"):
+            say("Не вижу, где вы едете: запустите оверлей, зайдите в игре на трассу и повторите.")
+            return
+        if sess.get("game") not in (None, "lmu"):
+            say("Последняя сессия оверлея была не в Le Mans Ultimate.")
+            return
+        if time.time() - float(sess.get("t", 0)) > 6 * 3600:
+            say("Данные о трассе старые (больше 6 часов): запустите оверлей и зайдите на трассу ещё раз.")
+            return
+        root_dir = (self.app.cfg.get("lmu_settings") or "") if isinstance(self.app.cfg.get("lmu_settings"), str) else ""
+        if not root_dir or not os.path.isdir(root_dir):
+            root_dir = find_lmu_settings()
+        if not root_dir:
+            root_dir = filedialog.askdirectory(parent=self.app.root, title="Папка UserData\\player\\Settings игры Le Mans Ultimate") or ""
+            if not root_dir:
+                say("Папка Settings не выбрана.")
+                return
+        self.app.cfg["lmu_settings"] = root_dir
+        self.app.save_cfg()
+        track = sess.get("track", "")
+        car = f"{sess.get('model', '')} {sess.get('vehicle', '')}".strip()
+        say(f"Качаю сетапы: {track} / {car} …")
+        box = []
+
+        def work():
+            try:
+                box.append((True, setups.download(root_dir, track, car)))
+            except Exception as e:
+                box.append((False, f"{type(e).__name__}: {e}"))
+
+        def poll():
+            if not box:
+                self.app.root.after(300, poll)
+                return
+            ok, res = box[0]
+            if not ok:
+                say("Не получилось скачать: " + str(res)[:200] + " (нужен интернет и доступ к github.com).")
+            elif not res["ok"]:
+                say(res["message"] + f"\nВидел: трасса «{track}», машина «{car}».")
+            else:
+                say(res["message"] + "\nПапка: " + res["folder"] + "\nСетапы появятся в игре в меню сетапов этой машины.")
+        threading.Thread(target=work, daemon=True).start()
+        self.app.root.after(300, poll)
+
     def refresh_layout_info(self):
         names = [k.replace("cls:", tr("класс") + " ") if k.startswith("cls:") else tr({"practice": "практика", "qualify": "квалификация", "race": "гонка"}.get(k, k))
                  for k in self.saved_layouts()]
@@ -1867,7 +1935,7 @@ class ProfilePanel(ttk.Frame):
                 c["hdr"].pack_forget()
                 c["body"].pack(fill="x", padx=1, pady=1)
                 continue
-            self._open.setdefault(c["key"], i == 0)
+            self._open.setdefault(c["key"], i == 0 or c["key"][1].startswith("Сетапы"))
             self.apply_card(c)
 
     @staticmethod
@@ -2001,6 +2069,13 @@ class ProfilePanel(ttk.Frame):
             if self.game == "lmu":
                 self.tg(f, None, "Скрывать оверлей в меню LMU (пока не загрузились на трассу)", self.v["lmu_menu_hide"])
             self.tg(f, None, "Записывать статистику сессий", self.v["stats"])
+            if self.game == "lmu" and setups is not None:
+                sc = self.card("Сетапы (бесплатные, из открытого репозитория)", R)
+                ttk.Label(sc, text="Зайдите на трассу в игре, потом нажмите кнопку: лаунчер возьмёт трассу и машину у оверлея и скачает все подходящие сетапы в UserData\\player\\Settings. Уже имеющиеся файлы не перезаписываются.",
+                          style="Dim.TLabel", justify="left", wraplength=440).grid(row=self.nr(sc), column=0, columnspan=3, sticky="w", pady=(0, 6))
+                ttk.Button(sc, text="Скачать сетапы для этой трассы и машины", style="Accent.TButton", command=self.download_setups).grid(row=self.nr(sc), column=0, columnspan=3, sticky="w")
+                self.setup_info = ttk.Label(sc, text="", style="Dim.TLabel", justify="left", wraplength=440)
+                self.setup_info.grid(row=self.nr(sc), column=0, columnspan=3, sticky="w", pady=(6, 0))
             self.mcombo(f, "Тема оверлеев", "theme_mode")
             self.mcombo(f, "Стиль окон", "win_style", width=34)
             self.slider(f, None, "Непрозрачность всех панелей", self.v["op_all"], 0.2, 1.0, pct, cmd=self.sync_op_all)

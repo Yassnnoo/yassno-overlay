@@ -355,6 +355,68 @@ class BrakeTrackerTests(unittest.TestCase):
         self.assertEqual(tr.points, [])
 
 
+class SetupsTests(unittest.TestCase):
+    PATHS = ["README.md", "Spa/BMW M4 Mid DF 5.2.svm", "Spa/SRA BMW M4 High DF LVL 4.5.svm", "Spa/HY BMW LDF Low DF level 4.1.svm",
+             "Spa/SRA 720S evo High DF LVL1.6.svm", "Spa/LMP3 Ligier High DF lvl 3.1.svm", "Sebring/BMW M4 Mid DF 5.2.svm", "Spa/sub/BMW M4 x.svm"]
+
+    def setUp(self):
+        import yassno_setups as S
+        self.S = S
+
+    def test_tracks(self):
+        S = self.S
+        for name, folder in (("Sebring International Raceway", "Sebring"), ("Circuit de la Sarthe", "Lemans"), ("Spa-Francorchamps", "Spa"),
+                             ("Autódromo José Carlos Pace", "Interlagos"), ("Circuit of the Americas", "Circuit Of The Americas"),
+                             ("Autódromo Internacional do Algarve", "Portimao"), ("Losail International Circuit", "Qatar")):
+            self.assertEqual(S.track_folder(name), folder, name)
+        self.assertIsNone(S.track_folder("Какая-то трасса"))
+
+    def test_plan_cars(self):
+        S = self.S
+        f, files, err = S.plan(self.PATHS, "Spa-Francorchamps", "BMW M4 GT3 #31")
+        self.assertEqual((f, err), ("Spa", ""))
+        self.assertEqual(files, ["Spa/BMW M4 Mid DF 5.2.svm", "Spa/SRA BMW M4 High DF LVL 4.5.svm"])      # без чужих машин и вложенных папок
+        self.assertEqual(S.plan(self.PATHS, "Spa", "BMW M Hybrid V8 #15")[1], ["Spa/HY BMW LDF Low DF level 4.1.svm"])
+        self.assertEqual(S.plan(self.PATHS, "Spa", "McLaren 720S GT3 Evo")[1], ["Spa/SRA 720S evo High DF LVL1.6.svm"])
+        self.assertIn("нет", S.plan(self.PATHS, "Spa", "Ferrari 499P #50")[2])
+        self.assertIn("не опознана", S.plan(self.PATHS, "Nowhere", "BMW M4 GT3")[2])
+
+    def test_download_no_overwrite(self):
+        import tempfile
+        S = self.S
+        tree = {"tree": [{"path": p, "type": "blob"} for p in self.PATHS]}
+        body = b'VehicleClassSetting="X"\nUpgradeSetting=(1,0,0,0)\n'
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, "spa"))                              # папка трассы уже есть в другом регистре
+            mine = os.path.join(d, "spa", "BMW M4 Mid DF 5.2.svm")
+            open(mine, "wb").write(b"MY OWN")
+            res = S.download(d, "Spa-Francorchamps", "BMW M4 GT3", tree_fn=lambda u: tree, get_fn=lambda u: body)
+            self.assertTrue(res["ok"])
+            self.assertEqual(res["saved"], ["SRA BMW M4 High DF LVL 4.5.svm"])
+            self.assertEqual(res["skipped"], ["BMW M4 Mid DF 5.2.svm"])
+            self.assertEqual(open(mine, "rb").read(), b"MY OWN")                # свой файл не затёрт
+            self.assertTrue(os.path.isfile(os.path.join(d, "spa", "SRA BMW M4 High DF LVL 4.5.svm")))
+
+    def test_api_down_uses_snapshot(self):
+        import tempfile
+        S = self.S
+
+        def boom(url):
+            raise OSError("403")
+        with tempfile.TemporaryDirectory() as d:
+            res = S.download(d, "Sebring International Raceway", "BMW M4 GT3", tree_fn=boom, get_fn=lambda u: b'VehicleClassSetting="X"\n')
+            self.assertTrue(res["ok"])
+            self.assertEqual(len(res["saved"]), 2)
+
+    def test_rejects_non_setup(self):
+        import tempfile
+        S = self.S
+        tree = {"tree": [{"path": p, "type": "blob"} for p in self.PATHS]}
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaises(ValueError):
+                S.download(d, "Spa", "BMW M4 GT3", tree_fn=lambda u: tree, get_fn=lambda u: b"<html>rate limit</html>")
+
+
 class PosEventTests(unittest.TestCase):
     def test_gain_and_loss(self):
         me = types.SimpleNamespace(_pe={}, POS_HOLD=O.Overlay.POS_HOLD)

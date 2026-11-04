@@ -1,6 +1,6 @@
 {
- "version": "2.5.80",
- "notes": "Руль чуть меньше и плавнее (частота 60/40 Гц), скорость с десятыми на пит-лейне",
+ "version": "2.5.81",
+ "notes": "Кнопка «Скачать сетапы» (LMU): бесплатные сетапы под текущую трассу и машину",
  "files": [
   "README.txt",
   "diagnose.cmd",
@@ -54,6 +54,7 @@
   "yassno_launcher.py",
   "yassno_overlay.py",
   "yassno_readers.py",
+  "yassno_setups.py",
   "yassno_svgmap.py",
   "yassno_wheels.py"
  ]
