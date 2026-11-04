@@ -29,13 +29,58 @@ TRACKS = [
     (r"silverstone", "Silverstone"),
     (r"\bspa\b|francorchamps", "Spa"),
 ]
-# (что встречается в названии машины, что встречается в имени файла сетапа)
-CARS = [
-    (r"720s", r"720s"),
-    (r"\bm4\b", r"\bm4\b"),
-    (r"bmw.*hybrid|m hybrid", r"hy bmw"),
-    (r"ligier|p325", r"ligier"),
+# Машина → ключ. Ищем в «склеенном» тексте (без пробелов, подчёркиваний и дефисов, нижний регистр): название машины из игры,
+# имя файла сетапа и строка VehicleClassSetting из самого файла дают один и тот же ключ.
+CAR_KEYS = [
+    ("720s", r"720s"),
+    ("m4", r"m4"),
+    ("bmwhybrid", r"bmw.*hybrid|mhybrid|hybmw"),
+    ("ligier", r"ligier"),
+    ("valkyrie", r"valkyrie"),
+    ("vantage", r"vantage|amrgt3"),
+    ("rcf", r"rcf|lexus"),
+    ("296", r"296"),
+    ("z06", r"z06|corvettez"),
+    ("amg", r"amg|mercedes"),
+    ("911", r"911|992|porsche.*gt3"),
+    ("mustang", r"mustang"),
+    ("huracan", r"huracan"),
+    ("499p", r"499p"),
+    ("963", r"963"),
+    ("9x8", r"9x8"),
+    ("vseries", r"vseries|cadillac"),
+    ("gr010", r"gr010"),
+    ("a424", r"a424"),
+    ("sc63", r"sc63"),
+    ("oreca", r"oreca"),
 ]
+CAR_TOKENS = {"amr": "vantage", "rcf": "rcf"}                 # короткие обозначения в именах файлов («HYMO … AMR SEB CQ»)
+
+# коды трасс в именах файлов (SEB, SPA, MNZ …) → папка
+TRACK_CODES = {"seb": "Sebring", "sebring": "Sebring", "spa": "Spa", "mnz": "Monza", "mon": "Monza", "monza": "Monza",
+               "lm": "Lemans", "lem": "Lemans", "lemans": "Lemans", "sarthe": "Lemans", "imo": "Imola", "imola": "Imola",
+               "sil": "Silverstone", "silverstone": "Silverstone", "bhr": "Bahrain", "bah": "Bahrain", "bahrain": "Bahrain",
+               "cota": "Circuit Of The Americas", "ame": "Circuit Of The Americas", "fuj": "Fuji", "fuji": "Fuji",
+               "int": "Interlagos", "interlagos": "Interlagos", "por": "Portimao", "prt": "Portimao", "portimao": "Portimao",
+               "qat": "Qatar", "qatar": "Qatar", "los": "Qatar", "losail": "Qatar"}
+
+
+def _squash(s):
+    return re.sub(r"[^a-z0-9]+", "", _norm(s))
+
+
+def car_key(*texts):
+    """Ключ машины по любому тексту (название из игры, имя файла, VehicleClassSetting) или None."""
+    sq = _squash(" ".join(t for t in texts if t))
+    for key, pat in CAR_KEYS:
+        if re.search(pat, sq):
+            return key
+    for tok in re.split(r"[^a-z0-9]+", _norm(" ".join(t for t in texts if t))):
+        if tok in CAR_TOKENS:
+            return CAR_TOKENS[tok]
+    return None
+
+
 # Снимок списка файлов репозитория на момент выпуска: запасной вариант, если GitHub API недоступен (лимит запросов без входа — 60 в час)
 KNOWN_PATHS = [
  "Bahrain/BMW M4 Mid DF 5.2.svm",
@@ -147,14 +192,6 @@ def track_folder(track):
     return None
 
 
-def car_pattern(vehicle):
-    v = _norm(vehicle)
-    for vpat, fpat in CARS:
-        if re.search(vpat, v):
-            return fpat
-    return None
-
-
 def fetch_json(url, timeout=20):
     req = urllib.request.Request(url, headers={"User-Agent": "yassno-overlay-setups", "Accept": "application/vnd.github+json"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -178,22 +215,86 @@ def read_session(logs_dir):
 
 
 def plan(paths, track, vehicle):
-    """Какие файлы репозитория подходят: (папка_трассы, [пути]) или ошибка текстом.
+    """Какие файлы репозитория подходят: (папка_трассы, [пути], ошибка).
     paths — все пути репозитория (строки вида 'Spa/BMW M4 Mid DF 5.2.svm')."""
     folder = track_folder(track)
     if not folder:
         return None, [], f"Трасса «{track}» не опознана — для неё в репозитории сетапов нет."
-    pat = car_pattern(vehicle)
-    if not pat:
+    key = car_key(vehicle)
+    if not key:
         return folder, [], f"Для машины «{vehicle}» сетапов в репозитории нет (там есть: {CARS_KNOWN})."
     found = []
     for p in paths:
         parts = p.split("/")
-        if len(parts) == 2 and parts[0] == folder and parts[1].lower().endswith(".svm") and re.search(pat, _norm(parts[1])):
+        if len(parts) == 2 and parts[0] == folder and parts[1].lower().endswith(".svm") and car_key(parts[1]) == key:
             found.append(p)
     if not found:
         return folder, [], f"Для «{vehicle}» на трассе {folder} в репозитории сетапов нет."
     return folder, sorted(found), ""
+
+
+def file_track(path):
+    """Трасса локального сетапа: по папке, в которой он лежит, или по коду в имени файла (SEB, SPA …)."""
+    for part in reversed(path.replace("\\", "/").split("/")[:-1]):
+        f = track_folder(part)
+        if f:
+            return f
+    for tok in re.split(r"[^a-z0-9]+", _norm(os.path.basename(path))):
+        if tok in TRACK_CODES:
+            return TRACK_CODES[tok]
+    return track_folder(os.path.basename(path))
+
+
+def file_car(path):
+    """Машина локального сетапа: по строке VehicleClassSetting внутри файла и по имени."""
+    head = ""
+    try:
+        with open(path, "rb") as f:
+            for line in f.read(600).decode("utf-8", "ignore").splitlines():
+                if line.startswith("VehicleClassSetting"):
+                    head = line
+                    break
+    except OSError:
+        pass
+    return car_key(head) or car_key(os.path.basename(path))
+
+
+def local_files(local_dirs, track, vehicle):
+    """Подходящие сетапы из своих папок (в них может быть что угодно): [полные пути]."""
+    folder, key = track_folder(track), car_key(vehicle)
+    out = []
+    if not folder or not key:
+        return out
+    for d in local_dirs:
+        for root, _dirs, names in os.walk(d):
+            for n in sorted(names):
+                p = os.path.join(root, n)
+                if n.lower().endswith(".svm") and file_track(p) == folder and file_car(p) == key:
+                    out.append(p)
+    return out
+
+
+def install_local(settings_root, track, vehicle, local_dirs):
+    """Копирует подходящие сетапы из своих папок в Settings\\<трасса>, не перезаписывая. Возвращает {'saved','skipped','folder'}."""
+    folder = track_folder(track)
+    saved, skipped = [], []
+    dest = None
+    for p in local_files(local_dirs, track, vehicle):
+        if dest is None:
+            dest = settings_track_dir(settings_root, folder)
+            os.makedirs(dest, exist_ok=True)
+        target = os.path.join(dest, os.path.basename(p))
+        if os.path.exists(target):
+            skipped.append(os.path.basename(p))
+            continue
+        with open(p, "rb") as f:
+            data = f.read()
+        if not looks_like_svm(data):
+            continue
+        with open(target, "wb") as f:
+            f.write(data)
+        saved.append(os.path.basename(p))
+    return {"saved": saved, "skipped": skipped, "folder": dest}
 
 
 def settings_track_dir(settings_root, folder):

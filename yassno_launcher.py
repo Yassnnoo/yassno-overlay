@@ -41,7 +41,7 @@ try:
 except Exception:
     wheels = None
 
-APP_VERSION = "2.5.81"
+APP_VERSION = "2.5.82"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -1670,28 +1670,70 @@ class ProfilePanel(ttk.Frame):
         self.app.save_cfg()
         track = sess.get("track", "")
         car = f"{sess.get('model', '')} {sess.get('vehicle', '')}".strip()
-        say(f"Качаю сетапы: {track} / {car} …")
+        local_dirs = self.setup_dirs()
+        say(f"Ищу сетапы: {track} / {car} …")
         box = []
 
         def work():
+            res = {"local": None, "net": None, "net_err": ""}
             try:
-                box.append((True, setups.download(root_dir, track, car)))
+                if local_dirs:
+                    res["local"] = setups.install_local(root_dir, track, car, local_dirs)
             except Exception as e:
-                box.append((False, f"{type(e).__name__}: {e}"))
+                res["net_err"] = f"свои папки: {type(e).__name__}: {e}"
+            try:
+                res["net"] = setups.download(root_dir, track, car)
+            except Exception as e:
+                res["net_err"] += f" {type(e).__name__}: {e}"
+            box.append(res)
 
         def poll():
             if not box:
                 self.app.root.after(300, poll)
                 return
-            ok, res = box[0]
-            if not ok:
-                say("Не получилось скачать: " + str(res)[:200] + " (нужен интернет и доступ к github.com).")
-            elif not res["ok"]:
-                say(res["message"] + f"\nВидел: трасса «{track}», машина «{car}».")
+            r = box[0]
+            lines, got = [], False
+            if r["local"] is not None:
+                n, k = len(r["local"]["saved"]), len(r["local"]["skipped"])
+                if n or k:
+                    got = True
+                    lines.append(f"Из своих папок: скачано {n}" + (f", уже были {k} (не тронуты)" if k else ""))
+            if r["net"] is not None:
+                if r["net"]["ok"]:
+                    got = True
+                    lines.append("Из репозитория: " + r["net"]["message"])
+                elif not got:
+                    lines.append(r["net"]["message"])
+            elif r["net_err"]:
+                lines.append("Репозиторий недоступен (нужен интернет и github.com): " + r["net_err"][:160])
+            if not got:
+                lines.append(f"Видел: трасса «{track}», машина «{car}».")
             else:
-                say(res["message"] + "\nПапка: " + res["folder"] + "\nСетапы появятся в игре в меню сетапов этой машины.")
+                lines.append("Сетапы появятся в меню сетапов этой машины в игре.")
+            say("\n".join(lines))
         threading.Thread(target=work, daemon=True).start()
         self.app.root.after(300, poll)
+
+    def setup_dirs(self):
+        """Свои папки с сетапами: выбранная в лаунчере и папка setups рядом с лаунчером."""
+        out = []
+        for d in (self.app.cfg.get("setups_dir") or "", os.path.join(HERE, "setups")):
+            if isinstance(d, str) and d and os.path.isdir(d) and d not in out:
+                out.append(d)
+        return out
+
+    def pick_setups_dir(self):
+        d = filedialog.askdirectory(parent=self.app.root, title="Папка с вашими сетапами (.svm)") or ""
+        if d:
+            self.app.cfg["setups_dir"] = d
+            self.app.save_cfg()
+            self.show_setups_dir()
+
+    def show_setups_dir(self):
+        lab = getattr(self, "setups_dir_lab", None)
+        if lab is not None:
+            d = self.app.cfg.get("setups_dir") or ""
+            lab.config(text=("Своя папка: " + d) if d else "Своя папка не выбрана (можно также класть .svm в папку setups рядом с лаунчером).")
 
     def refresh_layout_info(self):
         names = [k.replace("cls:", tr("класс") + " ") if k.startswith("cls:") else tr({"practice": "практика", "qualify": "квалификация", "race": "гонка"}.get(k, k))
@@ -2071,9 +2113,13 @@ class ProfilePanel(ttk.Frame):
             self.tg(f, None, "Записывать статистику сессий", self.v["stats"])
             if self.game == "lmu" and setups is not None:
                 sc = self.card("Сетапы (бесплатные, из открытого репозитория)", R)
-                ttk.Label(sc, text="Зайдите на трассу в игре, потом нажмите кнопку: лаунчер возьмёт трассу и машину у оверлея и скачает все подходящие сетапы в UserData\\player\\Settings. Уже имеющиеся файлы не перезаписываются.",
+                ttk.Label(sc, text="Зайдите на трассу в игре, потом нажмите кнопку: лаунчер возьмёт трассу и машину у оверлея, найдёт подходящие сетапы в ваших папках и в открытом репозитории и положит их в UserData\\player\\Settings. Уже имеющиеся файлы не перезаписываются.",
                           style="Dim.TLabel", justify="left", wraplength=440).grid(row=self.nr(sc), column=0, columnspan=3, sticky="w", pady=(0, 6))
                 ttk.Button(sc, text="Скачать сетапы для этой трассы и машины", style="Accent.TButton", command=self.download_setups).grid(row=self.nr(sc), column=0, columnspan=3, sticky="w")
+                ttk.Button(sc, text="Папка со своими сетапами…", command=self.pick_setups_dir).grid(row=self.nr(sc), column=0, columnspan=3, sticky="w", pady=(6, 0))
+                self.setups_dir_lab = ttk.Label(sc, text="", style="Dim.TLabel", justify="left", wraplength=440)
+                self.setups_dir_lab.grid(row=self.nr(sc), column=0, columnspan=3, sticky="w", pady=(4, 0))
+                self.show_setups_dir()
                 self.setup_info = ttk.Label(sc, text="", style="Dim.TLabel", justify="left", wraplength=440)
                 self.setup_info.grid(row=self.nr(sc), column=0, columnspan=3, sticky="w", pady=(6, 0))
             self.mcombo(f, "Тема оверлеев", "theme_mode")

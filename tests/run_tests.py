@@ -408,6 +408,22 @@ class SetupsTests(unittest.TestCase):
             self.assertTrue(res["ok"])
             self.assertEqual(len(res["saved"]), 2)
 
+    def test_local_folder(self):
+        import tempfile
+        S = self.S
+        body = b'VehicleClassSetting="GT3 McLaren_720S_LMGT3_Evo WEC2026"\nUpgradeSetting=(1,0,0,0)\n'
+        with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as game:
+            for n in ("PACK 1.0 720S SEB CQ.svm", "PACK 1.0 720S SEB WR.svm", "PACK 1.0 720S SPA CQ.svm", "notes.txt"):
+                open(os.path.join(src, n), "wb").write(body)
+            open(os.path.join(src, "PACK 1.0 AMR SEB CQ.svm"), "wb").write(b'VehicleClassSetting="GT3 AstonMartin_Vantage_LMGT3 WEC2026"\nUpgradeSetting=(1,0,0,0)\n')
+            os.makedirs(os.path.join(src, "monza"))
+            open(os.path.join(src, "monza", "any name.svm"), "wb").write(body)       # трасса — по папке, машина — по заголовку внутри файла
+            res = S.install_local(game, "Sebring International Raceway", "McLaren 720S GT3 Evo #7", [src])
+            self.assertEqual(sorted(res["saved"]), ["PACK 1.0 720S SEB CQ.svm", "PACK 1.0 720S SEB WR.svm"])     # чужая трасса и чужая машина не берутся
+            self.assertEqual(S.install_local(game, "Sebring International Raceway", "McLaren 720S GT3 Evo", [src])["saved"], [])
+            self.assertEqual(len(S.install_local(game, "Autodromo Nazionale Monza", "McLaren 720S", [src])["saved"]), 1)
+            self.assertEqual(S.car_key("PACK AMR SEB.svm"), "vantage")
+
     def test_rejects_non_setup(self):
         import tempfile
         S = self.S
