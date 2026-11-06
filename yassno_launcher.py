@@ -34,14 +34,34 @@ try:
     import yassno_setups as setups                # бесплатные сетапы LMU из открытого репозитория
 except Exception:
     setups = None
-try:
-    import yassno_wheels as wheels            # рисованные руля для предпросмотра (нужен PIL)
-    if not wheels.OK:
-        wheels = None
-except Exception:
-    wheels = None
+class _LazyWheels:
+    """Руль-картинки (PIL) подгружаются при первом рисовании, а не при старте: окно открывается быстрее.
+    Если Pillow или yassno_wheels недоступны, render() бросает ошибку, и предпросмотр рисует плоский руль."""
+    STYLES = ("round", "formula", "gt", "rally")
 
-APP_VERSION = "2.5.88"
+    @staticmethod
+    def render(style, size, angle):
+        import yassno_wheels
+        if not yassno_wheels.OK:
+            raise RuntimeError("PIL недоступен")
+        return yassno_wheels.render(style, size, angle)
+
+
+wheels = _LazyWheels
+
+
+def _preload_pil():
+    """Pillow грузится ~0,8 с — делаем это в фоне, пока строится окно."""
+    try:
+        import PIL.Image, PIL.ImageDraw, PIL.ImageFilter, PIL.ImageTk  # noqa: F401
+        import yassno_wheels  # noqa: F401
+    except Exception:
+        pass
+
+
+threading.Thread(target=_preload_pil, daemon=True).start()
+
+APP_VERSION = "2.5.89"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -6005,10 +6025,8 @@ class App:
         self.navhost.pack_propagate(False)
         self.holder = ttk.Frame(body)
         self.holder.grid(row=0, column=1, sticky="nsew")
-        for game in GAMES:
-            p = ProfilePanel(self.holder, self, game)
-            p.configure(padding=12)
-            self.panels[game] = p
+        self.holder_gen = getattr(self, "holder_gen", 0) + 1
+        self.make_panel(self.selected)                     # остальные игры достраиваем уже после показа окна
         self.settings_page = SettingsPage(self.holder, self)
         self.stats_page = StatsPage(self.holder, self)
         self.ac_page = AcSoonPage(self.holder, self)
@@ -6022,6 +6040,26 @@ class App:
             self.select_game(self.selected)
         translate_tree(self.root)
         self.refresh_status()
+        rest = [g for g in GAMES if g not in self.panels]
+        gen = self.holder_gen
+        for i, g in enumerate(rest):
+            self.root.after(250 + 120 * i, lambda g=g, gen=gen: self.late_panel(g, gen))
+
+    def make_panel(self, game):
+        p = ProfilePanel(self.holder, self, game)
+        p.configure(padding=12)
+        self.panels[game] = p
+        return p
+
+    def late_panel(self, game, gen):
+        if gen != self.holder_gen or game in self.panels:
+            return
+        try:
+            p = self.make_panel(game)
+            translate_tree(p)
+            self.refresh_status()
+        except Exception:
+            pass
 
     def rebuild(self):
         self.build()
@@ -6037,6 +6075,9 @@ class App:
         self.settings_page.pack_forget()
         self.stats_page.pack_forget()
         self.ac_page.pack_forget()
+        if game not in self.panels:
+            self.make_panel(game)
+            translate_tree(self.panels[game])
         for g, p in self.panels.items():
             if g == game:
                 p.pack(fill="both", expand=True)
@@ -6434,10 +6475,6 @@ def pillow_ok():
 def ensure_pillow(app):
     """При каждом запуске проверяем Pillow (с ImageTk). Нет — ставим в фоне (обычный pip, затем --user), итог пишем в logs/pillow.log;
     оверлей подхватит при следующем запуске."""
-    ok, why = pillow_ok()
-    if ok:
-        return
-
     def log(msg):
         try:
             os.makedirs(os.path.join(HERE, "logs"), exist_ok=True)
@@ -6447,6 +6484,9 @@ def ensure_pillow(app):
             pass
 
     def work():
+        ok, why = pillow_ok()
+        if ok:
+            return
         log(f"Pillow не найден ({why}), ставлю…")
         for extra in ([], ["--user"]):
             try:
