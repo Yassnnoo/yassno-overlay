@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "2.5.89"
+APP_VERSION = "2.6.0"
 import argparse
 import bisect
 import collections
@@ -5399,6 +5399,7 @@ class Overlay:
         self.font = tkfont.Font(family=fam, size=sz)
         self.bold = tkfont.Font(family=fam, size=sz, weight="bold")
         self.small = tkfont.Font(family=fam, size=max(7, sz - 3))
+        self.chipf = tkfont.Font(family=fam, size=max(8, sz - 2), weight="bold")
         self.big = tkfont.Font(family=fam, size=sz + 5, weight="bold")
         self.cw = self.font.measure("0")
         self.rh = self.font.metrics("linespace") + 14
@@ -5416,7 +5417,7 @@ class Overlay:
         self.x_of, self.w_of, x = {}, {}, 14
         for key, _, w, _ in self.cols:
             if key == "name" and self.cfg.get("st_pitinfo", True):
-                w += 8                              # место справа от фамилии под «К24 · 32с»
+                w += 8                              # место справа от фамилии под плашку «К24 32с»
             self.x_of[key], self.w_of[key] = x, int(w * self.cw)
             x += int(w * self.cw) + int(self.cw * 0.9)
         self.width = max(x + 6, 520)
@@ -6673,13 +6674,17 @@ class Overlay:
                     pi = pit_log.info(car["key"]) if (show_pit and frame.get("kind") == "RACE") else None
                     nm = car["driver"].upper()
                     if pi:
-                        ptxt = f"К{pi[0]} · {pi[1]:.0f}с"
-                        pw_ = self.small.measure(ptxt) + 6
-                        room = max(40, self.w_of["name"] - pw_)
+                        t1, t2 = f"К{pi[0]}", f"{pi[1]:.0f}с"
+                        w1, w2 = self.chipf.measure(t1), self.chipf.measure(t2)
+                        pw_ = w1 + w2 + 13
+                        room = max(40, self.w_of["name"] - pw_ - 4)
                         while len(nm) > 4 and (self.bold if is_me else self.font).measure(nm) > room:
                             nm = nm[:-1]
-                        self.canvas.create_text(self.x_of["name"] + self.w_of["name"], cy, text=ptxt, anchor="e", font=self.small,
-                                                fill=ACCENT if pi[2] else DIM)
+                        rx2 = self.x_of["name"] + self.w_of["name"]
+                        hh_ = max(int(rh * 0.30), min(rh // 2 - 1, self.chipf.metrics("linespace") // 2 + 1))
+                        self.rrect(rx2 - pw_, cy - hh_, rx2, cy + hh_, 5, fill="#ffd23f" if pi[2] else "#e8bd35")
+                        c.create_text(rx2 - pw_ + 4, cy, text=t1, anchor="w", font=self.chipf, fill="#10141a")
+                        c.create_text(rx2 - 4, cy, text=t2, anchor="e", font=self.chipf, fill="#b3170f" if pi[2] else "#1b3f9a")
                     self.text("name", cy, nm[:22], FG, self.bold if is_me else self.font)
                     if car.get("radio") and self.cfg.get("st_radio", True):
                         rx = self.x_of["name"] + (self.bold if is_me else self.font).measure(nm[:22]) + 9

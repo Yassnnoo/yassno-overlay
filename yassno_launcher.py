@@ -61,7 +61,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "2.5.89"
+APP_VERSION = "2.6.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -127,6 +127,24 @@ THEME_DEFAULT = {"accent": "#f2b705", "text": "#eef1f5", "dim": "#8791a0", "pane
 THEME_LIGHT = {"accent": "#b7791f", "text": "#1b1f26", "dim": "#5d6673", "panel": "#e3e6ea",
                "background": "#f2f4f6", "border": "#b9c0c9", "me": "#2b7de0",
                "throttle": "#1fa84f", "brake": "#d62d22", "clutch": "#2b6fd6"}
+STYLE_PRESETS = [
+    ("Классика", "dark", "classic", THEME_DEFAULT),
+    ("Неон", "dark", "soft", {"accent": "#00e5ff", "text": "#eaf6ff", "dim": "#7f8fb5", "panel": "#120f22", "background": "#07060f",
+                              "border": "#2f2a5c", "me": "#ff2fd1", "throttle": "#00ff9d", "brake": "#ff2e63", "clutch": "#7a7bff"}),
+    ("Карбон", "dark", "square", {"accent": "#c9d0da", "text": "#f1f3f6", "dim": "#8a909b", "panel": "#19191b", "background": "#0d0d0e",
+                                  "border": "#36363c", "me": "#8fa3c7", "throttle": "#5fe39a", "brake": "#ff5a4f", "clutch": "#6ea8ff"}),
+    ("Красный", "dark", "accent", {"accent": "#ff3b30", "text": "#f6eeee", "dim": "#a08788", "panel": "#1a1012", "background": "#0c0809",
+                                   "border": "#44242a", "me": "#ff8a4d", "throttle": "#3ddc84", "brake": "#ff3b30", "clutch": "#5aa0ff"}),
+    ("Океан", "dark", "soft", {"accent": "#3ddbd9", "text": "#e6f4f8", "dim": "#7d9aa8", "panel": "#0e2230", "background": "#07131c",
+                               "border": "#1f4058", "me": "#4da3ff", "throttle": "#37e39a", "brake": "#ff5d6c", "clutch": "#5b8dff"}),
+    ("Лес", "dark", "classic", {"accent": "#7bd88f", "text": "#eaf3ec", "dim": "#84a08c", "panel": "#101f16", "background": "#08120c",
+                                "border": "#244533", "me": "#c3e86b", "throttle": "#3fe07a", "brake": "#ff6a4d", "clutch": "#58b6ff"}),
+    ("Закат", "dark", "soft", {"accent": "#ff8a3d", "text": "#fbeee6", "dim": "#a98c92", "panel": "#22121c", "background": "#130b10",
+                               "border": "#4a2640", "me": "#ff5fa2", "throttle": "#3ee08f", "brake": "#ff4d4d", "clutch": "#8f7bff"}),
+    ("Янтарь", "dark", "minimal", {"accent": "#ffb000", "text": "#ffd98a", "dim": "#a37b25", "panel": "#17110a", "background": "#0a0700",
+                                   "border": "#3d2e12", "me": "#ffb000", "throttle": "#9be15d", "brake": "#ff6a3d", "clutch": "#ffd24a"}),
+    ("Светлая", "light", "soft", THEME_LIGHT),
+]
 THEME_NAMES = {"accent": "Акцент (заголовки, таймер)", "text": "Основной текст", "dim": "Второстепенный текст",
                "panel": "Панели и шапки", "background": "Фон таблицы", "border": "Рамки", "me": "Моя строка",
                "throttle": "Газ", "brake": "Тормоз", "clutch": "Сцепление"}
@@ -472,8 +490,8 @@ RADAR_RANGES = [15, 20, 30, 40, 60, 80, 120]
 RESERVES = ["0", "0.5", "1", "2"]
 
 UI_THEMES = {
-    "dark": dict(BG="#12161d", PANEL="#1a202a", FIELD="#222a36", FG="#e6e9ef", DIM="#8b95a5", ACCENT="#f2b705",
-                 BORDER="#2a3140", ACTIVE="#2a3342", ACCENT_HI="#ffd24a", OFF="#3a4352", KNOB_OFF="#b4bcc9",
+    "dark": dict(BG="#0f131a", PANEL="#171c25", FIELD="#202733", FG="#e8ebf1", DIM="#8c97a8", ACCENT="#f2b705",
+                 BORDER="#252c39", ACTIVE="#242c3a", ACCENT_HI="#ffd24a", OFF="#3a4352", KNOB_OFF="#b4bcc9",
                  TILE_TEXT="#ffffff", ACCENT_FG="#111111"),
     "light": dict(BG="#f2f4f8", PANEL="#e3e7ee", FIELD="#ffffff", FG="#1b2230", DIM="#5f6b7c", ACCENT="#e0a100",
                   BORDER="#c3cad6", ACTIVE="#d4dae4", ACCENT_HI="#f2b705", OFF="#b8c0cd", KNOB_OFF="#ffffff",
@@ -873,13 +891,15 @@ def setup_style(root):
     st.configure("TLabel", background=UI_BG, foreground=UI_FG)
     st.configure("Dim.TLabel", foreground=UI_DIM)
     st.configure("Head.TLabel", font=("Segoe UI Semibold", 11))
-    st.configure("Title.TLabel", font=("Segoe UI Semibold", 15))
+    st.configure("Title.TLabel", font=("Segoe UI Semibold", 18))
     st.configure("TLabelframe", background=UI_BG, bordercolor=UI_BORDER)
     st.configure("TLabelframe.Label", background=UI_BG, foreground=UI_ACCENT, font=("Segoe UI Semibold", 10))
     st.configure("TCheckbutton", background=UI_BG, foreground=UI_FG)
     st.map("TCheckbutton", background=[("active", UI_BG)])
-    st.configure("TButton", background=UI_PANEL, foreground=UI_FG, padding=(10, 5), borderwidth=1)
+    st.configure("TButton", background=UI_PANEL, foreground=UI_FG, padding=(13, 7), borderwidth=1)
     st.map("TButton", background=[("active", UI_ACTIVE)])
+    st.configure("TMenubutton", background=UI_PANEL, foreground=UI_FG, padding=(13, 7), borderwidth=1, arrowcolor=UI_FG)
+    st.map("TMenubutton", background=[("active", UI_ACTIVE)])
     st.configure("Accent.TButton", background=UI_ACCENT, foreground=UI_ACCENT_FG, font=("Segoe UI Semibold", 10))
     st.map("Accent.TButton", background=[("active", UI_ACCENT_HI)])
     st.configure("TNotebook", background=UI_BG, borderwidth=0)
@@ -894,7 +914,7 @@ def setup_style(root):
     st.map("Horizontal.TScale", background=[("active", UI_ACCENT_HI)])
     st.configure("Active.TButton", background=UI_GREEN_DK, foreground="#ffffff", font=("Segoe UI Semibold", 10))
     st.map("Active.TButton", background=[("active", UI_GREEN)])
-    st.configure("Treeview", background=UI_FIELD, fieldbackground=UI_FIELD, foreground=UI_FG, rowheight=22, borderwidth=0)
+    st.configure("Treeview", background=UI_FIELD, fieldbackground=UI_FIELD, foreground=UI_FG, rowheight=26, borderwidth=0)
     st.configure("Treeview.Heading", background=UI_PANEL, foreground=UI_FG, font=("Segoe UI Semibold", 9), relief="flat")
     st.map("Treeview", background=[("selected", UI_ACCENT)], foreground=[("selected", UI_ACCENT_FG)])
     st.map("Treeview.Heading", background=[("active", UI_ACTIVE)])
@@ -1435,6 +1455,10 @@ TIPS = {
     "Сравнивать": "С каким кругом сравнивается текущий: лучшим или предыдущим.",
     "Зелёный горит, секунд": "Сколько секунд после старта горят зелёные огни.",
 }
+ADV_CARDS = ("Цвета", "Бегущая строка", "Шапка таблицы", "Выделение в таблице", "Оформление")                 # в простом виде эти разделы прячутся (поиск и кнопка «Все настройки» показывают их)
+NAV_ICONS = {"general": "⚙", "standings": "≡", "relative": "⇅", "gaps": "⚔", "pedals": "◔", "speedo": "◎", "delta": "Δ",
+             "micro": "▦", "fuel": "◍", "tyres": "◐", "engine": "✦", "limiter": "⚑", "pitplan": "⏱", "trackmap": "⌖",
+             "radar": "◉", "weather": "☁", "lights": "●", "laplog": "☰", "alerts": "⚠", "sesstime": "◷", "clock": "◷"}
 NAV_TIPS = {
     "general": "Шрифт, тема, цвета, готовые наборы и список панелей.", "standings": "Таблица позиций: колонки, строки, режимы.",
     "relative": "Соседи спереди и сзади с отрывом.", "pedals": "Педали, руль, передача и шифт-лайт.",
@@ -1446,6 +1470,118 @@ NAV_TIPS = {
     "gaps": "Отрыв до соперников спереди и сзади и тренд.", "engine": "Температуры двигателя и расход.",
     "sesstime": "Сколько осталось до конца сессии.", "clock": "Локальное время ПК.", "speedo": "Спидометр: шесть видов приборов.", "laplog": "Последние круги с дельтой и температурой, плюс лучший круг.",
 }
+
+
+_PV_TRACK = {"t": 0.0, "d": None}
+
+
+def pv_track(n=60):
+    """Самая свежая сохранённая карта трассы, ужатая до n точек (нормализована к -1..1), для предпросмотра.
+    Возвращает (имя, [(x, y), ...]) или None, если карт ещё нет."""
+    try:
+        files = [os.path.join(MAP_DIR, f) for f in os.listdir(MAP_DIR) if f.lower().endswith(".json")]
+        newest = max(files, key=os.path.getmtime) if files else None
+        stamp = os.path.getmtime(newest) if newest else -1.0
+    except OSError:
+        return None
+    if newest is None:
+        return None
+    if _PV_TRACK["t"] == stamp and _PV_TRACK["d"] is not None:
+        return _PV_TRACK["d"]
+    out = None
+    try:
+        with open(newest, encoding="utf-8") as f:
+            d = json.load(f)
+        pts = [(float(a), float(b)) for a, b in d["points"]]
+        if len(pts) >= 20:
+            seg = [0.0]
+            for i in range(1, len(pts) + 1):
+                a, b = pts[i - 1], pts[i % len(pts)]
+                seg.append(seg[-1] + math.hypot(b[0] - a[0], b[1] - a[1]))
+            tot = seg[-1] or 1.0
+            res, j = [], 0
+            for k in range(n):
+                t = tot * k / n
+                while j < len(pts) - 1 and seg[j + 1] < t:
+                    j += 1
+                a, b = pts[j], pts[(j + 1) % len(pts)]
+                L = (seg[j + 1] - seg[j]) or 1.0
+                u = (t - seg[j]) / L
+                res.append((a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u))
+            xs, ys = [p[0] for p in res], [p[1] for p in res]
+            cx, cy = (max(xs) + min(xs)) / 2, (max(ys) + min(ys)) / 2
+            sc = max(max(xs) - min(xs), max(ys) - min(ys)) / 2 or 1.0
+            name = str(d.get("track") or os.path.splitext(os.path.basename(newest))[0])
+            out = (name, [((x - cx) / sc, (y - cy) / sc) for x, y in res])
+    except (OSError, ValueError, KeyError, TypeError):
+        out = None
+    _PV_TRACK["t"], _PV_TRACK["d"] = stamp, out
+    return out
+
+
+class RoundBox(tk.Canvas):
+    """Скруглённая рамка: внутрь кладутся виджеты через .inner; высота подстраивается под содержимое."""
+
+    def __init__(self, parent, radius=12, fill=None, border=None, outer=None, m=1, autow=True, fillh=False):
+        self.autow, self.fillh = autow, fillh
+        self.fill, self.border, self.rad, self.m = fill or UI_BG, border or UI_BORDER, radius, m
+        super().__init__(parent, bg=outer or UI_BG, highlightthickness=0, borderwidth=0, height=20)
+        self.inner = tk.Frame(self, bg=self.fill)
+        self.off = m + 1 + max(2, radius // 3)                  # отступ, чтобы углы внутренней рамки не закрывали скругление
+        self._win = self.create_window(self.off, self.off, window=self.inner, anchor="nw")
+        self.bind("<Configure>", self._redraw)
+        self.inner.bind("<Configure>", self._fit)
+
+    def _fit(self, e=None):
+        h = self.inner.winfo_reqheight() + 2 * self.off
+        if abs(int(self.cget("height")) - h) > 0:
+            self.configure(height=h)
+        if self.autow:
+            w = self.inner.winfo_reqwidth() + 2 * self.off
+            if getattr(self, "_wlast", None) != w:
+                self._wlast = w
+                self.configure(width=w)
+
+    def _redraw(self, e=None):
+        w, h = self.winfo_width(), self.winfo_height()
+        if w < 8 or h < 8:
+            return
+        self.delete("box")
+        r, m = self.rad, self.m
+        x0, y0, x1, y1 = m, m, w - m - 1, h - m - 1
+        pts = [x0 + r, y0, x1 - r, y0, x1, y0, x1, y0 + r, x1, y1 - r, x1, y1, x1 - r, y1, x0 + r, y1,
+               x0, y1, x0, y1 - r, x0, y0 + r, x0, y0]
+        self.create_polygon(pts, smooth=True, fill=self.fill, outline=self.border, tags="box")
+        self.tag_lower("box")
+        self.itemconfigure(self._win, width=max(1, w - 2 * self.off))
+        if self.fillh:
+            self.itemconfigure(self._win, height=max(1, h - 2 * self.off))
+
+
+class _SecInner(ttk.Frame):
+    """Внутренняя часть раздела: pack/grid относятся к скруглённой рамке вокруг неё."""
+    def pack(self, **kw):
+        self._outer.pack(**kw)
+
+    def grid(self, **kw):
+        self._outer.grid(**kw)
+
+    def pack_forget(self):
+        self._outer.pack_forget()
+
+    def grid_remove(self):
+        self._outer.grid_remove()
+
+
+def section(parent, title):
+    """Раздел настроек в скруглённой рамке с заголовком (страницы лаунчера, в одном стиле с карточками оверлея)."""
+    rb = RoundBox(parent, radius=10, fill=UI_BG, border=mix(UI_BORDER, UI_DIM, 0.35))
+    tk.Label(rb.inner, text=tr(title).upper(), bg=UI_BG, fg=UI_ACCENT, font=("Segoe UI Semibold", 10), anchor="w",
+             padx=12, pady=9).pack(fill="x")
+    inner = _SecInner(rb.inner, padding=(8, 0, 6, 8))
+    inner._outer = rb
+    ttk.Frame.pack(inner, fill="x")
+    return inner
 
 
 class Toggle(tk.Frame):
@@ -1545,7 +1681,7 @@ class AcSoonPage(ttk.Frame):
 
 class GameTile(tk.Frame):
     """Плитка выбора: все одного размера. У игр — логотип: серый, пока игра не выбрана, и цветной у выбранной."""
-    W, H = 220, 64
+    W, H = 172, 50
     BLUE, BLUE_HI = "#1d4f9c", "#2f6fd0"
 
     def __init__(self, parent, text, command, blue=False, static=False, game=None):
@@ -1653,6 +1789,7 @@ class ProfilePanel(ttk.Frame):
         self._tm = self.mode_val("theme_mode")
         self.v["theme_mode"].trace_add("write", lambda *a: self.on_theme_mode())
         self.show_page("general")
+        self.after(1200, lambda: setattr(self, "_armed", True))      # правки при построении окна «несохранёнными» не считаем
 
     def saved_layouts(self):
         lay = read_json(profile_path(self.game)).get("layouts")
@@ -1797,7 +1934,7 @@ class ProfilePanel(ttk.Frame):
         self.columnconfigure(0, weight=1)
         self.columnconfigure(1, minsize=self.RW)
         self.rowconfigure(0, weight=1)
-        nav = self.nav = tk.Frame(self.app.navhost, bg=UI_PANEL, width=210)
+        nav = self.nav = tk.Frame(self.app.navhost, bg=UI_PANEL, width=248)
         nav.pack_propagate(False)
         tk.Label(nav, text="ПАНЕЛИ ОВЕРЛЕЯ", bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI Semibold", 9),
                  anchor="w").pack(fill="x", padx=14, pady=(12, 4))
@@ -1825,17 +1962,35 @@ class ProfilePanel(ttk.Frame):
         tight = self.app.root.winfo_screenheight() < 1000
         rpad = 4 if tight else 8
 
-        def make_row(text, cmd, dot=True, parent=None):
+        def make_row(text, cmd, dot=True, parent=None, icon=""):
             row = tk.Frame(parent or inner, bg=UI_PANEL, cursor="hand2")
             row.pack(fill="x")
             strip = tk.Frame(row, bg=UI_PANEL, width=4)
             strip.pack(side="left", fill="y")
-            lbl = tk.Label(row, text=tr(text), bg=UI_PANEL, fg=UI_FG, font=("Segoe UI", 11), anchor="w", padx=12, pady=rpad)
+            ic = tk.Label(row, text=icon, bg=UI_PANEL, fg=UI_ACCENT, font=("Segoe UI Symbol", 12), width=2, anchor="center",
+                          cursor="hand2")
+            ic.pack(side="left", padx=(10, 0))
+            row._icon = ic
+            ic.bind("<Button-1>", lambda e: cmd())
+            lbl = tk.Label(row, text=tr(text), bg=UI_PANEL, fg=UI_FG, font=("Segoe UI", 11), anchor="w", padx=8, pady=rpad)
             lbl.pack(side="left", fill="x", expand=True)
             d = tk.Label(row, text="●" if dot else "", bg=UI_PANEL, fg=UI_GREEN, font=("Segoe UI", 9), padx=10)
             d.pack(side="right")
             for w in (row, lbl, d, strip):
                 w.bind("<Button-1>", lambda e: cmd())
+
+            def hov(on, row=row, lbl=lbl, d=d):
+                try:
+                    if str(lbl.cget("bg")) == UI_FIELD:
+                        return                                # выбранная страница не подсвечивается заново
+                    bg = UI_ACTIVE if on else UI_PANEL
+                    for w_ in (row, lbl, d, row._icon):
+                        w_.config(bg=bg)
+                except tk.TclError:
+                    pass
+            for w in (row, lbl, d, strip, ic):
+                w.bind("<Enter>", lambda e, h=hov: h(True), add="+")
+                w.bind("<Leave>", lambda e, h=hov: h(False), add="+")
             return row, lbl, d, strip
         self._navitems = []                               # (ключ страницы, заголовок группы или None, виджет)
         titles = {k: t for k, t, _ in self.pages()}
@@ -1847,7 +2002,7 @@ class ProfilePanel(ttk.Frame):
                 hd = tk.Label(inner, text=tr(gname).upper(), bg=UI_PANEL, fg=UI_ACCENT, font=("Segoe UI Semibold", 11), anchor="w", padx=14, pady=3)
                 self._navitems.append((None, gname, hd))
             for key in ks:
-                self.rows_ui[key] = make_row(titles[key], lambda k=key: self.open_page(k))
+                self.rows_ui[key] = make_row(titles[key], lambda k=key: self.open_page(k), icon=NAV_ICONS.get(key, "•"))
                 self._navitems.append((key, gname, self.rows_ui[key][0]))
                 if key in NAV_TIPS:
                     Tip(self.rows_ui[key][1], NAV_TIPS[key])
@@ -1856,9 +2011,9 @@ class ProfilePanel(ttk.Frame):
         tk.Frame(prog, bg=UI_BORDER, height=1).pack(fill="x", padx=14, pady=(6, 0))
         tk.Label(prog, text="ПРОГРАММА", bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI Semibold", 9),
                  anchor="w").pack(fill="x", padx=14, pady=(8, 2))
-        self.rows_ui["apps"] = make_row("Доп. программы", lambda: self.open_page("apps"), parent=prog)
-        self.extra_ui = {"stats": make_row("Статистика", self.app.show_stats, dot=False, parent=prog),
-                         "settings": make_row("Настройки лаунчера", self.app.show_settings, dot=False, parent=prog)}
+        self.rows_ui["apps"] = make_row("Доп. программы", lambda: self.open_page("apps"), parent=prog, icon="⧉")
+        self.extra_ui = {"stats": make_row("Статистика", self.app.show_stats, dot=False, parent=prog, icon="▤"),
+                         "settings": make_row("Настройки лаунчера", self.app.show_settings, dot=False, parent=prog, icon="⚙")}
 
         center = ttk.Frame(self)
         center.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
@@ -1867,22 +2022,59 @@ class ProfilePanel(ttk.Frame):
         self.title = ttk.Label(center, text="", style="Title.TLabel")
         self.title.grid(row=0, column=0, sticky="w")
         self.note = ttk.Label(center, text="", style="Dim.TLabel", wraplength=self.PW)
+        self._center = center
+        center.bind("<Configure>", lambda e: self.after(80, self.fit_preview))
         self.note.grid(row=1, column=0, sticky="w", pady=(2, 10))
-        self.canvas = TrCanvas(center, width=self.PW, height=self.PH, bg=MOCK_BG, highlightthickness=1,
-                                highlightbackground=UI_BORDER)
-        self.canvas.grid(row=2, column=0)                           # по центру колонки
+        pbox = RoundBox(center, radius=16, fill=MOCK_BG, border=mix(UI_BORDER, UI_DIM, 0.3))
+        pbox.configure(width=self.PW + 22 + 2 * pbox.off)
+        self._pbox = pbox
+        pbox.grid(row=2, column=0, sticky="n")                      # по центру колонки, предпросмотр в скруглённой рамке
+        self.canvas = TrCanvas(pbox.inner, width=self.PW, height=self.PH, bg=MOCK_BG, highlightthickness=0)
+        self.canvas.pack(padx=11, pady=11)
         self.canvas.bind("<Button-1>", self.on_click)
+        self.canvas.bind("<Motion>", self.on_hover)
+        self.canvas.bind("<Leave>", self.on_leave)
 
         holder = ttk.Frame(self, width=self.RW)
         holder.grid(row=0, column=1, sticky="nsew")
         holder.grid_propagate(False)
         holder.columnconfigure(0, weight=1)
-        holder.rowconfigure(0, weight=1)
+        holder.rowconfigure(1, weight=1)
+        self.sq = tk.StringVar()
+        sbar = tk.Frame(holder, bg=UI_BG)
+        sbar.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        self.sq_entry = tk.Entry(sbar, textvariable=self.sq, bg=UI_FIELD, fg=UI_FG, insertbackground=UI_FG, relief="flat",
+                                 highlightthickness=1, highlightbackground=UI_BORDER, highlightcolor=UI_ACCENT, font=("Segoe UI", 10))
+        self.sq_entry.pack(side="left", fill="x", expand=True, ipady=5)
+        self.open_btn = tk.Label(sbar, text="", bg=UI_FIELD, fg=UI_FG, font=("Segoe UI", 10), padx=10, pady=4, cursor="hand2", width=15)
+        self.open_btn.pack(side="left", padx=(6, 0), ipady=2)
+        self.open_btn.bind("<Button-1>", lambda e: self.toggle_all())
+        self.sq_hint = tr("Найти настройку на этой странице…")
+        self._sq_ph = True
+        self.sq_entry.config(fg=UI_DIM)
+        self.sq_entry.insert(0, self.sq_hint)
+
+        def sq_in(e=None):
+            if self._sq_ph:
+                self._sq_ph = False
+                self.sq_entry.delete(0, "end")
+                self.sq_entry.config(fg=UI_FG)
+
+        def sq_out(e=None):
+            if not self.sq.get().strip():
+                self._sq_ph = True
+                self.sq_entry.delete(0, "end")
+                self.sq_entry.insert(0, self.sq_hint)
+                self.sq_entry.config(fg=UI_DIM)
+        self.sq_entry.bind("<FocusIn>", sq_in)
+        self.sq_entry.bind("<FocusOut>", sq_out)
+        self.sq_entry.bind("<Escape>", lambda e: (self.sq.set(""), self.settings_filter()))
+        self.sq.trace_add("write", lambda *a: self.settings_filter())
         self.scroll = tk.Canvas(holder, bg=UI_BG, highlightthickness=0, borderwidth=0)
         sb = ttk.Scrollbar(holder, orient="vertical", command=self.scroll.yview)
         self.scroll.configure(yscrollcommand=sb.set)
-        self.scroll.grid(row=0, column=0, sticky="nsew")
-        sb.grid(row=0, column=1, sticky="ns")
+        self.scroll.grid(row=1, column=0, sticky="nsew")
+        sb.grid(row=1, column=1, sticky="ns")
         self.settings = ttk.Frame(self.scroll)
         self.settings.columnconfigure(0, weight=1)
         win = self.scroll.create_window(0, 0, window=self.settings, anchor="nw")
@@ -1891,30 +2083,28 @@ class ProfilePanel(ttk.Frame):
         enable_wheel(self.scroll, holder)
 
         bar = ttk.Frame(self)
-        bar.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(8, 0))
-        ttk.Button(bar, text="Сохранить", command=self.save).pack(side="left", padx=(0, 6))
-        ttk.Button(bar, text="Сохранить и перезапустить оверлей", style="Accent.TButton", command=self.save_apply).pack(side="left", padx=(0, 6))
-        ttk.Button(bar, text="Сбросить положение окон", command=self.reset_pos).pack(side="left")
-        bar2 = ttk.Frame(self)
-        bar2.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(6, 0))
-        ttk.Button(bar2, text=f"Запустить оверлей ({GAMES[self.game]})", command=lambda: self.launch("")).pack(side="left", padx=(0, 6))
-        self.btn_move = ttk.Button(bar2, text="Режим перемещения окон", command=self.toggle_move)
-        self.btn_move.pack(side="left", padx=(0, 6))
-        ttk.Button(bar2, text="Демо без игры", command=lambda: self.launch("demo")).pack(side="left", padx=(0, 6))
-        sb_ = ttk.Button(bar2, text="Проверить оверлей", command=self.selftest)
-        sb_.pack(side="left", padx=(0, 6))
-        Tip(sb_, "Запускает демо со всеми панелями и пишет, всё ли отрисовалось без ошибок.")
-        jb = ttk.Button(bar2, text="Журнал", command=self.show_log)
-        jb.pack(side="left", padx=(0, 6))
+        bar.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        self.btn_save = ttk.Button(bar, text="Сохранить", command=self.save)
+        self.btn_save.pack(side="left", padx=(0, 8))
+        ttk.Button(bar, text="Сохранить и перезапустить оверлей", style="Accent.TButton", command=self.save_apply).pack(side="left", padx=(0, 8))
+        more = ttk.Menubutton(bar, text=tr("Ещё") + " ▾")
+        mm = tk.Menu(more, tearoff=0, bg=UI_PANEL, fg=UI_FG, activebackground=UI_ACCENT, activeforeground=UI_ACCENT_FG, bd=0,
+                     font=("Segoe UI", 10))
+        mm.add_command(label=tr("Демо без игры"), command=lambda: self.launch("demo"))
+        mm.add_command(label=tr("Проверить оверлей"), command=self.selftest)
+        mm.add_command(label=tr("Журнал"), command=self.show_log)
+        mm.add_separator()
+        mm.add_command(label=tr("Сбросить положение окон"), command=self.reset_pos)
         if self.game == "rf2":
-            pb = ttk.Button(bar2, text="Настроить плагин rF2", command=self.setup_rf2_plugin)
-            pb.pack(side="left")
-            Tip(pb, "Находит rFactor 2 в библиотеках Steam, ставит плагин разделяемой памяти из скачанного архива (если его нет) и включает его. Игру перед этим закройте.")
-        for w_, t_ in ((self.btn_move, "Окна можно двигать мышью и растягивать за угол. Края экрана и соседние окна притягивают (Shift — без магнита)."),
-                       (jb, "Что оверлей писал в процессе работы — для поиска проблем.")):
-            Tip(w_, t_)
+            mm.add_command(label=tr("Настроить плагин rF2"), command=self.setup_rf2_plugin)
+        more.configure(menu=mm)
+        more.pack(side="right")
+        self.btn_move = ttk.Button(bar, text="Режим перемещения окон", command=self.toggle_move)
+        self.btn_move.pack(side="right", padx=(0, 8))
+        ttk.Button(bar, text=f"Запустить оверлей ({GAMES[self.game]})", command=lambda: self.launch("")).pack(side="right", padx=(0, 8))
+        Tip(self.btn_move, "Окна можно двигать мышью и растягивать за угол. Края экрана и соседние окна притягивают (Shift — без магнита).")
         self.msg = ttk.Label(self, text="", style="Dim.TLabel")
-        self.msg.grid(row=3, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        self.msg.grid(row=2, column=0, columnspan=2, sticky="w", pady=(6, 0))
 
     # ---------- страницы ----------
     def open_page(self, key):
@@ -1927,13 +2117,13 @@ class ProfilePanel(ttk.Frame):
         for k, (row, lbl, dot, strip) in self.rows_ui.items():
             sel = in_game and k == self.page
             bg = UI_FIELD if sel else UI_PANEL
-            for w in (row, lbl, dot):
+            for w in (row, lbl, dot, getattr(row, "_icon", row)):
                 w.config(bg=bg)
             strip.config(bg=UI_ACCENT if sel else UI_PANEL)
         for k, (row, lbl, dot, strip) in self.extra_ui.items():
             sel = view == k
             bg = UI_FIELD if sel else UI_PANEL
-            for w in (row, lbl, dot):
+            for w in (row, lbl, dot, getattr(row, "_icon", row)):
                 w.config(bg=bg)
             strip.config(bg=UI_ACCENT if sel else UI_PANEL)
 
@@ -1942,7 +2132,7 @@ class ProfilePanel(ttk.Frame):
         for k, (row, lbl, dot, strip) in self.rows_ui.items():
             sel = k == key
             bg = UI_FIELD if sel else UI_PANEL
-            for w in (row, lbl, dot):
+            for w in (row, lbl, dot, getattr(row, "_icon", row)):
                 w.config(bg=bg)
             strip.config(bg=UI_ACCENT if sel else UI_PANEL)
         self.mark_view(self.game)
@@ -1958,6 +2148,11 @@ class ProfilePanel(ttk.Frame):
         self.swatches, self.value_lbls, self._cards = [], [], []
         self.build_settings(key)
         self.finish_cards(key)
+        self._sf_hidden = []
+        if getattr(self, "sq_entry", None) is not None and not getattr(self, "_sq_ph", True):
+            self.sq.set("")
+            self.canvas.focus_set()
+        self.settings_filter()
         translate_tree(self.settings)
         self.refresh()
 
@@ -1967,20 +2162,20 @@ class ProfilePanel(ttk.Frame):
 
     def card(self, title, side):
         """Раздел настроек под спойлером: заголовок со знаком +/−, внутри — сетка элементов."""
-        wrap = tk.Frame(side, bg=UI_BORDER)
-        wrap.pack(fill="x", pady=(0, 6))
-        hdr = tk.Frame(wrap, bg=UI_PANEL, cursor="hand2")
-        hdr.pack(fill="x", padx=1, pady=(1, 0))
-        lb = tk.Label(hdr, text=tr(title).upper(), bg=UI_PANEL, fg=UI_FG, font=("Segoe UI Semibold", 10), anchor="w",
-                      padx=12, pady=9, cursor="hand2")
+        wrap = RoundBox(side, radius=14, fill=UI_BG, border=mix(UI_BORDER, UI_DIM, 0.35))
+        wrap.pack(fill="x", pady=(0, 10))
+        hdr = tk.Frame(wrap.inner, bg=UI_BG, cursor="hand2")
+        hdr.pack(fill="x", padx=2, pady=(2, 0))
+        lb = tk.Label(hdr, text=tr(title).upper(), bg=UI_BG, fg=UI_FG, font=("Segoe UI Semibold", 10), anchor="w",
+                      padx=14, pady=11, cursor="hand2")
         lb.pack(side="left", fill="x", expand=True)
-        sign = tk.Label(hdr, text="+", bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 13), padx=12, cursor="hand2")
+        sign = tk.Label(hdr, text="▸", bg=UI_BG, fg=UI_DIM, font=("Segoe UI", 11), padx=12, cursor="hand2")
         sign.pack(side="right")
-        f = ttk.Frame(wrap, padding=(14, 6, 14, 10))
+        f = ttk.Frame(wrap.inner, padding=(16, 4, 16, 12))
         f.columnconfigure(0, minsize=185)
         f._r = 0
         key = (self.page, title)
-        card = {"wrap": wrap, "hdr": hdr, "body": f, "sign": sign, "key": key}
+        card = {"wrap": wrap, "hdr": hdr, "body": f, "sign": sign, "key": key, "lb": lb, "title": title}
         self._cards.append(card)
 
         def toggle(e=None, c=card):
@@ -1992,9 +2187,11 @@ class ProfilePanel(ttk.Frame):
 
     def apply_card(self, c):
         on = self._open.get(c["key"], False)
-        c["sign"].config(text="−" if on else "+")
+        c["sign"].config(text="▾" if on else "▸", fg=UI_ACCENT if on else UI_DIM)
+        c["lb"].config(fg=UI_ACCENT if on else UI_FG)
+        self.sync_open_btn()
         if on:
-            c["body"].pack(fill="x", padx=1, pady=(0, 1))
+            c["body"].pack(fill="x", padx=2, pady=(0, 2))
         else:
             c["body"].pack_forget()
 
@@ -2003,7 +2200,7 @@ class ProfilePanel(ttk.Frame):
         for i, c in enumerate(self._cards):
             if len(self._cards) == 1:
                 c["hdr"].pack_forget()
-                c["body"].pack(fill="x", padx=1, pady=1)
+                c["body"].pack(fill="x", padx=2, pady=2)
                 continue
             self._open.setdefault(c["key"], i == 0 or c["key"][1].startswith("Сетапы"))
             self.apply_card(c)
@@ -2150,6 +2347,22 @@ class ProfilePanel(ttk.Frame):
                 self.show_setups_dir()
                 self.setup_info = ttk.Label(sc, text="", style="Dim.TLabel", justify="left", wraplength=440)
                 self.setup_info.grid(row=self.nr(sc), column=0, columnspan=3, sticky="w", pady=(6, 0))
+            sty = tk.Frame(f, bg=UI_BG)
+            sty.grid(row=self.nr(f), column=0, columnspan=3, sticky="ew", pady=(0, 6))
+            ttk.Label(f, text="Стиль оверлеев — один клик меняет цвета и вид окон. Дальше всё можно подправить ниже.",
+                      style="Dim.TLabel", wraplength=440, justify="left").grid(row=self.nr(f), column=0, columnspan=3, sticky="w", pady=(0, 8))
+            for i, (pn, pm, pw, pal) in enumerate(STYLE_PRESETS):
+                cv = tk.Canvas(sty, width=132, height=54, bg=UI_BG, highlightthickness=0, cursor="hand2")
+                cv.grid(row=i // 3, column=i % 3, padx=(0, 6), pady=(0, 6))
+                cv.create_rectangle(1, 1, 131, 53, fill=pal["background"], outline=pal["border"])
+                cv.create_rectangle(1, 1, 131, 14, fill=pal["panel"], outline="")
+                cv.create_rectangle(1, 1, 4, 14, fill=pal["accent"] if pw != "minimal" else pal["panel"], outline="")
+                cv.create_text(10, 8, text=tr(pn), fill=pal["text"], anchor="w", font=("Segoe UI", 8, "bold"))
+                for j, ck in enumerate(("accent", "me", "throttle", "brake")):
+                    cv.create_rectangle(8 + j * 16, 24, 20 + j * 16, 36, fill=pal[ck], outline="")
+                cv.create_text(76, 30, text="1:23.4", fill=pal["text"], anchor="w", font=("Segoe UI", 8))
+                cv.create_text(8, 45, text=dict(MODES["win_style"])[pw].split(":")[0], fill=pal["dim"], anchor="w", font=("Segoe UI", 7))
+                cv.bind("<Button-1>", lambda e, a=(pm, pw, pal): self.apply_style(*a))
             self.mcombo(f, "Тема оверлеев", "theme_mode")
             self.mcombo(f, "Стиль окон", "win_style", width=34)
             self.slider(f, None, "Непрозрачность всех панелей", self.v["op_all"], 0.2, 1.0, pct, cmd=self.sync_op_all)
@@ -2517,6 +2730,7 @@ class ProfilePanel(ttk.Frame):
             st = self.merge_external(self.collect())
             save_settings(self.game, st)
             self._base = {k: st[k] for k in self.sync_keys() if k in st}
+            self.set_dirty(False)
         except OSError as e:
             mb_error("Не удалось сохранить", str(e))
             return False
@@ -2725,6 +2939,17 @@ class ProfilePanel(ttk.Frame):
         for k, v in (THEME_LIGHT if m == "light" else THEME_DEFAULT).items():
             self.theme[k].set(v)
 
+    def apply_style(self, mode, win, pal):
+        self.v["theme_mode"].set(tr(dict(MODES["theme_mode"])[mode]))
+        self._tm = mode
+        self.v["win_style"].set(tr(dict(MODES["win_style"])[win]))
+        for k, v in pal.items():
+            self.theme[k].set(v)
+        try:
+            self.refresh_swatches()
+        except Exception:
+            pass
+
     def reset_colors(self):
         for k, v in (THEME_LIGHT if self.mode_val("theme_mode") == "light" else THEME_DEFAULT).items():
             self.theme[k].set(v)
@@ -2765,7 +2990,18 @@ class ProfilePanel(ttk.Frame):
             self.theme[key].set(hexv)
 
     # ---------- обновление ----------
+    def set_dirty(self, on):
+        if getattr(self, "_dirty", False) == on:
+            return
+        self._dirty = on
+        try:
+            self.btn_save.config(text=tr("Сохранить") + (" ●" if on else ""))
+        except (tk.TclError, AttributeError):
+            pass
+
     def changed(self):
+        if getattr(self, "_armed", False):
+            self.set_dirty(True)
         if not self._pending:
             self._pending = True
             self.after(50, self.refresh)
@@ -2804,23 +3040,189 @@ class ProfilePanel(ttk.Frame):
                 self.v[key].set(not self.v[key].get())
                 return
 
+    def fit_preview(self):
+        """Предпросмотр подстраивается под свободное место: окно больше — картинка крупнее (но не мельче базового размера)."""
+        try:
+            cw, chh = self._center.winfo_width(), self._center.winfo_height()
+            if cw < 100 or chh < 100:
+                return
+            nw = int(max(680, min(1180, cw - 2 * (self._pbox.off + 11) - 4)))
+            avail_h = chh - self.title.winfo_reqheight() - self.note.winfo_reqheight() - 2 * (self._pbox.off + 11) - 24
+            gh = int(max(330, min(980, avail_h)))
+            ph = int(max(400, min(760, avail_h)))
+            if (nw, gh, ph) == (self.PW, self.GH, self.PH):
+                return
+            self.PW, self.GH, self.PH = nw, gh, ph
+            self.note.config(wraplength=nw)
+            self.canvas.config(width=nw, height=190 if self.page == "apps" else self.gen_h() if self.page == "general" else ph)
+            self._pbox.configure(width=nw + 22 + 2 * self._pbox.off)
+            self.draw_preview()
+        except tk.TclError:
+            pass
+
+    def on_hover(self, e):
+        """Подсветка панели под курсором в общем предпросмотре: видно, что по ней можно кликнуть."""
+        c = self.canvas
+        self._hov_xy = (e.x, e.y)
+        c.delete("hov")
+        if self.page != "general":
+            c.config(cursor="")
+            return
+        for key, x0, y0, x1, y1 in self.hits:
+            if x0 <= e.x <= x1 and y0 <= e.y <= y1:
+                c.create_rectangle(x0 - 2, y0 - 2, x1 + 2, y1 + 2, outline=UI_ACCENT, width=2, dash=(5, 3), tags="hov")
+                c.config(cursor="hand2")
+                return
+        c.config(cursor="")
+
+    def is_simple(self):
+        return False                                    # «простой вид» убран: показываем все разделы
+
+    def is_adv(self, title):
+        return any(str(title).startswith(a) for a in ADV_CARDS)
+
+    def visible_cards(self):
+        cards = getattr(self, "_cards", [])
+        q = "" if getattr(self, "_sq_ph", True) else self.sq.get().strip()
+        if q or not self.is_simple() or len(cards) < 2:
+            return cards
+        return [c for c in cards if not self.is_adv(c["title"])]
+
+    def open_all(self, on):
+        for c in self.visible_cards():
+            if len(self._cards) > 1:
+                self._open[c["key"]] = on
+                self.apply_card(c)
+        self.sync_open_btn()
+
+    def toggle_all(self):
+        cards = self.visible_cards()
+        self.open_all(not (cards and all(self._open.get(c["key"], False) for c in cards)))
+
+    def sync_open_btn(self):
+        """Одна кнопка: «Развернуть всё», пока есть свёрнутые разделы, и «Свернуть всё», когда раскрыты все."""
+        btn = getattr(self, "open_btn", None)
+        cards = self.visible_cards()
+        if btn is None:
+            return
+        try:
+            if len(cards) < 2:
+                btn.pack_forget()
+                return
+            all_open = all(self._open.get(c["key"], False) for c in cards)
+            btn.config(text=tr("▸▸ Свернуть всё") if all_open else tr("▾▾ Развернуть всё"))
+            if not btn.winfo_ismapped():
+                btn.pack(side="left", padx=(6, 0), ipady=2)
+        except tk.TclError:
+            pass
+
+    def on_leave(self, e=None):
+        self._hov_xy = None
+        self.canvas.delete("hov")
+
+    def reapply_hover(self):
+        """Предпросмотр перерисовывается по таймеру и стирает рамку: ставим её обратно сразу, без мигания."""
+        xy = getattr(self, "_hov_xy", None)
+        if xy:
+            class _E:
+                pass
+            e = _E()
+            e.x, e.y = xy
+            self.on_hover(e)
+
+    # ---------- поиск по настройкам страницы ----------
+    @staticmethod
+    def _texts(w):
+        out = []
+        try:
+            t = w.cget("text")
+            if t:
+                out.append(str(t))
+        except (tk.TclError, AttributeError):
+            pass
+        try:
+            for ch in w.winfo_children():
+                out += ProfilePanel._texts(ch)
+        except tk.TclError:
+            pass
+        return out
+
+    def settings_filter(self):
+        q = "" if getattr(self, "_sq_ph", False) else self.sq.get().strip().lower()
+        for w in getattr(self, "_sf_hidden", []):
+            try:
+                w.grid()
+            except tk.TclError:
+                pass
+        self._sf_hidden = []
+        cards = getattr(self, "_cards", [])
+        if len(cards) > 1:
+            for c in cards:
+                c["wrap"].pack_forget()
+        shown = 0
+        simple = self.is_simple() and not q and len(cards) > 1
+        for c in cards:
+            on = True
+            if simple and self.is_adv(c["title"]):
+                continue
+            if q:
+                title_hit = q in tr(c["title"]).lower()
+                rows = {}
+                for w in c["body"].winfo_children():
+                    try:
+                        gi = w.grid_info()
+                    except tk.TclError:
+                        continue
+                    if gi:
+                        rows.setdefault(int(gi.get("row", 0)), []).append(w)
+                hit_rows = 0
+                for r, ws in rows.items():
+                    txt = " ".join(t for w in ws for t in self._texts(w)).lower()
+                    if title_hit or q in txt:
+                        hit_rows += 1
+                    else:
+                        for w in ws:
+                            w.grid_remove()
+                            self._sf_hidden.append(w)
+                on = title_hit or hit_rows > 0
+            if on:
+                shown += 1
+                if len(cards) > 1:
+                    c["wrap"].pack(fill="x", pady=(0, 10))
+                if q:
+                    c["body"].pack(fill="x", padx=2, pady=(0, 2))
+                    c["sign"].config(text="▾", fg=UI_ACCENT)
+                elif len(cards) > 1:
+                    self.apply_card(c)
+        if q and not shown and cards:
+            self.msg.config(text=tr("Ничего не найдено на этой странице."))
+        elif getattr(self, "msg", None) is not None and self.msg.cget("text") == tr("Ничего не найдено на этой странице."):
+            self.msg.config(text="")
+        self.sync_open_btn()
+        self.scroll.yview_moveto(0)
+
     # ---------- предпросмотр ----------
     OV_H = 640                                          # высота общего предпросмотра в натуральную величину
 
     def gen_h(self):
         wh = getattr(self.app, "win_h", 1000)
-        return int(max(330, min(self.GH, wh - 330)))
+        return int(max(330, min(self.GH, wh - 250)))
 
     base_k = 1.0
 
     def make_fonts(self, k):
         k = k * self.base_k
         fam = self.v["family"].get()
-        fam = "Segoe UI" if fam in ("", "(авто)") else fam
+        if fam in ("", "(авто)"):
+            try:
+                av = set(tkfont.families(self))
+            except tk.TclError:
+                av = set()
+            fam = next((n for n in ("Bahnschrift", "Segoe UI Semibold", "Segoe UI") if n in av), "Segoe UI")      # как в самом оверлее
         fs = int(self.num("font", 13))
-        mk = lambda size, bold: tkfont.Font(family=fam, size=max(5, int(round(size * k))), weight="bold" if bold else "normal")
+        mk = lambda size, bold: tkfont.Font(family=fam, size=max(6, int(round(size * k))), weight="bold" if bold else "normal")
         self.f_s = mk(max(6, fs // 2), True)
-        self.f_t = mk(max(6, fs // 2 - 1), False)
+        self.f_t = mk(max(7, fs // 2), True)
         self.f_b = mk(max(9, fs * 0.9), True)
 
     def compute_theme(self, key="standings"):
@@ -2833,6 +3235,10 @@ class ProfilePanel(ttk.Frame):
         self.th = th
 
     def draw_preview(self):
+        self._draw_preview_raw()
+        self.reapply_hover()
+
+    def _draw_preview_raw(self):
         c = self.canvas
         c.delete("all")
         self.hits = []
@@ -2840,12 +3246,12 @@ class ProfilePanel(ttk.Frame):
         for i in range(0, self.PW, 40):                 # «трасса» на заднем плане
             c.create_line(i, 0, i + 120, ph, fill="#222a39")
         if self.page == "general":
-            kk = min(1.0, ph / self.OV_H)
+            kk = max(0.3, min(self.PW / 680.0, ph / self.OV_H, 1.7))
             self.base_k = kk
             self._pk = kk
             self.make_fonts(1.0)
             self.draw_overview()
-            if kk < 1.0:
+            if abs(kk - 1.0) > 1e-3:
                 for item in c.find_all():
                     c.scale(item, 0, 0, kk, kk)
                     c.move(item, (self.PW - 680 * kk) / 2, 0)
@@ -2866,7 +3272,7 @@ class ProfilePanel(ttk.Frame):
         out.append(("num", 20))
         if self.cols["tyre"].get():
             out.append(("tyre", w["tyre"]))
-        out.append(("name", 84 + (46 if self.v["st_pitinfo"].get() else 0)))
+        out.append(("name", 84 + (62 if self.v["st_pitinfo"].get() else 0)))
         if self.game == "iracing" and self.cols["irat"].get():
             out.append(("irat", w["irat"]))
         for k in ("ahead", "lead", "best", "last", "fuel", "ve", "status"):
@@ -3086,8 +3492,20 @@ class ProfilePanel(ttk.Frame):
                         c.create_line(rx - 3, mid + 8, rx + 3, mid + 8, fill=th["accent"])
                         c.create_arc(rx + 5, mid - 6, rx + 11, mid + 2, start=-50, extent=100, style="arc", outline=th["accent"])
                     if self.v["st_pitinfo"].get() and i in (1, 4, 8, 10):
-                        c.create_text(kx + cw - 2, mid, text=("К%d · %dс" % (18 + i, 28 + i)) if i != 4 else "К22 · 14с", anchor="e",
-                                      fill=th["accent"] if i == 4 else th["dim"], font=self.f_t)
+                        t1, t2 = "К%d" % (18 + i), ("%dс" % (28 + i)) if i != 4 else "14с"
+                        if i == 4:
+                            t1 = "К22"
+                        w1, w2 = self.f_t.measure(t1), self.f_t.measure(t2)
+                        right = min(kx + cw - 2, x + w - 8)
+                        pw_ = w1 + w2 + 13
+                        if right - pw_ <= kx + 2 + self.f_t.measure(name) + 4:
+                            t2, pw_ = "", w1 + 9                           # не влезает целиком — только номер круга
+                        if right - pw_ > kx + 2 + self.f_t.measure(name) + 4:
+                            hh_ = max(rh * 0.30, min(rh / 2 - 0.5, self.f_t.metrics("linespace") / 2 + 1))
+                            self.rr(c, right - pw_, mid - hh_, right, mid + hh_, 4, "#ffd23f" if i == 4 else "#e8bd35")
+                            c.create_text(right - pw_ + 4, mid, text=t1, anchor="w", fill="#10141a", font=self.f_t)
+                            if t2:
+                                c.create_text(right - 4, mid, text=t2, anchor="e", fill="#b3170f" if i == 4 else "#1b3f9a", font=self.f_t)
                 elif k == "irat":
                     self.irat_chips(kx + cw - 2, mid, i, rh, forecast=True)
                 elif k in ("ahead", "lead"):
@@ -3349,9 +3767,16 @@ class ProfilePanel(ttk.Frame):
                 dx, dy = -dy, dx
             return ccx + (-dx if mirror else dx), ccy + dy
         pts = []
-        for i in range(60):
-            a = 2 * math.pi * i / 60
-            pts += list(tf(ccx + 50 * math.cos(a) + 14 * math.cos(2 * a + .7), ccy + 38 * math.sin(a) + 12 * math.sin(2 * a)))
+        real = pv_track(60)
+        if real:
+            rr_ = max(20, min(w - 36, h - 44) / 2)
+            for px_, py_ in real[1]:
+                pts += list(tf(ccx + px_ * rr_, ccy + py_ * rr_))
+            c.create_text(x + w - 8, y + h - 8, text=real[0][:22], fill=th["dim"], anchor="se", font=self.f_t)
+        else:
+            for i in range(60):
+                a = 2 * math.pi * i / 60
+                pts += list(tf(ccx + 50 * math.cos(a) + 14 * math.cos(2 * a + .7), ccy + 38 * math.sin(a) + 12 * math.sin(2 * a)))
         blk = self.mode_val("map_style") == "black"
         c.create_line(*pts, *pts[:2], fill="#ffffff" if blk else "#2f3745", width=10 if blk else 9, smooth=True)
         c.create_line(*pts, *pts[:2], fill="#1b1b1b" if blk else "#c5cad3", width=8 if blk else 3, smooth=True)
@@ -5063,10 +5488,12 @@ class StatsPage(ttk.Frame):
         left = ttk.Frame(self)
         left.grid(row=0, column=0, sticky="ns", padx=(0, 14))
         ttk.Label(left, text="Сессии", style="Head.TLabel").pack(anchor="w")
-        self.lst = tk.Listbox(left, width=40, height=24, bg=UI_FIELD, fg=UI_FG, selectbackground=UI_ACCENT,
-                              selectforeground=UI_ACCENT_FG, highlightthickness=1, highlightbackground=UI_BORDER,
-                              relief="flat", activestyle="none", exportselection=False)
-        self.lst.pack(fill="both", expand=True, pady=(4, 6))
+        lbox = RoundBox(left, radius=12, fill=UI_BG, border=mix(UI_BORDER, UI_DIM, 0.35), fillh=True)
+        lbox.pack(fill="both", expand=True, pady=(4, 8))
+        self.lst = tk.Listbox(lbox.inner, width=40, height=24, bg=UI_BG, fg=UI_FG, selectbackground=UI_ACCENT,
+                              selectforeground=UI_ACCENT_FG, highlightthickness=0,
+                              relief="flat", activestyle="none", exportselection=False, font=("Segoe UI", 10))
+        self.lst.pack(fill="both", expand=True, padx=4, pady=4)
         self.lst.bind("<<ListboxSelect>>", lambda e: self.on_select())
         ttk.Button(left, text="Обновить", command=self.reload).pack(fill="x", pady=2)
         ttk.Button(left, text="Экспорт в CSV…", command=self.export).pack(fill="x", pady=2)
@@ -5090,8 +5517,10 @@ class StatsPage(ttk.Frame):
             self.view_btns[k] = ttk.Button(ibar, text=tr(name), command=lambda k=k: self.set_view(k))
             self.view_btns[k].pack(side="right", padx=(4, 0))
         self.vmode = "laps"
-        wrap = ttk.Frame(right)
-        wrap.grid(row=2, column=0, sticky="nsew")
+        tbox = RoundBox(right, radius=12, fill=UI_BG, border=mix(UI_BORDER, UI_DIM, 0.35), fillh=True)
+        tbox.grid(row=2, column=0, sticky="nsew")
+        wrap = ttk.Frame(tbox.inner)
+        wrap.pack(fill="both", expand=True, padx=2, pady=2)
         wrap.columnconfigure(0, weight=1)
         wrap.rowconfigure(0, weight=1)
         self.tree = ttk.Treeview(wrap, columns=[k for k, _, _, _ in STAT_COLS], show="headings", height=8)
@@ -5116,7 +5545,7 @@ class StatsPage(ttk.Frame):
         self.tree.tag_configure("best", foreground="#b04dff")
         self.tree.tag_configure("pit", foreground=UI_DIM)
         self.tree.tag_configure("sum", foreground=UI_ACCENT)
-        self.wrap = wrap
+        self.wrap = tbox
         self.tel = TelemetryView(right, self)
         self.cards = ttk.Frame(right)
         self.cards.grid(row=3, column=0, sticky="ew", pady=(8, 0))
@@ -5518,7 +5947,7 @@ class SettingsPage(ttk.Frame):
         col2.grid(row=2, column=1, sticky="nw", padx=(0, 24))
         col3.grid(row=2, column=2, sticky="nw")
 
-        box = ttk.LabelFrame(col1, text="Внешний вид", padding=10)
+        box = section(col1, "Внешний вид")
         box.pack(fill="x", pady=(0, 10))
         ttk.Label(box, text="Тема").grid(row=0, column=0, sticky="w", padx=(0, 12), pady=4)
         cb = ttk.Combobox(box, textvariable=self.theme_var, values=[tr(n) for _, n in self.THEMES], state="readonly", width=16)
@@ -5529,12 +5958,12 @@ class SettingsPage(ttk.Frame):
         cb2.grid(row=1, column=1, sticky="w")
         cb2.bind("<<ComboboxSelected>>", self.on_lang)
 
-        box = ttk.LabelFrame(col1, text="Запуск", padding=10)
+        box = section(col1, "Запуск")
         box.pack(fill="x", pady=(0, 10))
         self.tg(box, 0, "Запускать лаунчер вместе с Windows", "win_start")
         self.tg(box, 1, "Запускать свёрнутым", "start_min")
 
-        box = ttk.LabelFrame(col1, text="Свёрнутое окно", padding=10)
+        box = section(col1, "Свёрнутое окно")
         box.pack(fill="x", pady=(0, 10))
         self.tg(box, 0, "Сворачивать в трей (значок у часов)", "min_tray")
         self.tg(box, 1, "Крестик окна сворачивает в трей, а не закрывает", "close_tray")
@@ -5543,7 +5972,7 @@ class SettingsPage(ttk.Frame):
         self.tray_btn = ttk.Button(box, text="Установить поддержку трея", command=self.install_tray)
         self.tray_btn.grid(row=3, column=0, sticky="w", pady=(6, 0))
 
-        box = ttk.LabelFrame(col3, text="Горячие клавиши оверлея", padding=10)
+        box = section(col3, "Горячие клавиши оверлея")
         box.pack(fill="x", pady=(0, 10))
         hk = read_json(profile_path("lmu")).get("hotkeys") if isinstance(read_json(profile_path("lmu")), dict) else None
         hk = hk if isinstance(hk, dict) else {}
@@ -5567,7 +5996,7 @@ class SettingsPage(ttk.Frame):
         self.hk_msg = ttk.Label(box, text="Применяются при следующем запуске оверлея.", style="Dim.TLabel")
         self.hk_msg.grid(row=len(HOTKEYS) + 1, column=0, columnspan=3, sticky="w", pady=(4, 0))
 
-        box = ttk.LabelFrame(col2, text="Оверлей и игра", padding=10)
+        box = section(col2, "Оверлей и игра")
         box.pack(fill="x", pady=(0, 10))
         self.tg(box, 0, "Запускать оверлей вместе с игрой (кнопка «Запустить игру»)", "launch_with_game")
         self.tg(box, 1, "Сам определять игру и запускать оверлей", "autostart")
@@ -5580,7 +6009,7 @@ class SettingsPage(ttk.Frame):
         ttk.Label(r, text="сек.").pack(side="left")
         ttk.Button(box, text="Процессы игр…", command=app.edit_procs).grid(row=5, column=0, sticky="w", pady=(8, 0))
 
-        box = ttk.LabelFrame(col2, text="Запуск игр", padding=10)
+        box = section(col2, "Запуск игр")
         box.pack(fill="x", pady=(0, 10))
         for i, (g, name) in enumerate(GAMES.items()):
             ttk.Label(box, text=name).grid(row=i, column=0, sticky="w", padx=(0, 8), pady=3)
@@ -5588,13 +6017,13 @@ class SettingsPage(ttk.Frame):
             ttk.Button(box, text="Обзор…", command=lambda g=g: app.browse_game(g)).grid(row=i, column=2, padx=(6, 0))
         ttk.Label(box, text="Пусто — игра запускается через Steam.", style="Dim.TLabel").grid(row=len(GAMES), column=0, columnspan=3, sticky="w", pady=(4, 0))
 
-        box = ttk.LabelFrame(col2, text="Файлы", padding=10)
+        box = section(col2, "Файлы")
         box.pack(fill="x", pady=(0, 10))
         for i, (name, path) in enumerate((("Открыть папку профилей", PROFILES), ("Открыть папку журналов", LOGS),
                                           ("Открыть папку карт трасс", MAP_DIR), ("Открыть папку лаунчера", HERE))):
             ttk.Button(box, text=name, command=lambda p=path: self.open_dir(p)).grid(row=i // 2, column=i % 2, sticky="w", padx=(0, 8), pady=3)
 
-        box = ttk.LabelFrame(col1, text="Обновление программы", padding=10)
+        box = section(col1, "Обновление программы")
         box.pack(fill="x", pady=(0, 10))
         self.ver_lbl = ttk.Label(box, text="", style="Dim.TLabel", justify="left")
         self.ver_lbl.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 4))
@@ -5604,20 +6033,20 @@ class SettingsPage(ttk.Frame):
         Toggle(box, "Проверять при запуске лаунчера", self.v["auto_update"]).grid(row=3, column=0, columnspan=2, sticky="w", pady=(6, 0))
         self.refresh_version()
 
-        box = ttk.LabelFrame(col2, text="Перенос настроек", padding=10)
+        box = section(col2, "Перенос настроек")
         box.pack(fill="x", pady=(0, 10))
         ttk.Button(box, text="Экспорт настроек…", command=self.export_all).grid(row=0, column=0, sticky="w", padx=(0, 8), pady=3)
         ttk.Button(box, text="Импорт настроек…", command=self.import_all).grid(row=0, column=1, sticky="w", pady=3)
         ttk.Label(box, text="Один файл: профили LMU и rFactor 2 (раскладка окон, виды, цвета)\nи ваши программы. Удобно для копии или другого ПК.",
                   style="Dim.TLabel", justify="left").grid(row=1, column=0, columnspan=2, sticky="w", pady=(2, 0))
 
-        box = ttk.LabelFrame(col3, text="Диагностика", padding=10)
+        box = section(col3, "Диагностика")
         box.pack(fill="x", pady=(0, 10))
         ttk.Button(box, text="Проверить систему…", command=self.diagnose).grid(row=0, column=0, sticky="w", pady=3)
         ttk.Label(box, text="Покажет, запущена ли игра, виден ли оверлею\nеё поток данных и что писал оверлей в журнал.",
                   style="Dim.TLabel", justify="left").grid(row=1, column=0, sticky="w", pady=(2, 0))
 
-        box = ttk.LabelFrame(col3, text="Телеметрия", padding=10)
+        box = section(col3, "Телеметрия")
         box.pack(fill="x", pady=(0, 10))
         self.tg(box, 0, "Записывать телеметрию (скорость, педали, шины…)", "telemetry")
         ttk.Label(box, text="20 записей в секунду, около 50 КБ на круг.\nЕсли оверлей нагружает компьютер — выключите.\nПрименяется сразу, перезапуск не нужен.",
@@ -5629,7 +6058,7 @@ class SettingsPage(ttk.Frame):
         ttk.Button(r2, text="Обзор…", command=self.browse_i2).pack(side="left", padx=(6, 0))
         self.i2_var.trace_add("write", lambda *a: (self.app.cfg.__setitem__("i2_path", self.i2_var.get().strip()), self.app.save_cfg()))
 
-        box = ttk.LabelFrame(col3, text="Сброс", padding=10)
+        box = section(col3, "Сброс")
         box.pack(fill="x")
         ttk.Button(box, text="Сбросить настройки лаунчера", command=self.reset).pack(anchor="w")
         ttk.Label(box, text="Профили оверлея (LMU и rFactor 2) не затрагиваются.", style="Dim.TLabel").pack(anchor="w", pady=(4, 0))
@@ -5983,7 +6412,7 @@ class App:
         self.tiles = {}
 
         def _fit_tiles(e=None, st={"on": True}):             # на узком окне синяя плитка «ИГРА» убирается — остальным хватает места
-            need = 1500
+            need = 1340
             if e is not None and e.widget is tiles:
                 want = e.width >= need
                 if want != st["on"]:
@@ -6005,12 +6434,14 @@ class App:
 
         head = ttk.Frame(self.root, padding=(14, 8, 14, 2))
         head.pack(fill="x")
-        self.dot = tk.Canvas(head, width=16, height=16, bg=UI_BG, highlightthickness=0)
-        self.dot.pack(side="left", padx=(0, 8))
-        self.lbl_game = ttk.Label(head, text="", style="Head.TLabel")
+        chip = RoundBox(head, radius=14, fill=UI_BG, border=mix(UI_BORDER, UI_DIM, 0.35), autow=True)
+        chip.pack(side="left")
+        self.dot = tk.Canvas(chip.inner, width=16, height=16, bg=UI_BG, highlightthickness=0)
+        self.dot.pack(side="left", padx=(8, 8), pady=4)
+        self.lbl_game = ttk.Label(chip.inner, text="", style="Head.TLabel")
         self.lbl_game.pack(side="left")
-        self.lbl_overlay = ttk.Label(head, text="", style="Dim.TLabel")
-        self.lbl_overlay.pack(side="left", padx=18)
+        self.lbl_overlay = ttk.Label(chip.inner, text="", style="Dim.TLabel")
+        self.lbl_overlay.pack(side="left", padx=(16, 12))
 
         ttk.Button(head, text="Процессы игр…", command=self.edit_procs).pack(side="right")
         Toggle(head, "Закрывать оверлей вместе с игрой", self.close_var, command=self.save_cfg).pack(side="right", padx=(0, 22))
@@ -6020,7 +6451,7 @@ class App:
         body.pack(fill="both", expand=True, padx=14, pady=(2, 10))
         body.columnconfigure(1, weight=1)
         body.rowconfigure(0, weight=1)
-        self.navhost = tk.Frame(body, bg=UI_BG, width=210)
+        self.navhost = tk.Frame(body, bg=UI_BG, width=248)
         self.navhost.grid(row=0, column=0, sticky="ns", padx=(0, 14), pady=(12, 12))
         self.navhost.pack_propagate(False)
         self.holder = ttk.Frame(body)
