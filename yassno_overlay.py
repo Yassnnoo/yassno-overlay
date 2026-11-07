@@ -2084,10 +2084,36 @@ class PedalsWindow(RelativeWindow):
             return
 
 
+class _Rec:
+    """Записывает вызовы create_* и потом воспроизводит их на холсте — так неизменный слой карты считается один раз, а не 60 раз в секунду."""
+    def __init__(self):
+        self.ops = []
+
+    def __getattr__(self, name):
+        if name.startswith("create_"):
+            def f(*a, **k):
+                self.ops.append((name, a, k))
+            return f
+        raise AttributeError(name)
+
+    def play(self, c):
+        for n, a, k in self.ops:
+            getattr(c, n)(*a, **k)
+
+
+def _lum(col):
+    try:
+        r, g, b = int(col[1:3], 16), int(col[3:5], 16), int(col[5:7], 16)
+    except (ValueError, IndexError):
+        return 0.0
+    return (0.299 * r + 0.587 * g + 0.114 * b) / 255.0
+
+
 class MapWindow(RelativeWindow):
-    """Карта трассы: рисуется по вашему проезду, затем уточняется; на ней все машины.
-    Три вида: полная карта, линейная (круг как полоса) и местная (участок вокруг вашей машины)."""
+    """Карта трассы без рамки: рисуется по вашему проезду, затем уточняется; на ней все машины.
+    Три вида: полная карта, линейная (круг как полоса) и местная (участок вокруг вашей машины). Рисуется до 60 кадров в секунду."""
     POS, ON = ("map_x", "map_y"), "trackmap"
+    FRAME_MS = 16
 
     def mode(self):
         v = self.main.cfg.get("map_mode", "full")
@@ -2096,44 +2122,88 @@ class MapWindow(RelativeWindow):
     def build(self):
         m = self.main
         self.cw, self.rh, self.R = m.cw, m.rh, m.R if self.rounded else 0
-        self.h_title, self.h_foot = int(self.rh * 1.4), int(self.rh * 0.95)
         self.side = int(self.rh * 11.6 * max(0.5, min(3.0, float(m.cfg.get("map_scale", 1.0)))))
+        self.tw = max(8, int(self.side * 0.030))                     # ширина ленты трассы
         self._mode = self.mode()
-        self._bare = (not m.cfg.get("map_frame", True)) and self._mode != "linear"
-        self.gx = 0 if self._bare else 14
-        if self._bare:
-            self.h_title = self.h_foot = 0
-        self.f_num = tkfont.Font(family=m.family, size=max(8, int(m.cfg["font"] * 0.9)), weight="bold")
-        self.f_turn = tkfont.Font(family=m.family, size=max(7, int(m.cfg["font"] * 0.62)), weight="bold")
+        self._bare = True                                            # рамки и заголовка нет ни в одном виде
+        self.h_title = self.h_foot = 0
+        self.gx = 0
+        self._fonts = {}
+        self.f_turn = tkfont.Font(family=m.family, size=max(8, int(m.cfg["font"] * 0.72)), weight="bold")
+        self.f_lab = tkfont.Font(family=m.family, size=max(7, int(m.cfg["font"] * 0.6)), weight="bold")
         if not getattr(self, "_wheel", False):
             self._wheel = True
             self.canvas.bind("<MouseWheel>", lambda e: m.scale_map(0.1 if e.delta > 0 else -0.1))
         if self._mode == "linear":
             self.width = int(self.side * 1.55) + 28
             self.lane_h = int(self.rh * 1.0)
-            self.height = self.h_title + int(self.rh * 2.1) + 3 * self.lane_h + self.h_foot
-        elif self._bare:
-            self.width, self.height = self.side, self.side
+            self.height = int(self.rh * 1.6) + 3 * self.lane_h
         else:
-            self.width = self.side + 28
-            self.height = self.h_title + self.side + self.h_foot
+            self.width = self.height = self.side
         self.canvas.config(width=self.width, height=self.height)
         self._sig = None
+        self._static_key = None
+        if not getattr(self, "_fps_on", False):
+            self._fps_on = True
+            self._t_prev = time.perf_counter()
+            self._cpos = {}
+            self.top.after(200, self._frame_loop)
 
     def tick(self, frame, ver):
         cf = self.main.cfg
-        if self.mode() != self._mode or ((not cf.get("map_frame", True)) and self._mode != "linear") != self._bare:
+        if self.mode() != self._mode:
             self.build()
-        sig = (cf.get("map_style", "classic"), cf.get("map_one_color", False), cf.get("map_frame", True), ver // 2, cf["font"], self.main.locked, cf.get("map_rot", 0), cf.get("map_mirror", False),
-               cf.get("map_radius", 500), cf.get("map_headup", True), cf.get("map_pit", True), cf.get("map_turns", True), cf.get("map_brake", True), len(brake_tracker.points), int(time.time() * 8))
-        if sig != self._sig:
-            self._sig = sig
-            self.draw(frame)
+
+    def _frame_loop(self):
+        """Своя развёртка карты: ~60 кадров в секунду, независимо от остального оверлея."""
+        t0 = time.perf_counter()
+        try:
+            m = self.main._m
+            if m.cfg.get(self.ON, True) and self.top.winfo_viewable():
+                with lock:
+                    frame = state["frame"]
+                if frame is not None or int(t0 * 4) != getattr(self, "_idle_sig", None):
+                    self._idle_sig = int(t0 * 4)
+                    self.draw(frame)
+                    if self._fresh:
+                        self._fresh = False
+                        self.stretch_items()
+                    move_decor(self.canvas, m.locked, self.R, lambda: m.close_window(self.ON))
+        except Exception as e:
+            if not getattr(self, "_err", False):
+                self._err = True
+                print("Карта: ошибка отрисовки:", repr(e))
+        dt = int((time.perf_counter() - t0) * 1000)
+        self.top.after(max(1, self.FRAME_MS - dt), self._frame_loop)
+
+    # ---------- мелочи ----------
+    def font_for(self, r):
+        px = max(7, int(r * 1.12))
+        f = self._fonts.get(px)
+        if f is None:
+            f = self._fonts[px] = tkfont.Font(family=self.main.family, size=-px, weight="bold")
+        return f
+
+    def car_r(self, player):
+        c = self.main.cfg
+        try:
+            r = int(c.get("map_pdot", 14) if player else c.get("map_dot", 10))
+        except (TypeError, ValueError):
+            r = 14 if player else 10
+        return max(5 if not c.get("map_nums", True) else 8, min(34, r))
+
+    def black(self):
+        return self.main.cfg.get("map_style", "classic") == "black"
+
+    def car_col(self, car):
+        if self.black():
+            return "#ffffff"
+        return "#e8eaee" if self.main.cfg.get("map_one_color", False) else class_color(car["cls"])
 
     def draw_wind(self, c, cx, cy, r, wind, rot, mirror):
         """Круглый компас ветра: стрелка показывает, куда дует, цвет и подпись — сила."""
         m = self.main
-        c.create_oval(cx - r - 3, cy - r - 3, cx + r + 3, cy + r + 3, fill="#12171f", outline=BORDER, width=2)
+        c.create_oval(cx - r - 3, cy - r - 3, cx + r + 3, cy + r + 3, fill="#0e1218", outline="#2a3140", width=1)
         for i in range(12):                                   # метки по кругу
             a = math.radians(30 * i)
             r1 = r - (4 if i % 3 else 7)
@@ -2170,65 +2240,89 @@ class MapWindow(RelativeWindow):
             out.append((-rx if mirror else rx, -rz))
         return out
 
-    def draw_marks(self, c, sp, sec, visible=None, local_k=1.0):
-        """Сектора (цветные участки и границы) и отметка старта/финиша на ломаной sp (экранные точки)."""
+    def halo_text(self, c, x, y, text, fill, font, anchor="center"):
+        """Подпись с тёмным контуром — читается и на ленте, и на фоне игры."""
+        for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, 1), (-1, 1), (1, -1)):
+            c.create_text(x + dx, y + dy, text=text, fill="#05070a", font=font, anchor=anchor)
+        c.create_text(x, y, text=text, fill=fill, font=font, anchor=anchor)
+
+    # ---------- неизменный слой ----------
+    def draw_track(self, c, sp, closed, sec, ok=None):
+        """Лента: тёмное полотно с тонкой светлой кромкой; при включённых секторах кромка окрашена по секторам."""
+        n = len(sp)
+        ok = ok or (lambda i: True)
+        tw, black = self.tw, self.black()
+        hi_all = n if closed else n - 1
+
+        def runs(lo, hi):
+            out, run = [], []
+            for i in range(lo, hi + 1):
+                if ok(i % n):
+                    run.append(i)
+                else:
+                    if len(run) >= 2:
+                        out.append(run)
+                    run = []
+            if len(run) >= 2:
+                out.append(run)
+            return out
+
+        def draw(rs, col, wd):
+            for r in rs:
+                pts, last = [], None
+                for i in r:                                   # точки чаще 1.5 px только рвут линию
+                    q = sp[i % n]
+                    if last is None or abs(q[0] - last[0]) + abs(q[1] - last[1]) >= 1.5:
+                        pts.append(q)
+                        last = q
+                if len(pts) >= 2:
+                    c.create_line(*[v for p in pts for v in p], fill=col, width=wd, capstyle="round", joinstyle="round")
+        full = runs(0, hi_all)
+        if not full:
+            return
+        edge_w = 3 if not black else 5
+        if closed and sec and self.main.cfg.get("map_sectors", True) and not black:
+            cuts = [0, int(sec[0] * n), int(sec[1] * n), hi_all]
+            for j in range(3):
+                draw(runs(cuts[j], cuts[j + 1]), SEC_COL[j], tw + edge_w)
+        else:
+            draw(full, "#f2f4f8", tw + edge_w)
+        draw(full, "#050607" if black else "#1b1d22", tw)
+
+    def draw_marks(self, c, sp, sec, visible=None):
+        """Старт/финиш двойной белой чертой, границы секторов — цветной чертой с подписью S2/S3."""
         m = self.main
         n_ = len(sp)
         ok = visible or (lambda i: True)
+        half = self.tw / 2 + 5
 
-        def tick(i, half, col, wd):
+        def tick(i):
             i = max(0, min(n_ - 2, i))
             (xa, ya), (xb, yb) = sp[i], sp[i + 1]
             dx, dy = xb - xa, yb - ya
             n = math.hypot(dx, dy) or 1.0
-            px, py = -dy / n * half, dx / n * half
-            c.create_line(xa - px, ya - py, xa + px, ya + py, fill=col, width=wd)
             return xa, ya, dx / n, dy / n
         if sec and m.cfg.get("map_sectors", True):
-            cuts = [0, int(sec[0] * n_), int(sec[1] * n_), n_]
-            for j in range(0 if self.black() else 3):               # участки секторов тонкой линией поверх трассы (в чёрном стиле не рисуем)
-                run = []
-                for i in range(cuts[j], min(n_, cuts[j + 1] + 1)):
-                    if ok(i):
-                        run.append(sp[i])
-                    elif len(run) >= 2:
-                        c.create_line(*[v for p in run for v in p], fill=SEC_COL[j], width=2, capstyle="round", joinstyle="round")
-                        run = []
-                    else:
-                        run = []
-                if len(run) >= 2:
-                    c.create_line(*[v for p in run for v in p], fill=SEC_COL[j], width=2, capstyle="round", joinstyle="round")
             for j, f in enumerate(sec):
                 i = int(f * n_)
                 if ok(i):
-                    xa, ya, ux, uy = tick(i, 11, SEC_COL[j + 1], 4)
-                    c.create_text(xa - uy * 20, ya + ux * 20, text=f"S{j + 2}", fill=SEC_COL[j + 1], font=self.f_num)
+                    xa, ya, ux, uy = tick(i)
+                    col = SEC_COL[j + 1]
+                    c.create_line(xa + uy * half, ya - ux * half, xa - uy * half, ya + ux * half, fill=col, width=3, capstyle="round")
+                    self.halo_text(c, xa - uy * (half + 11), ya + ux * (half + 11), f"S{j + 2}", col, self.f_lab)
         if ok(0):
-            x0, y0, ux, uy = tick(0, 13, "#ffffff", 6)
-            tick(0, 13, "#111111", 2)
-            c.create_text(x0 + uy * 34, y0 - ux * 34, text="СТАРТ", fill=FG, font=self.f_num)
-
-    def draw_brakes(self, c, sp, rot, mirror, to_screen):
-        """Красные чёрточки поперёк трассы — где вы начали тормозить на лучшем круге."""
-        pts = to_screen(self.transform([(x, z) for x, z, _d in brake_tracker.points], rot, mirror))
-        n_ = len(sp)
-        for bx, by in pts:
-            i = min(range(n_), key=lambda k: (sp[k][0] - bx) ** 2 + (sp[k][1] - by) ** 2)
-            a, b = sp[(i - 3) % n_], sp[(i + 3) % n_]
-            tx, ty = b[0] - a[0], b[1] - a[1]
-            tn = math.hypot(tx, ty) or 1.0
-            nx, ny = -ty / tn * 9, tx / tn * 9
-            mx, my = sp[i]
-            c.create_line(mx - nx, my - ny, mx + nx, my + ny, fill="#0a0a0a", width=5, capstyle="round")
-            c.create_line(mx - nx, my - ny, mx + nx, my + ny, fill="#ff3b30", width=3, capstyle="round")
+            x0, y0, ux, uy = tick(0)
+            for off in (-2.5, 2.5):                                   # двойная линия старта/финиша
+                px, py = x0 + ux * off, y0 + uy * off
+                c.create_line(px + uy * half, py - ux * half, px - uy * half, py + ux * half, fill="#05070a", width=4)
+                c.create_line(px + uy * half, py - ux * half, px - uy * half, py + ux * half, fill="#ffffff", width=2)
 
     def draw_turns(self, c, sp, loop, gx0, gy0, side):
-        """Номера поворотов на полной карте: кружок с цифрой снаружи от вершины поворота."""
+        """Номера поворотов: аккуратная цифра снаружи от вершины поворота."""
         key = (len(loop), loop[0], loop[len(loop) // 2])
         if getattr(self, "_corner_key", None) != key:
             self._corner_key, self._corners = key, detect_corners(loop)
         n_ = len(sp)
-        rr0 = max(5, int(self.rh * 0.30))
         for idx, num, _sgn in self._corners:
             i = idx % n_
             a, b = sp[(i - 4) % n_], sp[(i + 4) % n_]
@@ -2238,146 +2332,130 @@ class MapWindow(RelativeWindow):
             cross = (mx - a[0]) * (b[1] - my) - (my - a[1]) * (b[0] - mx)    # знак поворота уже на экране (учтены поворот и зеркало карты)
             side_ = -1.0 if cross > 0 else 1.0
             nx, ny = -ty / tn * side_, tx / tn * side_
-            rr = max(rr0, self.f_turn.measure(str(num)) // 2 + 3)       # круг не уже цифры (двузначные номера)
-            px, py = mx + nx * (rr + 11), my + ny * (rr + 11)
-            px = min(max(px, gx0 + rr + 1), gx0 + side - rr - 1)
-            py = min(max(py, gy0 + rr + 1), gy0 + side - rr - 1)
-            c.create_oval(px - rr, py - rr, px + rr, py + rr, fill=HDR_BG, outline=DIM)
-            c.create_text(px, py, text=str(num), fill=FG, font=self.f_turn)
+            dist = self.tw / 2 + 4 + self.f_turn.measure(str(num)) / 2 + 5
+            px = min(max(mx + nx * dist, gx0 + 8), gx0 + side - 8)
+            py = min(max(my + ny * dist, gy0 + 8), gy0 + side - 8)
+            self.halo_text(c, px, py, str(num), "#ffffff", self.f_turn)
 
-    def black(self):
-        return self.main.cfg.get("map_style", "classic") == "black"
-
-    def car_col(self, car):
-        if self.black():
-            return "#ffffff"
-        return "#e8eaee" if self.main.cfg.get("map_one_color", False) else class_color(car["cls"])
-
-    def track_line(self, c, flat, closed_pt=None):
-        """Полотно трассы: классика (серое) или чёрная с белой обводкой."""
-        black = self.black()
-        extra = list(closed_pt) if closed_pt else []
-        c.create_line(*flat, *extra, fill="#ffffff" if black else "#2f3745", width=16 if black else 14,
-                      capstyle="round", joinstyle="round")
-        c.create_line(*flat, *extra, fill="#1b1b1b" if black else "#c5cad3", width=13 if black else 5,
-                      capstyle="round", joinstyle="round")
+    # ---------- машины ----------
+    def draw_car(self, c, sx, sy, car, nums):
+        blk = self.black()
+        pl = car["place"] if car["place"] > 0 else None
+        if car["player"]:
+            r = self.car_r(True)
+            ring = "#22c55e" if blk else ACCENT
+            c.create_oval(sx - r - 4, sy - r - 4, sx + r + 4, sy + r + 4, outline=ring, width=1)          # лёгкое кольцо вокруг своей машины
+            c.create_oval(sx - r, sy - r, sx + r, sy + r, fill="#ffffff", outline=ring, width=max(2, r // 4))
+            if nums and pl:
+                c.create_text(sx, sy, text=str(pl), fill="#000000", font=self.font_for(r))
+            return
+        r = self.car_r(False)
+        col = self.car_col(car)
+        if car.get("in_pits"):
+            col = _mix(col, "#14171d", 0.45)
+        c.create_oval(sx - r, sy - r, sx + r, sy + r, fill=col, outline="#0b0e13", width=2)
+        if nums and pl:
+            c.create_text(sx, sy, text=str(pl), fill="#000000" if _lum(col) > 0.55 else "#ffffff", font=self.font_for(r))
 
     def draw_cars(self, c, items, gx0, gy0, side, clip=None):
-        """items: [(машина, x, y)]; игрок рисуется последним. Номер места — внутри точки."""
-        m = self.main
-        nums = m.cfg.get("map_nums", True)
+        """items: [(машина, x, y)]; игрок рисуется последним."""
+        nums = self.main.cfg.get("map_nums", True)
         for car, sx, sy in sorted(items, key=lambda t: t[0]["player"]):
             if not (gx0 <= sx <= gx0 + side and gy0 <= sy <= gy0 + side):
                 continue
             if clip and not clip(sx, sy):
                 continue
-            pl = car["place"] if car["place"] > 0 else None
-            blk = self.black()
-            if car["player"]:
-                pr = int(m.cfg.get("map_dot", 6)) + (7 if blk else 4)
-                if nums:
-                    pr = max(pr, 19 if blk else 15)
-                if blk:                                         # игрок — зелёный, кружок крупнее
-                    c.create_oval(sx - pr, sy - pr, sx + pr, sy + pr, fill="#22c55e", outline="#ffffff", width=3)
-                else:
-                    c.create_oval(sx - pr, sy - pr, sx + pr, sy + pr, fill=FG, outline=ACCENT, width=3)
-                if nums and pl:
-                    c.create_text(sx, sy, text=str(pl), fill="#000000", font=self.f_num)
-            else:
-                r = int(m.cfg.get("map_dot", 6))
-                if nums:
-                    r = max(r, 15 if blk else 13)
-                c.create_oval(sx - r, sy - r, sx + r, sy + r, fill=self.car_col(car), outline="#0a0a0a" if blk else BG, width=2)
-                if nums and pl:
-                    onw = blk or m.cfg.get("map_one_color", False)
-                    c.create_text(sx, sy, text=str(pl), fill="#000000" if onw else "#ffffff", font=self.f_num)
+            self.draw_car(c, sx, sy, car, nums)
 
+    def smooth(self, cars):
+        """Плавное движение точек между обновлениями данных игры: возвращает копии машин с плавной позицией."""
+        now = time.perf_counter()
+        dt = max(0.001, min(0.2, now - self._t_prev))
+        self._t_prev = now
+        k = 1.0 - math.exp(-dt / 0.05)
+        out, seen = [], set()
+        for car in cars:
+            key = car["key"]
+            seen.add(key)
+            x, z = car["pos"]
+            old = self._cpos.get(key)
+            if old is None or math.hypot(x - old[0], z - old[1]) > 150.0:
+                nx, nz = x, z
+            else:
+                nx, nz = old[0] + (x - old[0]) * k, old[1] + (z - old[1]) * k
+            self._cpos[key] = (nx, nz)
+            c2 = dict(car)
+            c2["pos"] = (nx, nz)
+            out.append(c2)
+        for key in [q for q in self._cpos if q not in seen]:
+            del self._cpos[key]
+        return out
+
+    # ---------- кадр ----------
     def draw(self, frame):
         m, c, W, H = self.main, self.canvas, self.width, self.height
         c.delete("all")
-        panel = HDR_BG
-        bare = self._bare
-        if bare:
-            if self.rounded:                                    # без рамки фон всегда прозрачный: служебный цвет окна не рисуется
-                pass
-            else:
-                c.create_rectangle(0, 0, W, H, fill="#0a0a0a" if self.black() else BG, outline="")
-        elif self.R:
-            draw_rrect(c, 0, 0, W - 1, H - 1, self.R, fill=panel, outline=BORDER)
-        else:
-            c.create_rectangle(0, 0, W - 1, H - 1, fill=panel, outline=BORDER)
+        if not self.rounded:
+            c.create_rectangle(0, 0, W, H, fill=BG, outline="")
         RUNTIME["ir_svg"] = bool(m.cfg.get("map_ir_svg", True))
         loop, partial, status, laps, track_name, sec = mapper.snapshot()
         rot, mirror = int(m.cfg.get("map_rot", 0)) % 4, bool(m.cfg.get("map_mirror", False))
         mode = self._mode
-        me = next((x for x in (frame["cars"] if frame else []) if x["player"]), None)
-
-        # ---------- шапка ----------
-        if not bare:
-            cy = self.h_title // 2
-            c.create_rectangle(14, cy - int(self.rh * 0.42), 18, cy + int(self.rh * 0.42), fill=MARK, outline="")
-            title = {"full": "КАРТА", "linear": "КРУГ", "local": f"КАРТА  {int(m.cfg.get('map_radius', 500))} м"}[mode]
-            c.create_text(28, cy, text=title, fill=FG, anchor="w", font=m.bold)
-            name = (track_name or "").upper()
-            c.create_text(W - 14, cy, text=name[:26], fill=DIM, anchor="e", font=m.small)
+        raw = [x for x in (frame["cars"] if frame else []) if not x["garage"] and x["pos"] != (0.0, 0.0)
+               and (m.cfg.get("map_pit", True) or x["player"] or not x["in_pits"])]
+        cars = self.smooth(raw) if raw else []
+        me = next((x for x in cars if x["player"]), None)
         if mode == "linear":
             self.draw_linear(c, frame, me, sec, W)
             return
-        gx0, gy0 = self.gx, self.h_title
         side = self.side
-        if not bare:
-            c.create_rectangle(gx0, gy0, gx0 + side, gy0 + side, fill="#0a0a0a" if self.black() else BG, outline=BORDER)
-
-        # ---------- расчёт масштаба ----------
         base = loop if loop else partial
-        cars = [x for x in (frame["cars"] if frame else []) if not x["garage"] and x["pos"] != (0.0, 0.0) and (m.cfg.get("map_pit", True) or x["player"] or not x["in_pits"])]
         if mode == "local" and len(base) >= 2 and me is not None and me["pos"] != (0.0, 0.0):
-            self.draw_local(c, base, bool(loop), sec, cars, me, gx0, gy0, side, rot, mirror)
+            self.draw_local(c, base, bool(loop), sec, cars, me, 0, 0, side, rot, mirror)
         elif len(base) >= 2:
-            tp = self.transform(base, rot, mirror)
-            xs, ys = [p[0] for p in tp], [p[1] for p in tp]
-            minx, maxx, miny, maxy = min(xs), max(xs), min(ys), max(ys)
-            margin = 14
-            span = max(maxx - minx, maxy - miny, 1.0)
-            k = (side - 2 * margin) / span
-            ox = gx0 + side / 2 - (minx + maxx) / 2 * k
-            oy = gy0 + side / 2 - (miny + maxy) / 2 * k
-            to_screen = lambda pts: [(ox + x * k, oy + y * k) for x, y in pts]
-            sp = to_screen(tp)
-            flat = [v for p in sp for v in p]
-            if loop:
-                self.track_line(c, flat, sp[0])
-                self.draw_marks(c, sp, sec)
-                if m.cfg.get("map_turns", True):
-                    self.draw_turns(c, sp, loop, gx0, gy0, side)
-                if m.cfg.get("map_brake", True) and brake_tracker.points:
-                    self.draw_brakes(c, sp, rot, mirror, to_screen)
-            else:
-                step = max(1, len(sp) // 700)
-                c.create_line(*[v for p in sp[::step] for v in p], fill=ACCENT, width=3, capstyle="round", joinstyle="round")
-            cp = to_screen(self.transform([x["pos"] for x in cars], rot, mirror)) if cars else []
-            self.draw_cars(c, [(car, sx, sy) for car, (sx, sy) in zip(cars, cp)], gx0, gy0, side)
+            skey = (side, rot, mirror, bool(loop), len(base), base[0], base[len(base) // 2], base[-1], tuple(sec) if sec else None,
+                    m.cfg.get("map_style", "classic"), bool(m.cfg.get("map_bg", True)), bool(m.cfg.get("map_turns", True)), bool(m.cfg.get("map_sectors", True)), m.cfg["font"])
+            if skey != self._static_key:
+                tp = self.transform(base, rot, mirror)
+                xs, ys = [p[0] for p in tp], [p[1] for p in tp]
+                minx, maxx, miny, maxy = min(xs), max(xs), min(ys), max(ys)
+                margin = max(18, self.tw + 14)
+                span = max(maxx - minx, maxy - miny, 1.0)
+                k = (side - 2 * margin) / span
+                ox = side / 2 - (minx + maxx) / 2 * k
+                oy = side / 2 - (miny + maxy) / 2 * k
+                self._to_screen = lambda pts, ox=ox, oy=oy, k=k: [(ox + x * k, oy + y * k) for x, y in pts]
+                sp = self._to_screen(tp)
+                rec = _Rec()
+                if loop:
+                    if m.cfg.get("map_bg", True) and self.rounded:              # подложка — только внутри готовой карты; прозрачность задаёт «Непрозрачность» окна
+                        poly, last = [], None
+                        for q in sp:
+                            if last is None or abs(q[0] - last[0]) + abs(q[1] - last[1]) >= 2.0:
+                                poly.append(q)
+                                last = q
+                        if len(poly) >= 3:
+                            rec.create_polygon(*[v for q in poly for v in q], fill=BG, outline="")
+                    self.draw_track(rec, sp, True, sec)
+                    self.draw_marks(rec, sp, sec)
+                    if m.cfg.get("map_turns", True):
+                        self.draw_turns(rec, sp, loop, 0, 0, side)
+                else:
+                    step = max(1, len(sp) // 700)
+                    pts_ = [v for p in sp[::step] for v in p]
+                    rec.create_line(*pts_, fill="#f2f4f8", width=self.tw + 3, capstyle="round", joinstyle="round")
+                    rec.create_line(*pts_, fill="#1b1d22", width=self.tw, capstyle="round", joinstyle="round")
+                self._static, self._static_key = rec, skey
+            self._static.play(c)
+            cp = self._to_screen(self.transform([x["pos"] for x in cars], rot, mirror)) if cars else []
+            self.draw_cars(c, [(car, sx, sy) for car, (sx, sy) in zip(cars, cp)], 0, 0, side)
         else:
             msg = "жду данные игры" if not frame else "проедьте круг — карта нарисуется по вашей траектории"
-            c.create_text(gx0 + side // 2, gy0 + side // 2, text=msg, fill=DIM, font=m.small, width=side - 30, justify="center")
-
-        # ---------- ветер ----------
+            self.halo_text(c, side // 2, side // 2, msg, DIM, m.small)
         if m.cfg.get("map_wind", True):
-            self.draw_wind(c, gx0 + side - 30, gy0 + 30, 21, frame.get("wind") if frame else None, rot, mirror)
-
-        # ---------- подвал ----------
-        if bare:
-            return
-        fy = gy0 + side + self.h_foot // 2
-        if status == "ready" and mapper.sources == "схема iRacing":
-            txt, col = "схема трассы iRacing", DIM
-        elif status == "ready":
-            txt, col = f"карта готова  •  кругов в карте: {laps}/{TrackMapper.MAX_LAPS}", DIM
-        elif status == "recording":
-            txt, col = "запись карты: проедьте круг без боксов", ACCENT
-        else:
-            txt, col = "карта пока не записана", DIM
-        c.create_text(gx0, fy, text=txt, fill=col, anchor="w", font=m.small)
+            self.draw_wind(c, side - 30, 30, 21, frame.get("wind") if frame else None, rot, mirror)
+        if status == "recording":
+            self.halo_text(c, 8, side - 10, "запись карты: проедьте круг без боксов", ACCENT, m.small, anchor="w")
 
     def draw_local(self, c, base, is_loop, sec, cars, me, gx0, gy0, side, rot, mirror):
         """Только участок вокруг игрока радиусом map_radius метров; можно крутить так, чтобы «вперёд» было вверх."""
@@ -2399,7 +2477,7 @@ class MapWindow(RelativeWindow):
                 old = getattr(self, "_hd", None)
                 nx, nz = dx / n, dz / n
                 if old:
-                    nx, nz = old[0] * 0.4 + nx * 0.6, old[1] * 0.4 + nz * 0.6
+                    nx, nz = old[0] * 0.8 + nx * 0.2, old[1] * 0.8 + nz * 0.2
                     n2 = math.hypot(nx, nz) or 1.0
                     nx, nz = nx / n2, nz / n2
                 self._hd, self._hp = (nx, nz), (px, pz)
@@ -2412,33 +2490,22 @@ class MapWindow(RelativeWindow):
                 return cx + (dx * fz - dz * fx) * k, cy - (dx * fx + dz * fz) * k
             (tx, ty), = self.transform([(dx, dz)], rot, mirror)
             return cx + tx * k, cy + ty * k
-        c.create_oval(cx - rr, cy - rr, cx + rr, cy + rr, fill="" if (self._bare and self.rounded) else ("#0a0a0a" if self.black() else "#0e1218"),
-                    outline=BORDER, width=2)
+        if is_loop and self.rounded and m.cfg.get("map_bg", True):
+            c.create_oval(cx - rr, cy - rr, cx + rr, cy + rr, fill=BG, outline="")             # подложка местной карты — только круг обзора, когда карта готова
+        c.create_oval(cx - rr, cy - rr, cx + rr, cy + rr, fill="" if self.rounded else "#0e1218", outline="#2a3140", width=1)
         sp = [proj(x, z) for x, z in base]
         dist = [math.hypot(x - px, z - pz) for x, z in base]
         vis = lambda i: dist[i] <= R * 1.02
         if is_loop:
             n = len(sp)
-            runs, run = [], []
-            for i in range(n):
-                if vis(i):
-                    run.append(sp[i])
-                else:
-                    if len(run) >= 2:
-                        runs.append(run)
-                    run = []
-            if len(run) >= 2:
-                if runs and vis(0) and vis(n - 1):
-                    runs[0] = run + runs[0]                        # участок через линию старта склеиваем
-                else:
-                    runs.append(run)
-            for run in runs:
-                self.track_line(c, [v for p in run for v in p])
+            self.draw_track(c, sp, True, sec, ok=vis)
             self.draw_marks(c, sp + sp[:2], sec, visible=lambda i: vis(i % n))
         else:
             run = [sp[i] for i in range(len(sp)) if vis(i)]
             if len(run) >= 2:
-                c.create_line(*[v for p in run for v in p], fill=ACCENT, width=3, capstyle="round", joinstyle="round")
+                flat = [v for p in run for v in p]
+                c.create_line(*flat, fill="#f2f4f8", width=self.tw + 3, capstyle="round", joinstyle="round")
+                c.create_line(*flat, fill="#1b1d22", width=self.tw, capstyle="round", joinstyle="round")
         items = []
         for car in cars:
             if car["player"]:
@@ -2447,35 +2514,38 @@ class MapWindow(RelativeWindow):
                 items.append((car, *proj(*car["pos"])))
         self.draw_cars(c, items, gx0, gy0, side)
         if headup:                                                  # стрелка «вперёд» у игрока
-            c.create_polygon(cx, cy - 26, cx - 6, cy - 16, cx + 6, cy - 16, fill=ACCENT, outline="")
+            r0 = self.car_r(True)
+            c.create_polygon(cx, cy - r0 - 16, cx - 6, cy - r0 - 6, cx + 6, cy - r0 - 6, fill=ACCENT, outline="")
+        if m.cfg.get("map_wind", True):
+            self.draw_wind(c, side - 30, 30, 21, None, rot, mirror)
 
     def draw_linear(self, c, frame, me, sec, W):
         """Круг как горизонтальная полоса: сектора, старт/финиш и машины по пройденной доле круга, по полосам классов."""
         m = self.main
         x0, x1 = 22, W - 22
         L = frame.get("track_len", 0.0) if frame else 0.0
-        by = self.h_title + int(self.rh * 0.75)
+        by = int(self.rh * 0.7)
         bh = max(6, int(self.rh * 0.3))
         cuts = [0.0] + (list(sec) if sec and m.cfg.get("map_sectors", True) else []) + [1.0]
+        c.create_rectangle(x0 - 1, by - 1, x1 + 1, by + bh + 1, fill="#f2f4f8", outline="")
         for j in range(len(cuts) - 1):
-            col = SEC_COL[j] if len(cuts) == 4 else "#c5cad3"
+            col = SEC_COL[j] if len(cuts) == 4 else "#1b1d22"
             c.create_rectangle(x0 + (x1 - x0) * cuts[j], by, x0 + (x1 - x0) * cuts[j + 1], by + bh, fill=col, outline="")
             if len(cuts) == 4:
-                c.create_text(x0 + (x1 - x0) * (cuts[j] + cuts[j + 1]) / 2, by - int(self.rh * 0.35), text=f"S{j + 1}",
-                              fill=SEC_COL[j], font=self.f_num)
-        for xx, lab, anc in ((x0, "СТАРТ", "w"), (x1, "ФИНИШ", "e")):
-            c.create_rectangle(xx - 2, by - 5, xx + 2, by + bh + 5, fill="#ffffff", outline="#111111")
+                self.halo_text(c, x0 + (x1 - x0) * (cuts[j] + cuts[j + 1]) / 2, by - int(self.rh * 0.38), f"S{j + 1}", SEC_COL[j], self.f_lab)
+        for xx in (x0, x1):
+            c.create_rectangle(xx - 2, by - 5, xx + 2, by + bh + 5, fill="#ffffff", outline="#05070a")
         lane0 = by + bh + int(self.rh * 0.6)
         for ln in range(3):
             yy = lane0 + ln * self.lane_h + self.lane_h // 2
             c.create_line(x0, yy, x1, yy, fill="#232a36", dash=(2, 5))
         if not frame or L < 500 or not me:
-            c.create_text(W // 2, lane0 + self.lane_h, text="жду данные игры", fill=DIM, font=m.small)
+            self.halo_text(c, W // 2, lane0 + self.lane_h, "жду данные игры", DIM, m.small)
             return
         classes = [k for k in CLASS_ORDER if any(x["cls"] == k for x in frame["cars"])]
         classes += sorted({x["cls"] for x in frame["cars"]} - set(classes))
         nums = m.cfg.get("map_nums", True)
-        r0 = max(int(m.cfg.get("map_dot", 6)), 12 if nums else 5)
+        r0 = self.car_r(False)
         cars = [x for x in frame["cars"] if not x["garage"] and (self.main.cfg.get("map_pit", True) or x["player"] or not x["in_pits"])]
         lane_of = lambda car: (car["place"] % 3 if len(classes) <= 1 else min(2, classes.index(car["cls"]) if car["cls"] in classes else 2))
         jit = {}
@@ -2492,29 +2562,11 @@ class MapWindow(RelativeWindow):
                 prev_x = sx_
         for car in sorted(cars, key=lambda t: t["player"]):
             f = max(0.0, min(1.0, car["lap_dist"] / L))
-            if len(classes) <= 1:
-                ln = car["place"] % 3
-            else:
-                ln = min(2, classes.index(car["cls"]) if car["cls"] in classes else 2)
             sx = x0 + (x1 - x0) * f
-            sy = lane0 + ln * self.lane_h + self.lane_h // 2 + jit.get(car["key"], 0)
+            sy = lane0 + lane_of(car) * self.lane_h + self.lane_h // 2 + jit.get(car["key"], 0)
             if car["player"]:
                 c.create_line(sx, by + bh + 2, sx, lane0 + 3 * self.lane_h, fill=ACCENT, width=1)
-                pr = max(r0 + 3, 15)
-                c.create_oval(sx - pr, sy - pr, sx + pr, sy + pr, fill=FG, outline=ACCENT, width=3)
-                if nums and car["place"] > 0:
-                    c.create_text(sx, sy, text=str(car["place"]), fill="#000000", font=self.f_num)
-            else:
-                c.create_oval(sx - r0, sy - r0, sx + r0, sy + r0, fill=self.car_col(car), outline=BG, width=2)
-                if nums and car["place"] > 0:
-                    c.create_text(sx, sy, text=str(car["place"]), fill="#ffffff", font=self.f_num)
-        fy = self.height - self.h_foot // 2
-        s1, s2, last = me.get("last_s1", 0), me.get("last_s2", 0), me.get("last", 0)
-        if s1 > 0 and s2 > s1 and last > s2:
-            txt = f"прошлый круг:  S1 {s1:.2f}   S2 {s2 - s1:.2f}   S3 {last - s2:.2f}"
-        else:
-            txt = "сектора появятся после первого круга"
-        c.create_text(14, fy, text=txt, fill=DIM, anchor="w", font=m.small)
+            self.draw_car(c, sx, sy, car, nums)
 
 
 def _mix(c1, c2, t):
@@ -5229,8 +5281,6 @@ class Overlay:
         self.menu.add_checkbutton(label="Карта: отразить зеркально", variable=self.mirror_var, command=self.mirror_map)
         self.menu.add_command(label="Карта: крупнее", command=lambda: self.scale_map(+0.15))
         self.menu.add_command(label="Карта: мельче", command=lambda: self.scale_map(-0.15))
-        self.mbrake_var = tk.BooleanVar(value=bool(cfg.get("map_brake", True)))
-        self.menu.add_checkbutton(label="Карта: точки торможения лучшего круга", variable=self.mbrake_var, command=self.toggle_mbrake)
         self.menu.add_command(label="Карта: стереть и записать заново", command=mapper.clear)
         self.stand_var = tk.BooleanVar(value=bool(cfg.get("standings", True)))
         self.menu.add_checkbutton(label="Таблица (стендинг)", variable=self.stand_var, command=self.toggle_standings)
@@ -5769,10 +5819,6 @@ class Overlay:
                 json.dump(dict(data, t=int(time.time())), f, ensure_ascii=False)
         except (OSError, TypeError, ValueError):
             pass
-
-    def toggle_mbrake(self):
-        self.cfg["map_brake"] = bool(self.mbrake_var.get())
-        self.save()
 
     def toggle_cols(self):
         self.cfg["hide_cols"] = [k for k, v in self.col_vars.items() if not v.get()]

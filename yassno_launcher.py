@@ -196,7 +196,7 @@ MODES = {"stand_mode": [("table", "Таблица"), ("compact", "Компакт
          "win_style": [("classic", "Классика: красная метка"), ("square", "Строгий: прямые углы"),
                        ("soft", "Мягкий: сильно скруглённые"), ("minimal", "Минимализм: без цветной метки"),
                        ("accent", "Акцент: метка и рамка цвета акцента")],
-         "map_style": [("classic", "Классика: серая трасса"), ("black", "Чёрная, как в RaceLab")],
+         "map_style": [("classic", "Минимализм: тёмная лента"), ("black", "Чёрная, как в RaceLab")],
          "speedo_view": [("arc", "Дуга оборотов и скорость"), ("dial", "Круглый циферблат со стрелкой"),
                          ("tacho", "Тахометр со стрелкой"), ("led", "Лента светодиодов и передача"),
                          ("digital", "Цифровой: скорость и полоски"), ("minimal", "Минимальный: передача, скорость")],
@@ -458,7 +458,7 @@ PED_PARTS = [("gear", "Передача"), ("speed", "Скорость"), ("whee
              ("graph", "График газа и тормоза"), ("bars", "Столбики педалей")]
 REL_COLS = [("pos", "Позиция"), ("num", "Номер"), ("tag", "Метка PIT"), ("irat", "iRating и лицензия (iRacing)")]
 WX_CARDS = [("track", "Температура трассы"), ("air", "Температура воздуха"), ("wet", "Влажность трассы"), ("rain", "Осадки")]
-OP_DEFAULT = {"standings": 0.94, "relative": 0.94, "pedals": 0.94, "trackmap": 0.94, "radar": 1.0,
+OP_DEFAULT = {"standings": 0.94, "relative": 0.94, "pedals": 0.94, "trackmap": 0.6, "radar": 1.0,
               "weather": 0.94, "lights": 1.0, "limiter": 1.0, "fuel": 0.94, "delta": 0.94, "alerts": 1.0,
               "tyres": 0.94, "pitplan": 0.94, "gaps": 0.94, "engine": 0.94, "sesstime": 0.94, "clock": 0.94, "speedo": 0.94, "laplog": 0.94, "micro": 0.94}
 SCALE_KEYS = {"standings": "scale_standings", "relative": "scale_relative", "pedals": "scale_pedals", "weather": "scale_weather", "lights": "scale_lights",
@@ -471,13 +471,13 @@ DEFAULTS = {**{k: True for k, _ in ELEMENTS}, "font": 13, "family": "", "rows": 
             "hide_garage": True, "class_only": False, **SCALE_DEFAULT, **{"op_" + k: v for k, v in OP_DEFAULT.items()},
             "radar_range": 40, "fuel_reserve": 0.0, "fuel_pit_laps": 1.0, "fuel_avg": 5,
             "rel_ahead": 3, "rel_behind": 3, "ped_seconds": 8, "shift_start": 82.0, "shift_flash": 98.0, "speed_mph": False,
-            "map_wind": True, "map_dot": 6, "map_mirror": False, "map_rot": 0,
+            "map_wind": True, "map_dot": 10, "map_pdot": 14, "map_mirror": False, "map_rot": 0,
             "radar_arcs": True, "radar_fade": True, "lights_hold": 4,
-            "map_nums": True, "map_pit": True, "map_turns": True, "map_brake": True, "map_sectors": True, "fuel_ve": True,
+            "map_nums": True, "map_pit": True, "map_turns": True, "map_sectors": True, "fuel_ve": True,
             "app_racelab": False, "app_simhub": False, "app_crewchief": False, "app_tradingpaints": False, "stats": True,
             "stand_mode": "table", "ticker_w": 1000, "ticker_speed": 70, "map_mode": "full", "map_radius": 500,
             "map_headup": True, "delta_ref": "best", "delta_range": 1.0, "delta_view": "full", "delta_theme": "full", "delta_show_session": True, "delta_show_mine": True, "delta_show_pred": True, "tyres_view": "table", "layout_mode": "off", "wheel_style": "round"}
-DEFAULTS.update({"map_ir_svg": True, "weather_view": "cards", "map_style": "classic", "map_one_color": False, "map_frame": True,
+DEFAULTS.update({"map_ir_svg": True, "weather_view": "cards", "map_style": "classic", "map_one_color": False, "map_bg": True,
                  **{"hg_" + k: True for k, _ in ELEMENTS if k not in ("standings", "shiftlight")}})
 DEFAULTS.update({"tyres": False, "pitplan": False, "gaps": False, "engine": False, "engine_view": "table", "delta_sec_bar": True,
                  "sesstime": False, "clock": False, "speedo": False, "laplog": False, "micro": False, "micro_n": 20, "laplog_count": 5, "laplog_best": True, "laplog_delta": True, "laplog_temp": True,
@@ -2321,7 +2321,7 @@ class ProfilePanel(ttk.Frame):
             f = self.card(title, L)
             if elem:
                 self.tg(f, None, "Показывать эту панель", self.v[elem])
-                self.slider(f, None, "Непрозрачность", self.v["op_" + key], 0.2, 1.0, pct)
+                self.slider(f, None, "Непрозрачность подложки" if key == "trackmap" else "Непрозрачность", self.v["op_" + key], 0.2, 1.0, pct)
                 if ("hg_" + key) in self.v:
                     self.tg(f, None, "Скрывать, когда машина в гараже", self.v["hg_" + key])
             return f
@@ -2422,10 +2422,11 @@ class ProfilePanel(ttk.Frame):
             f = main_card()
             self.mcombo(f, "Вид карты", "map_mode", width=26)
             self.slider(f, None, "Размер карты", self.v["map_scale"], 0.5, 3.0, mult)
-            self.spin(f, None, "Размер точек машин", "map_dot", 3, 12)
+            self.spin(f, None, "Размер машин соперников", "map_dot", 4, 20)
+            self.spin(f, None, "Размер вашей машины", "map_pdot", 6, 30)
             self.combo(f, None, "Поворот карты", "map_rot", self.ROT)
             self.mcombo(f, "Стиль карты", "map_style", width=30)
-            self.tg(f, None, "Рамка и заголовок вокруг карты (выкл — только сама карта)", self.v["map_frame"])
+            self.tg(f, None, "Подложка под картой", self.v["map_bg"])
             self.tg(f, None, "Все соперники одного цвета (иначе по классам)", self.v["map_one_color"])
             h = self.card("Местная карта", L)
             self.combo(h, None, "Радиус, м", "map_radius", [str(x) for x in MAP_RADII])
@@ -2433,9 +2434,8 @@ class ProfilePanel(ttk.Frame):
             g = self.card("На карте", R)
             self.tg(g, None, "Номера мест на машинах", self.v["map_nums"])
             self.tg(g, None, "Номера поворотов (полная карта)", self.v["map_turns"])
-            self.tg(g, None, "Точки торможения лучшего круга (полная карта)", self.v["map_brake"])
             self.tg(g, None, "Машины на пит-лейне", self.v["map_pit"])
-            self.tg(g, None, "Сектора и отметка старта/финиша", self.v["map_sectors"])
+            self.tg(g, None, "Разделение по секторам и линия старта", self.v["map_sectors"])
             self.tg(g, None, "Компас ветра в углу", self.v["map_wind"])
             self.tg(g, None, "Зеркально отразить карту", self.v["map_mirror"])
             if self.game == "iracing":
@@ -2702,7 +2702,8 @@ class ProfilePanel(ttk.Frame):
         st["ped_seconds"] = lim(st["ped_seconds"], 4, 20)
         st["shift_start"] = lim(st["shift_start"], 50, 95)
         st["shift_flash"] = lim(st["shift_flash"], st["shift_start"] + 2, 100)
-        st["map_dot"] = lim(st["map_dot"], 3, 12)
+        st["map_dot"] = lim(st["map_dot"], 4, 20)
+        st["map_pdot"] = lim(st["map_pdot"], 6, 30)
         st["fuel_avg"] = lim(st["fuel_avg"], 1, 10)
         st["ticker_w"] = lim(st["ticker_w"], 400, 3000)
         st["ticker_speed"] = lim(st["ticker_speed"], 20, 300)
@@ -3417,10 +3418,10 @@ class ProfilePanel(ttk.Frame):
             self.canvas.create_rectangle(x, y, x + w, y + h, fill=t, outline=self.th["accent"] if st == "accent" else self.th["border"])
 
     @staticmethod
-    def rr(c, x1, y1, x2, y2, r, fill):
+    def rr(c, x1, y1, x2, y2, r, fill, outline=""):
         pts = [x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r, x2, y2 - r, x2, y2,
                x2 - r, y2, x1 + r, y2, x1, y2, x1, y2 - r, x1, y1 + r, x1, y1]
-        return c.create_polygon(pts, smooth=True, fill=fill, outline="")
+        return c.create_polygon(pts, smooth=True, fill=fill, outline=outline)
 
     def d_standings(self, x, y, w, h):
         c, th = self.canvas, self.th
@@ -3741,16 +3742,40 @@ class ProfilePanel(ttk.Frame):
                 c.create_rectangle(bx, top + 2, bx + 6, y + h - 5, fill="#262d38", outline="")
                 c.create_rectangle(bx, y + h - 5 - (y + h - 7 - top) * lvl, bx + 6, y + h - 5, fill=col, outline="")
 
+    def pv_car(self, px, py, r, col, pl, nums, player=False):
+        """Круг машины как в оверлее: цветной круг с номером; своя машина — белая с жёлтым кольцом."""
+        c, th = self.canvas, self.th
+        if player:
+            c.create_oval(px - r - 2.5, py - r - 2.5, px + r + 2.5, py + r + 2.5, outline=th["accent"], width=1)
+            c.create_oval(px - r, py - r, px + r, py + r, fill="#ffffff", outline=th["accent"], width=2)
+            tc = "#000000"
+        else:
+            c.create_oval(px - r, py - r, px + r, py + r, fill=col, outline="#0b0e13", width=1.5)
+            tc = "#000000" if col in ("#ffffff", "#e8eaee") else "#ffffff"
+        if nums and pl:
+            c.create_text(px, py, text=str(pl), fill=tc, font=self.f_t)
+
+    def pv_sizes(self, nums):
+        k = 0.62
+        r = max(3.0, min(20, self.num("map_dot", 10))) * k
+        rp = max(4.0, min(30, self.num("map_pdot", 14))) * k
+        if nums:
+            r, rp = max(r, 6.0), max(rp, 7.5)
+        return r, rp
+
+    def pv_wind(self, x, y, w):
+        c, th = self.canvas, self.th
+        wx, wy = x + w - 20, y + 20
+        c.create_oval(wx - 13, wy - 13, wx + 13, wy + 13, fill="#0e1218", outline="#2a3140")
+        c.create_polygon(wx + 8, wy - 9, wx + 1, wy - 1, wx + 4, wy - 1, wx - 6, wy + 9, wx - 2, wy + 1, wx - 4, wy + 1, fill="#6cb8ff", outline="")
+
+    def pv_plate_col(self):
+        op = max(0.2, min(1.0, self.num("op_trackmap", 0.6)))
+        return mix(UI_BG, "#0b0e13", op)
+
     def d_map(self, x, y, w, h):
         c, th = self.canvas, self.th
         mmode = self.mode_val("map_mode")
-        bare = (not self.v["map_frame"].get()) and mmode != "linear"
-        if bare:
-            c.create_rectangle(x, y, x + w, y + h, fill=th["bg"] if "bg" in th else "#0b0e13", outline="")
-        else:
-            self.panel(x, y, w, h)
-            self.mark(c, x + 6, y + 6, x + 9, y + 18)
-            c.create_text(x + 14, y + 12, text="КАРТА", fill=th["text"], anchor="w", font=self.f_t)
         if mmode == "linear":
             self.d_map_linear(x, y, w, h)
             return
@@ -3759,7 +3784,7 @@ class ProfilePanel(ttk.Frame):
             return
         rot = self.ROT.index(self.v["map_rot"].get()) if self.v["map_rot"].get() in self.ROT else 0
         mirror = bool(self.v["map_mirror"].get())
-        ccx, ccy = x + w / 2, y + h / 2 + 8
+        ccx, ccy = x + w / 2, y + h / 2
 
         def tf(px, py):                                     # поворот и зеркало вокруг центра карты
             dx, dy = px - ccx, py - ccy
@@ -3769,130 +3794,118 @@ class ProfilePanel(ttk.Frame):
         pts = []
         real = pv_track(60)
         if real:
-            rr_ = max(20, min(w - 36, h - 44) / 2)
+            rr_ = max(20, min(w, h) / 2 - 18)
             for px_, py_ in real[1]:
                 pts += list(tf(ccx + px_ * rr_, ccy + py_ * rr_))
-            c.create_text(x + w - 8, y + h - 8, text=real[0][:22], fill=th["dim"], anchor="se", font=self.f_t)
         else:
             for i in range(60):
                 a = 2 * math.pi * i / 60
                 pts += list(tf(ccx + 50 * math.cos(a) + 14 * math.cos(2 * a + .7), ccy + 38 * math.sin(a) + 12 * math.sin(2 * a)))
         blk = self.mode_val("map_style") == "black"
-        c.create_line(*pts, *pts[:2], fill="#ffffff" if blk else "#2f3745", width=10 if blk else 9, smooth=True)
-        c.create_line(*pts, *pts[:2], fill="#1b1b1b" if blk else "#c5cad3", width=8 if blk else 3, smooth=True)
         sec_on = bool(self.v["map_sectors"].get())
         nums = bool(self.v["map_nums"].get())
-        if sec_on:
-            cols = ("#ffd400", "#3da9ff", "#ff5ad1")
+        cols = ("#ffd400", "#3da9ff", "#ff5ad1")
+        if self.v["map_bg"].get():                                            # подложка только внутри нарисованной карты
+            c.create_polygon(*pts, fill=self.pv_plate_col(), outline="", smooth=True)
+        tw = max(6.0, min(w, h) * 0.055)                                       # лента трассы, как в оверлее
+        ew = 3 if not blk else 5
+        closed = pts + pts[:2]
+        kw = dict(smooth=True, capstyle="round", joinstyle="round")
+        if sec_on and not blk:
             for j, (i0, i1) in enumerate(((0, 20), (20, 40), (40, 60))):
                 seg = pts[i0 * 2:i1 * 2 + 2] if j < 2 else pts[i0 * 2:] + pts[:2]
-                c.create_line(*seg, fill=cols[j], width=2, smooth=True)
+                c.create_line(*seg, fill=cols[j], width=tw + ew, **kw)
+        else:
+            c.create_line(*closed, fill="#f2f4f8", width=tw + ew, **kw)
+        c.create_line(*closed, fill="#050607" if blk else "#1b1d22", width=tw, **kw)
+
+        def tang(idx):
+            ax_, ay_ = pts[((idx - 1) % 60) * 2], pts[((idx - 1) % 60) * 2 + 1]
+            bx_, by_ = pts[((idx + 1) % 60) * 2], pts[((idx + 1) % 60) * 2 + 1]
+            dn_ = math.hypot(bx_ - ax_, by_ - ay_) or 1.0
+            return (bx_ - ax_) / dn_, (by_ - ay_) / dn_
+        half = tw / 2 + 3.5
+        if sec_on:
             for j, idx in enumerate((20, 40)):
                 px, py = pts[idx * 2], pts[idx * 2 + 1]
-                c.create_line(px - 6, py - 6, px + 6, py + 6, fill=cols[j + 1], width=3)
-                c.create_text(px + 12, py + 2, text=f"S{j + 2}", fill=cols[j + 1], font=self.f_t)
-            px, py = pts[0], pts[1]
-            c.create_rectangle(px - 2, py - 9, px + 2, py + 9, fill="#ffffff", outline="#111111")
-            c.create_text(px + 22, py, text="СТАРТ", fill=th["text"], font=self.f_t)
-        def outward(idx, dist):                                # точка снаружи от трассы в вершине idx (в экранных координатах предпросмотра)
+                ux_, uy_ = tang(idx)
+                c.create_line(px + uy_ * half, py - ux_ * half, px - uy_ * half, py + ux_ * half, fill=cols[j + 1], width=2, capstyle="round")
+                c.create_text(px - uy_ * (half + 7), py + ux_ * (half + 7), text=f"S{j + 2}", fill=cols[j + 1], font=self.f_t)
+        px, py = pts[0], pts[1]                                              # двойная линия старта/финиша
+        ux_, uy_ = tang(0)
+        for off in (-1.8, 1.8):
+            qx, qy = px + ux_ * off, py + uy_ * off
+            c.create_line(qx + uy_ * half, qy - ux_ * half, qx - uy_ * half, qy + ux_ * half, fill="#ffffff", width=1.5)
+
+        def outward(idx, dist):                                # точка снаружи от трассы в вершине idx
             px, py = pts[idx * 2], pts[idx * 2 + 1]
             dx, dy = px - ccx, py - ccy
             n_ = math.hypot(dx, dy) or 1.0
             return px + dx / n_ * dist, py + dy / n_ * dist
-        if self.v["map_turns"].get():                          # номера поворотов на полной карте
+        if self.v["map_turns"].get():                          # номера поворотов
             for num_, idx in enumerate((6, 14, 24, 32, 42, 52), 1):
-                tx_, ty_ = outward(idx, 13)
-                c.create_oval(tx_ - 5, ty_ - 5, tx_ + 5, ty_ + 5, fill=th["panel"], outline=th["dim"])
-                c.create_text(tx_, ty_, text=str(num_), fill=th["text"], font=self.f_t)
-        if self.v["map_brake"].get():                          # точки торможения лучшего круга: красные чёрточки поперёк трассы
-            for idx in (3, 17, 30, 47):
-                bx_, by_ = pts[idx * 2], pts[idx * 2 + 1]
-                ax_, ay_ = pts[((idx - 3) % 60) * 2], pts[((idx - 3) % 60) * 2 + 1]
-                cx_, cy_ = pts[((idx + 3) % 60) * 2], pts[((idx + 3) % 60) * 2 + 1]
-                tn_ = math.hypot(cx_ - ax_, cy_ - ay_) or 1.0
-                nx_, ny_ = -(cy_ - ay_) / tn_ * 8, (cx_ - ax_) / tn_ * 8
-                c.create_line(bx_ - nx_, by_ - ny_, bx_ + nx_, by_ + ny_, fill="#0a0a0a", width=5, capstyle="round")
-                c.create_line(bx_ - nx_, by_ - ny_, bx_ + nx_, by_ + ny_, fill="#ff3b30", width=3, capstyle="round")
-        lane = [outward(i, 10) for i in (55, 56, 57, 58, 59)]       # пит-лейн у линии старта/финиша
-        c.create_line(*[v for p_ in lane for v in p_], fill="#39414f", width=3, dash=(4, 3))
-        if self.v["map_pit"].get():
-            for (qx, qy), qc in ((lane[1], "#9aa4b5"), (lane[3], "#ff4d4d")):
-                c.create_oval(qx - 5, qy - 5, qx + 5, qy + 5, fill=qc, outline="")
-            c.create_text(lane[2][0] + 14, lane[2][1] + 2, text="ПИТ", fill=th["dim"], anchor="w", font=self.f_t)
-        dot = max(3, min(12, int(self.num("map_dot", 6)))) * 0.8
-        if nums:
-            dot = max(dot, 6.5)
+                tx_, ty_ = outward(idx, tw / 2 + 7)
+                c.create_text(tx_, ty_, text=str(num_), fill="#ffffff", font=self.f_t)
+        r, rp = self.pv_sizes(nums)
         one = bool(self.v["map_one_color"].get())
         for idx, col, pl in ((10, "#ff4d4d", 1), (24, "#2fd27e", 3), (44, "#3a8dff", 5)):
-            if one or self.mode_val("map_style") == "black":
+            if one or blk:
                 col = "#ffffff"
-            px, py = pts[idx * 2], pts[idx * 2 + 1]
-            c.create_oval(px - dot, py - dot, px + dot, py + dot, fill=col, outline="")
-            if nums:
-                c.create_text(px, py, text=str(pl), fill="#000000" if col == "#ffffff" else "#ffffff", font=self.f_t)
-        px, py = pts[60], pts[61]
-        pr = dot + 2
-        if self.mode_val("map_style") == "black":
-            pr += 2
-            c.create_oval(px - pr, py - pr, px + pr, py + pr, fill="#22c55e", outline="#ffffff", width=2)
-        else:
-            c.create_oval(px - pr, py - pr, px + pr, py + pr, fill="#ffffff", outline=th["accent"], width=2)
-        if nums:
-            c.create_text(px, py, text="2", fill="#000000", font=self.f_t)
+            self.pv_car(pts[idx * 2], pts[idx * 2 + 1], r, col, pl, nums)
+        self.pv_car(pts[60], pts[61], rp, "#ffffff", 2, nums, player=True)
         if self.v["map_wind"].get():
-            wx, wy = x + w - 22, y + 38
-            c.create_oval(wx - 13, wy - 13, wx + 13, wy + 13, fill="#12171f", outline=th["border"])
-            c.create_polygon(wx + 8, wy - 9, wx + 1, wy - 1, wx + 4, wy - 1, wx - 6, wy + 9, wx - 2, wy + 1, wx - 4, wy + 1, fill="#6cb8ff", outline="")
+            self.pv_wind(x, y, w)
 
     def d_map_linear(self, x, y, w, h):
         c, th = self.canvas, self.th
         cols = ("#ffd400", "#3da9ff", "#ff5ad1")
-        x0, x1, by = x + 12, x + w - 12, y + 34
+        x0, x1, by = x + 12, x + w - 12, y + 22
+        c.create_rectangle(x0 - 1, by - 1, x1 + 1, by + 6, fill="#f2f4f8", outline="")
         for j, (a, b) in enumerate(((0, .31), (.31, .67), (.67, 1))):
             if self.v["map_sectors"].get():
                 c.create_rectangle(x0 + (x1 - x0) * a, by, x0 + (x1 - x0) * b, by + 5, fill=cols[j], outline="")
                 c.create_text(x0 + (x1 - x0) * (a + b) / 2, by - 8, text=f"S{j + 1}", fill=cols[j], font=self.f_t)
             else:
-                c.create_rectangle(x0 + (x1 - x0) * a, by, x0 + (x1 - x0) * b, by + 5, fill="#c5cad3", outline="")
+                c.create_rectangle(x0 + (x1 - x0) * a, by, x0 + (x1 - x0) * b, by + 5, fill="#1b1d22", outline="")
         for xx in (x0, x1):
             c.create_rectangle(xx - 1, by - 4, xx + 1, by + 9, fill="#ffffff", outline="")
         nums = bool(self.v["map_nums"].get())
+        r, rp = self.pv_sizes(nums)
         for ln, items in enumerate((((.40, 1, "#ff4d4d"), (.43, 2, "#ff4d4d")), ((.55, 5, "#3a8dff"), (.30, 6, "#3a8dff")),
                                     ((.50, 4, "#2fd27e"), (.80, 7, "#2fd27e")))):
             yy = by + 24 + ln * 22
             c.create_line(x0, yy, x1, yy, fill="#232a36", dash=(2, 4))
             for f, pl, col in items:
-                sx = x0 + (x1 - x0) * f
-                c.create_oval(sx - 7, yy - 7, sx + 7, yy + 7, fill=col, outline="")
-                if nums:
-                    c.create_text(sx, yy, text=str(pl), fill="#ffffff", font=self.f_t)
+                self.pv_car(x0 + (x1 - x0) * f, yy, r, "#ffffff" if self.v["map_one_color"].get() else col, pl, nums)
         px = x0 + (x1 - x0) * 0.5
         c.create_line(px, by + 8, px, by + 92, fill=th["accent"])
-        c.create_oval(px - 9, by + 66 - 9 + 0, px + 9, by + 66 + 9, fill="#ffffff", outline=th["accent"], width=2)
-        c.create_text(px, by + 66, text="3", fill="#000000", font=self.f_t)
+        self.pv_car(px, by + 66, rp, "#ffffff", 3, nums, player=True)
 
     def d_map_local(self, x, y, w, h):
         c, th = self.canvas, self.th
-        cx, cy = x + w / 2, y + h / 2 + 8
-        r = min(w, h) / 2 - 16
-        c.create_oval(cx - r, cy - r, cx + r, cy + r, fill="#0e1218", outline=th["border"], width=2)
+        cx, cy = x + w / 2, y + h / 2
+        r = min(w, h) / 2 - 8
+        c.create_oval(cx - r, cy - r, cx + r, cy + r, fill=self.pv_plate_col() if self.v["map_bg"].get() else "", outline="#2a3140", width=1)
         pts = [cx - 4, cy + r - 4, cx - 2, cy + r * .5, cx, cy, cx + r * .2, cy - r * .35, cx + r * .55, cy - r * .55, cx + r * .8, cy - r * .5]
         blk = self.mode_val("map_style") == "black"
-        c.create_line(*pts, fill="#ffffff" if blk else "#2f3745", width=10 if blk else 9, smooth=True)
-        c.create_line(*pts, fill="#1b1b1b" if blk else "#c5cad3", width=8 if blk else 3, smooth=True)
-        if self.v["map_sectors"].get():
-            c.create_line(cx + r * .2 - 6, cy - r * .35 - 6, cx + r * .2 + 6, cy - r * .35 + 6, fill="#3da9ff", width=3)
+        tw = max(6.0, min(w, h) * 0.055)
+        kw = dict(smooth=True, capstyle="round", joinstyle="round")
+        sec_on = bool(self.v["map_sectors"].get())
+        c.create_line(*pts, fill="#f2f4f8" if (blk or not sec_on) else "#ffd400", width=tw + (5 if blk else 3), **kw)
+        c.create_line(*pts, fill="#050607" if blk else "#1b1d22", width=tw, **kw)
+        if sec_on:
+            half = tw / 2 + 3.5
+            px, py = cx + r * .2, cy - r * .35
+            c.create_line(px - half * .7, py - half * .7, px + half * .7, py + half * .7, fill="#3da9ff", width=2, capstyle="round")
         nums = bool(self.v["map_nums"].get())
+        rr, rp = self.pv_sizes(nums)
         for px, py, col, pl in ((cx + r * .55, cy - r * .55, "#ff4d4d", 2), (cx - 3, cy + r * .62, "#2fd27e", 4)):
-            c.create_oval(px - 7, py - 7, px + 7, py + 7, fill=col, outline="")
-            if nums:
-                c.create_text(px, py, text=str(pl), fill="#ffffff", font=self.f_t)
-        c.create_oval(cx - 9, cy - 9, cx + 9, cy + 9, fill="#ffffff", outline=th["accent"], width=2)
-        if nums:
-            c.create_text(cx, cy, text="3", fill="#000000", font=self.f_t)
+            self.pv_car(px, py, rr, "#ffffff" if (blk or self.v["map_one_color"].get()) else col, pl, nums)
+        self.pv_car(cx, cy, rp, "#ffffff", 3, nums, player=True)
         if self.v["map_headup"].get():
-            c.create_polygon(cx, cy - 22, cx - 5, cy - 13, cx + 5, cy - 13, fill=th["accent"], outline="")
-        c.create_text(x + w - 8, y + 12, text=f"{self.v['map_radius'].get()} м", fill=th["dim"], anchor="e", font=self.f_t)
+            c.create_polygon(cx, cy - rp - 11, cx - 4, cy - rp - 4, cx + 4, cy - rp - 4, fill=th["accent"], outline="")
+        if self.v["map_wind"].get():
+            self.pv_wind(x, y, w)
 
     def delta_th_h(self):
         n = any(self.v[k].get() for k in ("delta_show_session", "delta_show_mine", "delta_show_pred"))
