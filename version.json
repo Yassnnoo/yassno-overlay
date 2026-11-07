@@ -1,6 +1,6 @@
 {
- "version": "2.6.0",
- "notes": "Новый интерфейс",
+ "version": "2.6.1",
+ "notes": "Новая карта трассы",
  "files": [
   "README.txt",
   "diagnose.cmd",
