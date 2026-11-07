@@ -61,7 +61,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "2.6.1"
+APP_VERSION = "2.6.2"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -612,7 +612,7 @@ def default_launcher():
     return {"autostart": True, "close_with_game": True, "theme": "dark", "lang": "ru", "win_start": False,
             "start_min": False, "min_tray": False, "close_tray": False, "stop_on_exit": False, "poll_sec": 2.5,
             "apps_close": True, "launch_with_game": True, "telemetry": True, "i2_path": "", "tel_strips": [],
-            "auto_update": True}
+            "auto_update": True, "shortcut_asked": False}
 
 
 def load_launcher():
@@ -1056,6 +1056,10 @@ EN.update({
     "Горячие клавиши оверлея": "Overlay hotkeys", 
     "Вернуть окна на экран": "Bring windows back", "Выйти из оверлея": "Quit the overlay",
     "Спрятать / показать оверлей": "Hide / show the overlay", "Вид тайминга": "Timing view", "Вид карты": "Map view",
+    "Ярлык на рабочем столе": "Desktop shortcut", "Ярлык уже есть на рабочем столе.": "The shortcut is already on the desktop.",
+    "Создать ярлык лаунчера на рабочем столе?\n\nБольше этот вопрос показываться не будет. Ярлык можно создать позже: «Настройки лаунчера» → «Ярлык на рабочем столе».":
+        "Create a launcher shortcut on the desktop?\n\nThis question will not be shown again. You can create it later: Launcher settings → Desktop shortcut.",
+    "Ярлык «Yassno Overlay» создан на рабочем столе.": "The “Yassno Overlay” shortcut was created on the desktop.",
     "Вид дельты": "Delta view", "Вид шин": "Tyres view", "Стандартные": "Defaults",
     "Применяются при следующем запуске оверлея.": "Applied the next time the overlay starts.",
     "Одинаковое сочетание у двух действий — не сохранено.": "Two actions share one combination — not saved.",
@@ -1321,6 +1325,87 @@ def mb_yesno(title, msg):
 
 def mb_yesnocancel(title, msg):
     return messagebox.askyesnocancel(tr(title), tr(msg))
+
+
+# ---------------------------------------------------------------------------
+# ярлык на рабочем столе
+# ---------------------------------------------------------------------------
+SHORTCUT_NAME = "Yassno Overlay.lnk"
+
+
+def desktop_dirs():
+    """Папки рабочего стола (личная и общая) — с учётом переноса в OneDrive."""
+    out = []
+    if os.name != "nt":
+        return out
+    try:
+        import ctypes
+        for csidl in (0x10, 0x19):                       # DESKTOPDIRECTORY, COMMON_DESKTOPDIRECTORY
+            buf = ctypes.create_unicode_buffer(520)
+            if ctypes.windll.shell32.SHGetFolderPathW(None, csidl, None, 0, buf) == 0 and buf.value:
+                out.append(buf.value)
+    except Exception:
+        pass
+    return out
+
+
+def shortcut_exists():
+    for d in desktop_dirs():
+        try:
+            if any(n.lower().startswith("yassno") and n.lower().endswith(".lnk") for n in os.listdir(d)):
+                return True
+        except OSError:
+            pass
+    return False
+
+
+def make_icon():
+    """Значок ярлыка рядом с лаунчером (рисуется один раз). Возвращает путь или пустую строку."""
+    path = os.path.join(HERE, "yassno.ico")
+    if os.path.isfile(path):
+        return path
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+        S = 256
+        im = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+        d = ImageDraw.Draw(im)
+        d.rounded_rectangle((8, 8, S - 8, S - 8), radius=52, fill=(22, 27, 36, 255), outline=(60, 70, 88, 255), width=4)
+        d.rounded_rectangle((34, 54, 52, S - 54), radius=6, fill=(229, 50, 45, 255))
+        font = None
+        for name in ("segoeuib.ttf", "arialbd.ttf", "DejaVuSans-Bold.ttf"):
+            try:
+                font = ImageFont.truetype(name, 150)
+                break
+            except OSError:
+                pass
+        if font is not None:
+            d.text((S // 2 + 12, S // 2 + 4), "Y", fill=(242, 244, 248, 255), font=font, anchor="mm")
+        im.save(path, format="ICO", sizes=[(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
+        return path
+    except Exception:
+        return ""
+
+
+def create_desktop_shortcut():
+    """Создаёт ярлык лаунчера на рабочем столе (через PowerShell, без доп. программ). Возвращает (успех, сообщение)."""
+    if os.name != "nt":
+        return False, "Ярлыки на рабочем столе создаются только в Windows."
+    dirs = desktop_dirs()
+    if not dirs:
+        return False, "Не удалось найти рабочий стол."
+    env = dict(os.environ, YO_LNK=os.path.join(dirs[0], SHORTCUT_NAME), YO_EXE=gui_python(), YO_ARG='"%s"' % os.path.join(HERE, "yassno_launcher.py"),
+               YO_DIR=HERE, YO_ICO=make_icon())
+    ps = ("$s=(New-Object -ComObject WScript.Shell).CreateShortcut($env:YO_LNK);$s.TargetPath=$env:YO_EXE;$s.Arguments=$env:YO_ARG;"
+          "$s.WorkingDirectory=$env:YO_DIR;if($env:YO_ICO){$s.IconLocation=$env:YO_ICO};$s.Description='Yassno Overlay';$s.Save()")
+    try:
+        r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps], env=env, capture_output=True, timeout=30,
+                           stdin=subprocess.DEVNULL, creationflags=NO_WINDOW)
+    except Exception as e:
+        return False, "Не получилось создать ярлык: %s" % e
+    if r.returncode != 0 or not os.path.isfile(env["YO_LNK"]):
+        return False, "Не получилось создать ярлык: %s" % (r.stderr or b"").decode("utf-8", "replace").strip()[:200]
+    return True, "Ярлык «Yassno Overlay» создан на рабочем столе."
+
 
 
 # ---------------------------------------------------------------------------
@@ -6021,6 +6106,8 @@ class SettingsPage(ttk.Frame):
         ttk.Spinbox(r, from_=1, to=10, increment=1, textvariable=self.v["poll_sec"], width=4, command=self.on_poll).pack(side="left", padx=6)
         ttk.Label(r, text="сек.").pack(side="left")
         ttk.Button(box, text="Процессы игр…", command=app.edit_procs).grid(row=5, column=0, sticky="w", pady=(8, 0))
+        if os.name == "nt":
+            ttk.Button(box, text="Ярлык на рабочем столе", command=app.make_shortcut).grid(row=6, column=0, sticky="w", pady=(6, 0))
 
         box = section(col2, "Запуск игр")
         box.pack(fill="x", pady=(0, 10))
@@ -6404,6 +6491,30 @@ class App:
             self.root.after(400, self.start_hidden)
         elif self.cfg.get("auto_update", True):
             self.root.after(4000, lambda: self.check_update(False))
+        if os.name == "nt" and "--minimized" not in sys.argv and not self.cfg.get("shortcut_asked"):
+            self.root.after(2500, self.offer_shortcut)
+
+    def offer_shortcut(self):
+        """При первом запуске предлагаем ярлык на рабочем столе; ответ запоминаем, больше не спрашиваем."""
+        if self.cfg.get("shortcut_asked"):
+            return
+        self.cfg["shortcut_asked"] = True
+        try:
+            write_json(LAUNCHER_CFG, self.cfg)
+        except Exception:
+            pass
+        if shortcut_exists():
+            return
+        if mb_yesno("Ярлык на рабочем столе", "Создать ярлык лаунчера на рабочем столе?\n\nБольше этот вопрос показываться не будет. "
+                    "Ярлык можно создать позже: «Настройки лаунчера» → «Ярлык на рабочем столе»."):
+            self.make_shortcut()
+
+    def make_shortcut(self):
+        if shortcut_exists():
+            mb_info("Ярлык на рабочем столе", "Ярлык уже есть на рабочем столе.")
+            return
+        ok, msg = create_desktop_shortcut()
+        (mb_info if ok else mb_error)("Ярлык на рабочем столе", msg)
 
     # ---------- построение интерфейса ----------
     def build(self):

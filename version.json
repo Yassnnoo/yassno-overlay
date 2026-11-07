@@ -1,6 +1,6 @@
 {
- "version": "2.6.1",
- "notes": "Новая карта трассы",
+ "version": "2.6.2",
+ "notes": "Ярлык на рабочем столе",
  "files": [
   "README.txt",
   "diagnose.cmd",
