@@ -323,7 +323,9 @@ def _wet_value(buf, base, rel, tag):
     wmin, wmax = _f64(buf, base + rel["wet_min"]), _f64(buf, base + rel["wet_max"])
     rain = _f64(buf, base + rel["rain_intensity"])
     _weather_dump(buf, base + rel["wet_min"], tag, rain if rain == rain else 0.0, wmin if wmin == wmin else 0.0, wmax if wmax == wmax else 0.0)
-    return max(_sane(wmin, 0.0, 1.0), _sane(wmax, 0.0, 1.0))
+    def ok(x):
+        return min(1.0, x) if (x == x and 0.0 <= x < 1.5) else 0.0      # ровно 1.0 (100%) — тоже валидно, раньше отбрасывалось как «мусор»
+    return max(ok(wmin), ok(wmax))
 
 
 def parse_rf2(sc, tl, cache=None):

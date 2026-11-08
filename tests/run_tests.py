@@ -467,5 +467,16 @@ class SelfTest(unittest.TestCase):
             self.assertIn("SELFTEST OK", out, f"{g}: {out[-600:]}")
 
 
+class WetValue(unittest.TestCase):
+    def test_full_wet_is_not_dry(self):
+        import yassno_readers as R
+        buf = bytearray(4096)
+        rel = {"wet_min": 100, "wet_max": 108, "rain_intensity": 116}
+        for mn, mx, want in ((0.0, 1.0, 1.0), (1.0, 1.0, 1.0), (0.2, 0.6, 0.6), (0.0, 0.0, 0.0)):
+            struct.pack_into("<d", buf, 100, mn)
+            struct.pack_into("<d", buf, 108, mx)
+            self.assertAlmostEqual(R._wet_value(bytes(buf), 0, rel, "t"), want)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
