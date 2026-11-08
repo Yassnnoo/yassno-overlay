@@ -61,7 +61,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "2.6.4"
+APP_VERSION = "2.6.5"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -3077,7 +3077,11 @@ class ProfilePanel(ttk.Frame):
                 return
             if self.winfo_ismapped() and self.page != "apps" and getattr(self, "anim_on", True) and not self._pending:
                 self.draw_preview()
-            self.after(120, self._anim_tick)
+            try:
+                focused = self.focus_displayof() is not None
+            except (tk.TclError, KeyError):
+                focused = True
+            self.after(120 if focused else 1000, self._anim_tick)      # окно в фоне (идёт гонка) — почти не грузим процессор
         except tk.TclError:
             pass
 
@@ -4563,6 +4567,9 @@ def fmt_num(v, nd=1, suffix=""):
     return "—" if not isinstance(v, (int, float)) else f"{v:.{nd}f}{suffix}"
 
 
+_SESS_CACHE = {}
+
+
 def load_sessions():
     """Список сохранённых сессий: [(путь, данные)] от новых к старым."""
     out = []
@@ -4570,11 +4577,24 @@ def load_sessions():
         names = [n for n in os.listdir(STATS_DIR) if n.lower().endswith(".json")]
     except OSError:
         return out
+    cache, fresh = _SESS_CACHE, {}
     for n in names:
         path = os.path.join(STATS_DIR, n)
-        d = read_json(path)
+        try:
+            st = os.stat(path)
+        except OSError:
+            continue
+        stamp = (st.st_mtime, st.st_size)
+        hit = cache.get(path)
+        if hit and hit[0] == stamp:                      # файл не менялся — не разбираем заново (в гонке 20+ машин файл большой)
+            d = hit[1]
+        else:
+            d = read_json(path)
+        fresh[path] = (stamp, d)
         if isinstance(d.get("laps"), list):
-            out.append((path, d, os.path.getmtime(path)))
+            out.append((path, d, st.st_mtime))
+    cache.clear()
+    cache.update(fresh)
     out.sort(key=lambda x: -x[2])
     return [(p, d) for p, d, _ in out]
 
@@ -6734,6 +6754,10 @@ class App:
         self.update_tiles()
 
     def update_tiles(self):
+        key = (self.view, self.detected, self.selected, tuple(self.panels), id(self.tiles), tuple(id(p) for p in self.panels.values()))
+        if getattr(self, "_tiles_key", None) == key:
+            return
+        self._tiles_key = key
         for g, t in self.tiles.items():
             t.set_state(g == self.view, g == self.detected)
         for g, p in self.panels.items():                    # левый список — от выбранной игры, подсветка — по текущей странице
@@ -6893,7 +6917,8 @@ class App:
                 except RuntimeError:
                     pass
             threading.Thread(target=work, daemon=True).start()
-        self.root.after(int(float(self.cfg.get("poll_sec", 2.5)) * 1000), self.poll)
+        base = float(self.cfg.get("poll_sec", 2.5))
+        self.root.after(int(max(base, 6.0 if self.detected else base) * 1000), self.poll)      # игра уже идёт — tasklist реже
 
     def on_detect(self, game, proc=""):
         self._busy = False
@@ -6930,15 +6955,22 @@ class App:
     def refresh_status(self):
         self.update_tiles()
         g = self.detected
+        r = self.runner
+        run = r.running()
+        gtxt = f"{tr('Игра')}: {GAMES[g]}  ({self.found_proc})" if g else tr("Игра не запущена")
+        if run:
+            extra = {"demo": tr(" (демо)"), "unlock": tr(" (режим перемещения)")}.get(r.mode, "")
+            otxt = f"{tr('Оверлей: работает для')} {GAMES[r.game]}{extra}"
+        else:
+            otxt = tr("Оверлей: остановлен")
+        key = (bool(g), gtxt, otxt, UI_GREEN, UI_OFF)
+        if getattr(self, "_status_key", None) == key:          # ничего не изменилось — не перерисовываем (вызывается каждые 1.5 с)
+            return
+        self._status_key = key
         self.dot.delete("all")
         self.dot.create_oval(2, 2, 14, 14, fill=UI_GREEN if g else UI_OFF, outline="")
-        self.lbl_game.config(text=f"{tr('Игра')}: {GAMES[g]}  ({self.found_proc})" if g else tr("Игра не запущена"))
-        r = self.runner
-        if r.running():
-            extra = {"demo": tr(" (демо)"), "unlock": tr(" (режим перемещения)")}.get(r.mode, "")
-            self.lbl_overlay.config(text=f"{tr('Оверлей: работает для')} {GAMES[r.game]}{extra}")
-        else:
-            self.lbl_overlay.config(text=tr("Оверлей: остановлен"))
+        self.lbl_game.config(text=gtxt)
+        self.lbl_overlay.config(text=otxt)
 
     def stop_overlay(self):
         self.runner.stop()
