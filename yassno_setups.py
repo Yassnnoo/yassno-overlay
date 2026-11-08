@@ -389,3 +389,94 @@ def download_pack(settings_root, track, vehicle, tree_fn=None, get_fn=None):
             f.write(data)
         saved.append(n)
     return {"saved": saved, "skipped": skipped, "folder": dest}
+
+
+# --- Выбор сетапов вручную: сначала список кандидатов, потом установка только отмеченных ---
+SOURCE_LABELS = {"local": "Из ваших папок", "pack": "Набор лаунчера (HYMO)", "net": "Из открытого репозитория"}
+
+
+def candidates(settings_root, track, vehicle, local_dirs, tree_fn=None):
+    """Список подходящих сетапов без скачивания: [{'source','name','ref','exists'}]. Одинаковые имена берутся один раз (свои папки главнее)."""
+    tree_fn = tree_fn or fetch_json
+    folder = track_folder(track)
+    dest = settings_track_dir(settings_root, folder) if folder else None
+    seen, out, errors = set(), [], []
+
+    def add(source, name, ref):
+        key = name.lower()
+        if key in seen:
+            return
+        seen.add(key)
+        out.append({"source": source, "name": name, "ref": ref,
+                    "exists": bool(dest and os.path.exists(os.path.join(dest, name)))})
+    try:
+        for p in local_files(local_dirs, track, vehicle):
+            add("local", os.path.basename(p), p)
+    except Exception as e:
+        errors.append(f"свои папки: {e}")
+    key = car_key(vehicle)
+    if folder and key:
+        try:
+            try:
+                tree = tree_fn(PACK_TREE_URL)
+                names = [t["path"].split("/", 1)[1] for t in tree.get("tree", [])
+                         if t.get("type") == "blob" and t["path"].startswith(PACK_DIR + "/") and t["path"].count("/") == 1]
+                if not names:
+                    raise ValueError("пусто")
+            except Exception:
+                names = list(PACK_KNOWN)
+            for n in sorted(names):
+                if n.lower().endswith(".svm") and file_track(n) == folder and car_key(n) == key:
+                    add("pack", n, n)
+        except Exception as e:
+            errors.append(f"набор: {e}")
+    try:
+        try:
+            tree = tree_fn(TREE_URL)
+            paths = [t["path"] for t in tree.get("tree", []) if t.get("type") == "blob"]
+            if not paths:
+                raise ValueError("пустой список")
+        except Exception:
+            paths = list(KNOWN_PATHS)
+        nf, files, err = plan(paths, track, vehicle)
+        if not err:
+            for pth in files:
+                add("net", pth.split("/", 1)[1], pth)
+            folder = folder or nf
+    except Exception as e:
+        errors.append(f"репозиторий: {e}")
+    return {"items": out, "folder": folder, "errors": errors}
+
+
+def install_selected(settings_root, track, items, get_fn=None):
+    """Ставит только выбранные: items — элементы из candidates(). Не перезаписывает. Возвращает {'saved','skipped','failed','folder'}."""
+    get_fn = get_fn or fetch_bytes
+    folder = track_folder(track)
+    saved, skipped, failed = [], [], []
+    dest = settings_track_dir(settings_root, folder) if folder else None
+    for it in items:
+        if dest is None:
+            failed.append(it["name"])
+            continue
+        os.makedirs(dest, exist_ok=True)
+        target = os.path.join(dest, it["name"])
+        if os.path.exists(target):
+            skipped.append(it["name"])
+            continue
+        try:
+            if it["source"] == "local":
+                with open(it["ref"], "rb") as f:
+                    data = f.read()
+            elif it["source"] == "pack":
+                data = get_fn(PACK_RAW_URL + PACK_DIR + "/" + urllib.parse.quote(it["ref"]))
+            else:
+                data = get_fn(RAW_URL + urllib.parse.quote(it["ref"]))
+            if not looks_like_svm(data):
+                failed.append(it["name"])
+                continue
+            with open(target, "wb") as f:
+                f.write(data)
+            saved.append(it["name"])
+        except Exception:
+            failed.append(it["name"])
+    return {"saved": saved, "skipped": skipped, "failed": failed, "folder": dest}

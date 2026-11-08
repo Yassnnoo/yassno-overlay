@@ -83,6 +83,33 @@ def penalty_label(car, lines):
     return "PEN" if n == 1 else f"PEN {n}"
 
 
+_WX = {"t": 0.0, "n": 0, "last": None}
+
+
+def _weather_dump(buf, base, tag, rain, wmin, wmax):
+    """Диагностика погоды: что игра реально отдаёт в блоке вокруг «влажности трассы» (logs/weather.log, не чаще раза в 10 с, при изменении)."""
+    now = time.time()
+    if now - _WX["t"] < 10.0 or _WX["n"] >= 400:
+        return
+    try:
+        near = []
+        for off in range(base - 48, base + 112, 8):
+            v = _f64(buf, off)
+            if v == v and 0.0 < abs(v) < 1e4:
+                near.append(f"{off - base:+d}:{v:.3f}")
+        key = (round(rain or 0, 2), round(wmin or 0, 2), round(wmax or 0, 2))
+        if key == _WX["last"]:
+            return
+        _WX["t"], _WX["last"], _WX["n"] = now, key, _WX["n"] + 1
+        d = os.path.join(HERE, "logs")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "weather.log"), "a", encoding="utf-8") as f:
+            f.write(f"{time.strftime('%H:%M:%S')} {tag} rain={rain:.3f} wet_min={wmin:.3f} wet_max={wmax:.3f} | вокруг: {' '.join(near)}\n")
+    except Exception:
+        pass
+
+
+
 class SharedMemoryError(RuntimeError):
     pass
 
@@ -291,6 +318,14 @@ def detect_rf2_telemetry_base(tl, tcount, ids):
     return best
 
 
+def _wet_value(buf, base, rel, tag):
+    """Влажность трассы 0..1: берём большее из min/max по пути (раньше было среднее — на частично мокрой трассе занижало)."""
+    wmin, wmax = _f64(buf, base + rel["wet_min"]), _f64(buf, base + rel["wet_max"])
+    rain = _f64(buf, base + rel["rain_intensity"])
+    _weather_dump(buf, base + rel["wet_min"], tag, rain if rain == rain else 0.0, wmin if wmin == wmin else 0.0, wmax if wmax == wmax else 0.0)
+    return max(_sane(wmin, 0.0, 1.0), _sane(wmax, 0.0, 1.0))
+
+
 def parse_rf2(sc, tl, cache=None):
     """Кадр из двух буферов плагина rF2SharedMemoryMapPlugin (sc — scoring, tl — telemetry или None)."""
     cache = cache if cache is not None else {}
@@ -345,7 +380,7 @@ def parse_rf2(sc, tl, cache=None):
         "max_laps": struct.unpack_from("<i", sc, si + rel["max_laps"])[0],
         "game_phase": sc[si + rel["game_phase"]], "yellow": struct.unpack_from("<b", sc, si + rel["yellow_flag"])[0],
         "start_light": sc[si + rel["start_light"]], "red_lights": sc[si + rel["red_lights"]],
-        "wet": (_sane(_f64(sc, si + rel["wet_min"]), 0.0, 1.0) + _sane(_f64(sc, si + rel["wet_max"]), 0.0, 1.0)) / 2,
+        "wet": _wet_value(sc, si, rel, "rf2"),
         "player_name": player_name, "tel_count": len(tel),
         "wheel_dbg": (tel.get(player["key"]) or {}).get("_wdbg") if player else None,
         "layout": f"scoring: машины с {vb}, телеметрия с {tb}",
@@ -864,7 +899,7 @@ def parse_session(buf):
         "max_laps": struct.unpack_from("<i", buf, SCORING["max_laps"])[0],
         "game_phase": buf[SCORING["game_phase"]], "yellow": struct.unpack_from("<b", buf, SCORING["yellow_flag"])[0],
         "start_light": buf[SCORING["start_light"]], "red_lights": buf[SCORING["red_lights"]],
-        "wet": (_sane(_f64(buf, SCORING["wet_min"]), 0.0, 1.0) + _sane(_f64(buf, SCORING["wet_max"]), 0.0, 1.0)) / 2,
+        "wet": _wet_value(buf, 0, SCORING, "lmu"),
         "player_name": _text(buf[SCORING["player_name"]:SCORING["player_name"] + 32]),
         "wind": (_finite(_f64(buf, SCORING["wind"])), _finite(_f64(buf, SCORING["wind"] + 16))),
         "air": _f64(buf, SCORING["air_temp"]), "track_temp": _f64(buf, SCORING["track_temp"]),

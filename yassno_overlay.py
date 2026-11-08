@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "2.6.2"
+APP_VERSION = "2.6.3"
 import argparse
 import bisect
 import collections
@@ -3608,7 +3608,15 @@ class DeltaTracker:
         self.ref_t = ts[-1]
         raw = (now - self.t0) - rt
         prev = self.delta
-        self.delta = raw if prev is None or abs(raw - prev) > 1.0 else prev + (raw - prev) * 0.4      # лёгкое сглаживание, чтобы цифры не дёргались
+        pt = getattr(self, "_dt_t", None)
+        self._dt_t = now
+        if prev is None or abs(raw - prev) > 1.0 or pt is None or not (0.0 < now - pt < 1.0):
+            self.delta = raw
+        else:
+            dt = now - pt
+            alpha = 1.0 - math.exp(-dt / 0.3)                  # сглаживание по времени, не по кадрам: не зависит от частоты обновлений
+            lim = 0.7 * dt + 0.004                             # реальная дельта меняется медленно — резкие скачки отсекаем
+            self.delta = prev + max(-lim, min(lim, (raw - prev) * alpha))
         self.pred = self.ref_t + self.delta
         self.hist.append((now, self.delta))
 

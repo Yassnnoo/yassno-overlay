@@ -61,7 +61,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "2.6.2"
+APP_VERSION = "2.6.3"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -1056,7 +1056,9 @@ EN.update({
     "Горячие клавиши оверлея": "Overlay hotkeys", 
     "Вернуть окна на экран": "Bring windows back", "Выйти из оверлея": "Quit the overlay",
     "Спрятать / показать оверлей": "Hide / show the overlay", "Вид тайминга": "Timing view", "Вид карты": "Map view",
-    "Ярлык на рабочем столе": "Desktop shortcut", "Ярлык уже есть на рабочем столе.": "The shortcut is already on the desktop.",
+    "Ярлык на рабочем столе": "Desktop shortcut", "Какие сетапы поставить": "Which setups to install", "Выбрано: ": "Selected: ",
+    "Из ваших папок": "From your folders", "Набор лаунчера (HYMO)": "Launcher pack (HYMO)", "Из открытого репозитория": "From the open repository",
+    "  — уже установлен": "  — already installed", "Выбрать все": "Select all", "Снять все": "Clear all", "Поставить выбранные": "Install selected", "Ярлык уже есть на рабочем столе.": "The shortcut is already on the desktop.",
     "Создать ярлык лаунчера на рабочем столе?\n\nБольше этот вопрос показываться не будет. Ярлык можно создать позже: «Настройки лаунчера» → «Ярлык на рабочем столе».":
         "Create a launcher shortcut on the desktop?\n\nThis question will not be shown again. You can create it later: Launcher settings → Desktop shortcut.",
     "Ярлык «Yassno Overlay» создан на рабочем столе.": "The “Yassno Overlay” shortcut was created on the desktop.",
@@ -1917,52 +1919,114 @@ class ProfilePanel(ttk.Frame):
         box = []
 
         def work():
-            res = {"local": None, "pack": None, "net": None, "net_err": ""}
             try:
-                res["pack"] = setups.download_pack(root_dir, track, car)
+                box.append(setups.candidates(root_dir, track, car, local_dirs))
             except Exception as e:
-                res["net_err"] += f" набор: {type(e).__name__}: {e}"
-            try:
-                if local_dirs:
-                    res["local"] = setups.install_local(root_dir, track, car, local_dirs)
-            except Exception as e:
-                res["net_err"] = f"свои папки: {type(e).__name__}: {e}"
-            try:
-                res["net"] = setups.download(root_dir, track, car)
-            except Exception as e:
-                res["net_err"] += f" {type(e).__name__}: {e}"
-            box.append(res)
+                box.append({"items": [], "folder": None, "errors": [f"{type(e).__name__}: {e}"]})
 
         def poll():
             if not box:
                 self.app.root.after(300, poll)
                 return
             r = box[0]
-            lines, got = [], False
-            if r["local"] is not None:
-                n, k = len(r["local"]["saved"]), len(r["local"]["skipped"])
-                if n or k:
-                    got = True
-                    lines.append(f"Из своих папок: скачано {n}" + (f", уже были {k} (не тронуты)" if k else ""))
-            if r["pack"] and (r["pack"]["saved"] or r["pack"]["skipped"]):
-                got = True
-                n, k = len(r["pack"]["saved"]), len(r["pack"]["skipped"])
-                lines.append(f"Из набора лаунчера (HYMO): скачано {n}" + (f", уже были {k} (не тронуты)" if k else ""))
-            if r["net"] is not None:
-                if r["net"]["ok"]:
-                    got = True
-                    lines.append("Из репозитория: " + r["net"]["message"])
-                elif not got:
-                    lines.append(r["net"]["message"])
-            elif r["net_err"]:
-                lines.append("Репозиторий недоступен (нужен интернет и github.com): " + r["net_err"][:160])
-            if not got:
-                lines.append(f"Видел: трасса «{track}», машина «{car}».")
-            else:
-                lines.append("Сетапы появятся в меню сетапов этой машины в игре.")
-            say("\n".join(lines))
+            if not r["items"]:
+                msg = f"Подходящих сетапов не нашёл. Видел: трасса «{track}», машина «{car}»."
+                if r["errors"]:
+                    msg += " Ошибки: " + "; ".join(r["errors"])[:160]
+                say(msg)
+                return
+            say(f"Нашёл сетапов: {len(r['items'])}. Отметьте, какие поставить.")
+            self.pick_setups_dialog(r["items"], root_dir, track, car, say)
         threading.Thread(target=work, daemon=True).start()
         self.app.root.after(300, poll)
+
+    def pick_setups_dialog(self, items, root_dir, track, car, say):
+        """Окно с галочками: какие из найденных сетапов поставить в игру."""
+        win = tk.Toplevel(self.app.root)
+        win.title(tr("Какие сетапы поставить"))
+        win.configure(bg=UI_BG)
+        win.transient(self.app.root)
+        win.geometry("+%d+%d" % (self.app.root.winfo_rootx() + 120, self.app.root.winfo_rooty() + 80))
+        ttk.Label(win, text=f"{track} — {car}", style="Dim.TLabel", wraplength=460, justify="left").pack(anchor="w", padx=14, pady=(12, 4))
+        outer = ttk.Frame(win)
+        outer.pack(fill="both", expand=True, padx=14)
+        cv = tk.Canvas(outer, bg=UI_BG, highlightthickness=0, width=470, height=min(380, 40 + 26 * len(items) + 24 * 3))
+        sb = ttk.Scrollbar(outer, orient="vertical", command=cv.yview)
+        cv.configure(yscrollcommand=sb.set)
+        inner = ttk.Frame(cv)
+        cv.create_window((0, 0), window=inner, anchor="nw")
+        inner.bind("<Configure>", lambda e: cv.configure(scrollregion=cv.bbox("all")))
+        cv.pack(side="left", fill="both", expand=True)
+        if len(items) > 12:
+            sb.pack(side="right", fill="y")
+        enable_wheel(cv, outer)
+        vars_ = []
+        row = 0
+        for src in ("local", "pack", "net"):
+            group = [it for it in items if it["source"] == src]
+            if not group:
+                continue
+            ttk.Label(inner, text=tr(setups.SOURCE_LABELS[src]), style="Dim.TLabel").grid(row=row, column=0, sticky="w", pady=(8 if row else 2, 2))
+            row += 1
+            for it in group:
+                var = tk.BooleanVar(value=not it["exists"])
+                cb = ttk.Checkbutton(inner, text=it["name"] + (tr("  — уже установлен") if it["exists"] else ""), variable=var)
+                if it["exists"]:
+                    cb.state(["disabled"])
+                cb.grid(row=row, column=0, sticky="w", padx=(8, 0), pady=1)
+                vars_.append((var, it))
+                row += 1
+        cnt = ttk.Label(win, text="", style="Dim.TLabel")
+        cnt.pack(anchor="w", padx=14, pady=(6, 0))
+
+        def recount(*_):
+            cnt.config(text=tr("Выбрано: ") + str(sum(1 for v, it in vars_ if v.get() and not it["exists"])))
+        for v, _it in vars_:
+            v.trace_add("write", recount)
+        recount()
+
+        def setall(on):
+            for v, it in vars_:
+                if not it["exists"]:
+                    v.set(on)
+        btns = ttk.Frame(win)
+        btns.pack(fill="x", padx=14, pady=12)
+        ttk.Button(btns, text="Выбрать все", command=lambda: setall(True)).pack(side="left")
+        ttk.Button(btns, text="Снять все", command=lambda: setall(False)).pack(side="left", padx=6)
+        ttk.Button(btns, text="Отмена", command=win.destroy).pack(side="right")
+
+        def go():
+            chosen = [it for v, it in vars_ if v.get() and not it["exists"]]
+            win.destroy()
+            if not chosen:
+                say("Ничего не выбрано — сетапы не ставил.")
+                return
+            say(f"Ставлю сетапы: {len(chosen)} …")
+            out = []
+
+            def work2():
+                try:
+                    out.append(setups.install_selected(root_dir, track, chosen))
+                except Exception as e:
+                    out.append({"saved": [], "skipped": [], "failed": [f"{type(e).__name__}: {e}"], "folder": None})
+
+            def poll2():
+                if not out:
+                    self.app.root.after(300, poll2)
+                    return
+                r = out[0]
+                line = f"Установлено: {len(r['saved'])}"
+                if r["skipped"]:
+                    line += f", уже были {len(r['skipped'])} (не тронуты)"
+                if r["failed"]:
+                    line += f", не получилось {len(r['failed'])}"
+                if r["saved"]:
+                    line += "\nСетапы появятся в меню сетапов этой машины в игре."
+                say(line)
+            threading.Thread(target=work2, daemon=True).start()
+            self.app.root.after(300, poll2)
+        ttk.Button(btns, text="Поставить выбранные", style="Accent.TButton", command=go).pack(side="right", padx=(0, 6))
+        win.grab_set()
 
     def setup_dirs(self):
         """Свои папки с сетапами: выбранная в лаунчере и папка setups рядом с лаунчером."""
@@ -2423,9 +2487,9 @@ class ProfilePanel(ttk.Frame):
             self.tg(f, None, "Записывать статистику сессий", self.v["stats"])
             if self.game == "lmu" and setups is not None:
                 sc = self.card("Сетапы (бесплатные, из открытого репозитория)", R)
-                ttk.Label(sc, text="Зайдите на трассу в игре, потом нажмите кнопку: лаунчер возьмёт трассу и машину у оверлея, найдёт подходящие сетапы в ваших папках и в открытом репозитории и положит их в UserData\\player\\Settings. Уже имеющиеся файлы не перезаписываются.",
+                ttk.Label(sc, text="Зайдите на трассу в игре, потом нажмите кнопку: лаунчер возьмёт трассу и машину у оверлея, найдёт подходящие сетапы в ваших папках и в открытом репозитории, покажет список с галочками и положит выбранные в UserData\\player\\Settings. Уже имеющиеся файлы не перезаписываются.",
                           style="Dim.TLabel", justify="left", wraplength=440).grid(row=self.nr(sc), column=0, columnspan=3, sticky="w", pady=(0, 6))
-                ttk.Button(sc, text="Скачать сетапы для этой трассы и машины", style="Accent.TButton", command=self.download_setups).grid(row=self.nr(sc), column=0, columnspan=3, sticky="w")
+                ttk.Button(sc, text="Подобрать сетапы для этой трассы и машины", style="Accent.TButton", command=self.download_setups).grid(row=self.nr(sc), column=0, columnspan=3, sticky="w")
                 ttk.Button(sc, text="Папка со своими сетапами…", command=self.pick_setups_dir).grid(row=self.nr(sc), column=0, columnspan=3, sticky="w", pady=(6, 0))
                 self.setups_dir_lab = ttk.Label(sc, text="", style="Dim.TLabel", justify="left", wraplength=440)
                 self.setups_dir_lab.grid(row=self.nr(sc), column=0, columnspan=3, sticky="w", pady=(4, 0))
@@ -5634,7 +5698,8 @@ class StatsPage(ttk.Frame):
         self.rtree = ttk.Treeview(wrap, columns=[k for k, _, _, _ in self.RES_COLS], show="headings", height=8)
         for k, name, w, anchor in self.RES_COLS:
             self.rtree.heading(k, text=tr(name))
-            self.rtree.column(k, width=w, minwidth=w, anchor=anchor, stretch=(k == "driver"))
+            grow = k in ("driver", "cls", "car", "state")
+            self.rtree.column(k, width=w, minwidth=(40 if grow else min(w, 44)), anchor=anchor, stretch=grow)
         self.rtree.bind("<<TreeviewSelect>>", self.on_result_pick)
         self.rtree.tag_configure("me", foreground=UI_ACCENT)
         self.rtree.tag_configure("gone", foreground=UI_DIM)
@@ -5681,10 +5746,10 @@ class StatsPage(ttk.Frame):
         self.current = self.sessions[idx]
         self.show(self.current[1])
 
-    RES_COLS = [("pos", "Поз", 44, "center"), ("cpos", "В классе", 70, "center"), ("number", "№", 50, "center"),
-                ("driver", "Пилот", 200, "w"), ("cls", "Класс", 90, "w"), ("car", "Машина", 200, "w"),
-                ("laps", "Круги", 56, "center"), ("best", "Лучший", 90, "e"), ("last", "Последний", 90, "e"),
-                ("state", "Статус", 80, "w")]
+    RES_COLS = [("pos", "Поз", 40, "center"), ("cpos", "В классе", 66, "center"), ("number", "№", 40, "center"),
+                ("driver", "Пилот", 150, "w"), ("cls", "Класс", 70, "w"), ("car", "Машина", 170, "w"),
+                ("laps", "Круги", 50, "center"), ("best", "Лучший", 78, "e"), ("last", "Последний", 78, "e"),
+                ("state", "Статус", 70, "w")]
 
     def set_view(self, k):
         self.vmode = k
