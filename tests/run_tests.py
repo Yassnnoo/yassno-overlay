@@ -478,5 +478,24 @@ class WetValue(unittest.TestCase):
             self.assertAlmostEqual(R._wet_value(bytes(buf), 0, rel, "t"), want)
 
 
+class DaytonaPack(unittest.TestCase):
+    def test_daytona_ferrari_296(self):
+        import yassno_setups as S
+        self.assertEqual(S.track_folder("Daytona International Speedway"), "Daytonarc")
+        self.assertEqual(S.car_key("Ferrari 296 GT3"), "296")
+        self.assertEqual(S.file_track("HYMO2_1.4_296_DAY_EQ.svm"), "Daytonarc")
+        self.assertEqual(S.car_key("HYMO2_1.4_296_DAY_EQ.svm"), "296")
+        for n in ("P1Doks_FerrariGT3_Daytona_E_1.4.svm", "P1Doks_FerrariGT3_Daytona_Wet_E_1.4.svm"):
+            self.assertEqual((S.file_track(n), S.car_key(n)), ("Daytonarc", "296"))
+        self.assertEqual(S.car_key("Ferrari 499P"), "499p")
+        for n in ("HYMO2_1.4.0_AMR_DAY_WR.svm", "P1Doks_AstonGT3_Daytona_1.4.1_Safe_R.svm"):
+            self.assertEqual((S.file_track(n), S.car_key(n)), ("Daytonarc", "vantage"))
+        self.assertEqual(S.car_key("Aston Martin Vantage GT3"), "vantage")
+        for n in ("HYMO2_1.4_720S_DAY_WR.svm", "P1Doks_MclarenGT3_Daytona_Safe_R_1.4.1.svm"):
+            self.assertEqual((S.file_track(n), S.car_key(n)), ("Daytonarc", "720s"))
+        for n in ("HYMO2_1.4_RCF_DAY_WR.svm", "P1Doks_RCF_Daytona_SafeR.svm"):
+            self.assertEqual((S.file_track(n), S.car_key(n)), ("Daytonarc", "rcf"))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -17,6 +17,12 @@ RAW_URL = f"https://raw.githubusercontent.com/{REPO}/{BRANCH}/"
 # (что встречается в названии трассы у игры, папка в репозитории; она же папка в UserData\player\Settings)
 TRACKS = [
     (r"bahrain|sakhir", "Bahrain"),
+    (r"daytona", "Daytonarc"),
+    (r"barcelona|catalunya", "Circuit De Barcelona"),
+    (r"laguna", "Lagunaseca"),
+    (r"long beach|longbeach", "Longbeach"),
+    (r"ricard", "Paulricard"),
+    (r"road atlanta", "Road Atlanta"),
     (r"americas|\bcota\b", "Circuit Of The Americas"),
     (r"fuji", "Fuji"),
     (r"imola|enzo e dino", "Imola"),
@@ -32,14 +38,14 @@ TRACKS = [
 # Машина → ключ. Ищем в «склеенном» тексте (без пробелов, подчёркиваний и дефисов, нижний регистр): название машины из игры,
 # имя файла сетапа и строка VehicleClassSetting из самого файла дают один и тот же ключ.
 CAR_KEYS = [
-    ("720s", r"720s"),
+    ("720s", r"720s|mclaren"),
     ("m4", r"m4"),
     ("bmwhybrid", r"bmw.*hybrid|mhybrid|hybmw"),
     ("ligier", r"ligier"),
     ("valkyrie", r"valkyrie"),
-    ("vantage", r"vantage|amrgt3"),
+    ("vantage", r"vantage|amrgt3|astongt3|astonmartin"),
     ("rcf", r"rcf|lexus"),
-    ("296", r"296"),
+    ("296", r"296|ferrarigt3"),
     ("z06", r"z06|corvettez"),
     ("amg", r"amg|mercedes"),
     ("911", r"911|992|porsche.*gt3"),
@@ -57,7 +63,9 @@ CAR_KEYS = [
 CAR_TOKENS = {"amr": "vantage", "rcf": "rcf"}                 # короткие обозначения в именах файлов («HYMO … AMR SEB CQ»)
 
 # коды трасс в именах файлов (SEB, SPA, MNZ …) → папка
-TRACK_CODES = {"seb": "Sebring", "sebring": "Sebring", "spa": "Spa", "mnz": "Monza", "mon": "Monza", "monza": "Monza",
+TRACK_CODES = {"day": "Daytonarc", "dyt": "Daytonarc", "daytona": "Daytonarc", "bcn": "Circuit De Barcelona",
+               "lbh": "Longbeach", "prc": "Paulricard", "atl": "Road Atlanta",
+               "seb": "Sebring", "sebring": "Sebring", "spa": "Spa", "mnz": "Monza", "mon": "Monza", "monza": "Monza",
                "lm": "Lemans", "lem": "Lemans", "lemans": "Lemans", "sarthe": "Lemans", "imo": "Imola", "imola": "Imola",
                "sil": "Silverstone", "silverstone": "Silverstone", "bhr": "Bahrain", "bah": "Bahrain", "bahrain": "Bahrain",
                "cota": "Circuit Of The Americas", "ame": "Circuit Of The Americas", "fuj": "Fuji", "fuji": "Fuji",
@@ -353,7 +361,7 @@ PACK_REPO = "Yassnnoo/yassno-overlay"
 PACK_DIR = "setups"
 PACK_TREE_URL = f"https://api.github.com/repos/{PACK_REPO}/git/trees/main?recursive=1"
 PACK_RAW_URL = f"https://raw.githubusercontent.com/{PACK_REPO}/main/"
-PACK_KNOWN = ['HYMO 1.4.1 720S SEB CQ.svm', 'HYMO 1.4.1 720S SEB CR.svm', 'HYMO 1.4.1 720S SEB EQ.svm', 'HYMO 1.4.1 720S SEB ER.svm', 'HYMO 1.4.1 720S SEB WQ.svm', 'HYMO 1.4.1 720S SEB WR.svm', 'HYMO 1.4.1 AMR SEB CQ.svm', 'HYMO 1.4.1 AMR SEB CR.svm', 'HYMO 1.4.1 AMR SEB EQ.svm', 'HYMO 1.4.1 AMR SEB ER.svm', 'HYMO 1.4.1 AMR SEB WQ.svm', 'HYMO 1.4.1 AMR SEB WR.svm', 'HYMO 1.4.1 RCF SEB CQ.svm', 'HYMO 1.4.1 RCF SEB CR.svm', 'HYMO 1.4.1 RCF SEB EQ.svm', 'HYMO 1.4.1 RCF SEB ER.svm', 'HYMO 1.4.1 RCF SEB WQ.svm', 'HYMO 1.4.1 RCF SEB WR.svm']
+PACK_KNOWN = ['HYMO 1.4.1 720S SEB CQ.svm', 'HYMO 1.4.1 720S SEB CR.svm', 'HYMO 1.4.1 720S SEB EQ.svm', 'HYMO 1.4.1 720S SEB ER.svm', 'HYMO 1.4.1 720S SEB WQ.svm', 'HYMO 1.4.1 720S SEB WR.svm', 'HYMO 1.4.1 AMR SEB CQ.svm', 'HYMO 1.4.1 AMR SEB CR.svm', 'HYMO 1.4.1 AMR SEB EQ.svm', 'HYMO 1.4.1 AMR SEB ER.svm', 'HYMO 1.4.1 AMR SEB WQ.svm', 'HYMO 1.4.1 AMR SEB WR.svm', 'HYMO 1.4.1 RCF SEB CQ.svm', 'HYMO 1.4.1 RCF SEB CR.svm', 'HYMO 1.4.1 RCF SEB EQ.svm', 'HYMO 1.4.1 RCF SEB ER.svm', 'HYMO 1.4.1 RCF SEB WQ.svm', 'HYMO 1.4.1 RCF SEB WR.svm', 'HYMO2_1.4_296_DAY_CQ.svm', 'HYMO2_1.4_296_DAY_CR.svm', 'HYMO2_1.4_296_DAY_EQ.svm', 'HYMO2_1.4_296_DAY_ER.svm', 'HYMO2_1.4_296_DAY_WQ.svm', 'HYMO2_1.4_296_DAY_WR.svm', 'P1Doks_FerrariGT3_Daytona_E_1.4.svm', 'P1Doks_FerrariGT3_Daytona_Safe_E_1.4.svm', 'P1Doks_FerrariGT3_Daytona_Wet_E_1.4.svm', 'HYMO2_1.4.0_AMR_DAY_CQ.svm', 'HYMO2_1.4.0_AMR_DAY_CR.svm', 'HYMO2_1.4.0_AMR_DAY_ER.svm', 'HYMO2_1.4.0_AMR_DAY_WR.svm', 'P1Doks_AstonGT3_Daytona_1.4.1_E.svm', 'P1Doks_AstonGT3_Daytona_1.4.1_R.svm', 'P1Doks_AstonGT3_Daytona_1.4.1_Safe_E.svm', 'P1Doks_AstonGT3_Daytona_1.4.1_Safe_R.svm', 'P1Doks_AstonGT3_Daytona_1.4.1_Wet_R.svm', 'HYMO2_1.4_RCF_DAY_CQ.svm', 'HYMO2_1.4_RCF_DAY_EQ.svm', 'HYMO2_1.4_RCF_DAY_ER.svm', 'HYMO2_1.4_RCF_DAY_WR.svm', 'P1Doks_RCF_Daytona_E.svm', 'P1Doks_RCF_Daytona_R.svm', 'P1Doks_RCF_Daytona_SafeE.svm', 'P1Doks_RCF_Daytona_SafeR.svm', 'P1Doks_RCF_Daytona_WetR.svm', 'HYMO2_1.4_720S_DAY_CR.svm', 'HYMO2_1.4_720S_DAY_EQ.svm', 'HYMO2_1.4_720S_DAY_ER.svm', 'HYMO2_1.4_720S_DAY_WR.svm', 'P1Doks_MclarenGT3_Daytona_E_1.4.1.svm', 'P1Doks_MclarenGT3_Daytona_R_1.4.1.svm', 'P1Doks_MclarenGT3_Daytona_Safe_E_1.4.1.svm', 'P1Doks_MclarenGT3_Daytona_Safe_R_1.4.1.svm', 'P1Doks_MclarenGT3_Daytona_Wet_E_1.4.1.svm', 'P1Doks_MclarenGT3_Daytona_Wet_R_1.4.1.svm']
 
 
 def download_pack(settings_root, track, vehicle, tree_fn=None, get_fn=None):

@@ -1,6 +1,6 @@
 {
- "version": "2.6.5",
- "notes": "Лаунчер меньше нагружает процессор в гонке",
+ "version": "2.6.6",
+ "notes": "Сетапы для Ferrari, Aston Martin, Lexus и McLaren на Daytona",
  "files": [
   "README.txt",
   "diagnose.cmd",
