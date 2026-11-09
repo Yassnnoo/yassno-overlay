@@ -467,6 +467,32 @@ class SelfTest(unittest.TestCase):
             self.assertIn("SELFTEST OK", out, f"{g}: {out[-600:]}")
 
 
+class LeaderLapsAndVE(unittest.TestCase):
+    def _cars(self):
+        mk = lambda k, laps, lg: {"key": k, "laps": laps, "laps_leader": 0, "gap_leader": lg, "best": 100.0}
+        return [mk("a", 12, 0.0), mk("b", 12, 3.2)]
+
+    def test_leader_shows_laps(self):
+        g = O.group_gaps(self._cars(), False)
+        self.assertEqual(g["a"][2], "12 кр.")
+        self.assertEqual(g["b"][2], "+3.20")
+        self.assertEqual(O.group_gaps(self._cars(), True)["a"][2], "ЛИДЕР")
+
+    def test_ve_reserve(self):
+        fc = O.FuelCalc()
+        fc.ve_laps.extend([0.05] * 5)
+        me = {"player": True, "fuel": 50.0, "fuel_cap": 90.0, "ve": 0.5, "laps": 3, "lap_dist": 0.0,
+              "last": 100.0, "best": 100.0}
+        fr = {"cars": [me], "max_laps": 13, "end_et": 0, "elapsed": 0, "track_len": 5000, "game": "lmu"}
+        a = fc.compute(fr, 0.0, 5, 0.0)["ve"]
+        b = fc.compute(fr, 0.0, 5, 2.0)["ve"]
+        self.assertAlmostEqual(a["need"], 50.0, places=3)
+        self.assertAlmostEqual(b["need"] - a["need"], 10.0, places=3)
+        self.assertAlmostEqual(b["add"], 10.0, places=3)
+        fr["game"] = "rf2"
+        self.assertIsNone(fc.compute(fr, 0.0, 5, 0.0)["ve"])
+
+
 class WetValue(unittest.TestCase):
     def test_full_wet_is_not_dry(self):
         import yassno_readers as R

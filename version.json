@@ -1,6 +1,6 @@
 {
- "version": "2.6.6",
- "notes": "Сетапы для Ferrari, Aston Martin, Lexus и McLaren на Daytona",
+ "version": "2.6.7",
+ "notes": "Стендинг: круги лидера и сессии, запас энергии LMU",
  "files": [
   "README.txt",
   "diagnose.cmd",

@@ -61,7 +61,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "2.6.6"
+APP_VERSION = "2.6.7"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -469,7 +469,7 @@ SCALE_DEFAULT = {"scale_standings": 1.0, "scale_relative": 1.0, "scale_pedals": 
                  "scale_tyres": 1.0, "scale_pitplan": 1.0, "scale_gaps": 1.0, "scale_engine": 1.0, "scale_sesstime": 1.0, "scale_clock": 1.0, "scale_speedo": 1.0, "scale_laplog": 1.0, "scale_micro": 1.0}
 DEFAULTS = {**{k: True for k, _ in ELEMENTS}, "font": 13, "family": "", "rows": 12,
             "hide_garage": True, "class_only": False, **SCALE_DEFAULT, **{"op_" + k: v for k, v in OP_DEFAULT.items()},
-            "radar_range": 40, "fuel_reserve": 0.0, "fuel_pit_laps": 1.0, "fuel_avg": 5,
+            "radar_range": 40, "fuel_reserve": 0.0, "ve_reserve": 0.0, "fuel_pit_laps": 1.0, "fuel_avg": 5,
             "rel_ahead": 3, "rel_behind": 3, "ped_seconds": 8, "shift_start": 82.0, "shift_flash": 98.0, "speed_mph": False,
             "map_wind": True, "map_dot": 10, "map_pdot": 14, "map_mirror": False, "map_rot": 0,
             "radar_arcs": True, "radar_fade": True, "lights_hold": 4,
@@ -1843,7 +1843,7 @@ class ProfilePanel(ttk.Frame):
                 self.v[k] = tk.StringVar(value=self.mode_label(k, val))
             elif k in ("radar_range", "map_radius"):
                 self.v[k] = tk.StringVar(value=str(int(val)))
-            elif k in ("fuel_reserve", "fuel_pit_laps"):
+            elif k in ("fuel_reserve", "ve_reserve", "fuel_pit_laps"):
                 self.v[k] = tk.StringVar(value=f"{float(val):g}")
             elif k == "map_rot":
                 self.v[k] = tk.StringVar(value=self.ROT[int(val) % 4])
@@ -2678,6 +2678,7 @@ class ProfilePanel(ttk.Frame):
             if self.game == "lmu":
                 g = self.card("Виртуальная энергия (LMU)", R)
                 self.tg(g, None, "Показывать блок энергии и её расчёт", self.v["fuel_ve"])
+                self.combo(g, None, "Запас энергии, кругов", "ve_reserve", RESERVES)
                 ttk.Label(g, text="Остаток в %, расход за круг, среднее и сколько\nэнергии нужно до финиша — как для топлива.",
                           style="Dim.TLabel", justify="left").grid(row=self.nr(g), column=0, columnspan=3, sticky="w", pady=(2, 0))
         keys = PAGE_COLORS.get(key, [])
@@ -2865,6 +2866,7 @@ class ProfilePanel(ttk.Frame):
         for k in OP_DEFAULT:
             st["op_" + k] = round(lim(st["op_" + k], 0.2, 1.0), 2)
         st["fuel_reserve"] = self.num("fuel_reserve", 0.0)
+        st["ve_reserve"] = self.num("ve_reserve", 0.0)
         st["fuel_pit_laps"] = self.num("fuel_pit_laps", 1.0)
         st["hide_cols"] = [k for k, v in self.cols.items() if not v.get()]
         st["rel_hide"] = [k for k, v in self.relc.items() if not v.get()]

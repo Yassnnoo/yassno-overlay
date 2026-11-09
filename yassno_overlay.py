@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "2.6.6"
+APP_VERSION = "2.6.7"
 import argparse
 import bisect
 import collections
@@ -187,7 +187,8 @@ def group_gaps(group, timed):
     out, prev = {}, None
     for i, c in enumerate(group):
         if i == 0:
-            out[c["key"]] = ("", None, "ЛИДЕР")
+            ll = c.get("laps", 0)
+            out[c["key"]] = ("", None, (f"{ll} кр." if ll > 0 else "ЛИДЕР") if not timed else "ЛИДЕР")
         elif timed:
             lead = group[0]["best"]
             lead_txt = fmt_gap(c["best"] - lead, 0) if c["best"] > 0 and lead > 0 else "-"
@@ -652,7 +653,7 @@ class FuelCalc:
                     self.ve_laps.append(vused)
             self.cur_lap, self.start_fuel, self.start_ve, self.dirty = lap, fuel, ve, in_pit
 
-    def compute(self, frame, reserve=0.0, keep=None):
+    def compute(self, frame, reserve=0.0, keep=None, ve_reserve=None):
         me = next((c for c in frame["cars"] if c["player"]), None) if frame else None
         if not me or not me["fuel"] > 0:
             return None
@@ -687,7 +688,9 @@ class FuelCalc:
                   "avg": vavg * 100.0 if vavg else None, "n": len(rv), "laps": (me["ve"] / vavg) if vavg else None,
                   "need": None, "add": None}
             if left is not None and vavg:
-                ve["need"] = (left + reserve) * vavg * 100.0
+                vr = reserve if ve_reserve is None else ve_reserve
+                ve["reserve"] = vr
+                ve["need"] = (left + vr) * vavg * 100.0
                 ve["add"] = ve["need"] - me["ve"] * 100.0
             out["ve"] = ve
         if left is not None and avg:
@@ -3168,7 +3171,7 @@ class FuelWindow(RelativeWindow):
         self._sig = None
 
     def tick(self, frame, ver):
-        sig = (ver // 2, self.main.cfg["font"], self.main.cfg.get("fuel_reserve", 0.0), self.main.cfg.get("fuel_scale", 0.8), int(time.time() * 2))
+        sig = (ver // 2, self.main.cfg["font"], self.main.cfg.get("fuel_reserve", 0.0), self.main.cfg.get("ve_reserve", 0.0), self.main.cfg.get("fuel_scale", 0.8), int(time.time() * 2))
         if sig != self._sig:
             self._sig = sig
             self.draw(frame)
@@ -3176,7 +3179,8 @@ class FuelWindow(RelativeWindow):
     def draw(self, frame):
         m, c, W, rh = self.main, self.canvas, self.width, self.rh
         reserve = float(m.cfg.get("fuel_reserve", 0.0))
-        d = fuel_calc.compute(frame, reserve, m.cfg.get("fuel_avg", 5)) if frame else None
+        ve_res = float(m.cfg.get("ve_reserve", 0.0))
+        d = fuel_calc.compute(frame, reserve, m.cfg.get("fuel_avg", 5), ve_res) if frame else None
         if d and not m.cfg.get("fuel_ve", True):
             d["ve"] = None
         H = self.height_ve if (d and d.get("ve")) else self.height
@@ -3246,6 +3250,8 @@ class FuelWindow(RelativeWindow):
             y2 = int(rh * 11.6)
             c.create_line(14, y2 - int(rh * 0.5), W - 14, y2 - int(rh * 0.5), fill=BORDER)
             c.create_text(16, y2, text="ВИРТ. ЭНЕРГИЯ", fill=DIM, anchor="w", font=self.f_s)
+            if ve_res:
+                c.create_text(W - 14, y2, text=f"запас +{ve_res:g} кр.", fill=DIM, anchor="e", font=self.f_s)
             vcol = "#2ee26d" if v["level"] > 35 else "#ffc107" if v["level"] > 15 else "#ff3b30"
             c.create_text(16, y2 + int(rh * 0.95), text=f"{v['level']:.1f}%", fill=FG, anchor="w", font=self.f_mid)
             if v["laps"] is not None:
@@ -3264,7 +3270,7 @@ class FuelWindow(RelativeWindow):
                 c.create_text(W - 14, r1, text="—", fill=DIM, anchor="e", font=self.f_b)
             elif v["add"] > 0:
                 c.create_text(16, r1, text=f"нужно {v['need']:.0f}%", fill=DIM, anchor="w", font=self.f_s)
-                c.create_text(W - 14, r1, text=f"не хватает {v['add']:.0f}%", fill="#ff5a4f", anchor="e", font=self.f_b)
+                c.create_text(W - 14, r1, text=f"ДОЛИТЬ +{v['add']:.0f}%", fill="#ff5a4f", anchor="e", font=self.f_b)
             else:
                 c.create_text(16, r1, text=f"нужно {v['need']:.0f}%", fill=DIM, anchor="w", font=self.f_s)
                 c.create_text(W - 14, r1, text=f"хватит, запас {-v['add']:.0f}%", fill="#2ee26d", anchor="e", font=self.f_b)
@@ -5304,6 +5310,13 @@ class Overlay:
             resm.add_radiobutton(label=f"запас {v:g} круга" if v else "без запаса", variable=self.res_var, value=v,
                                  command=self.set_reserve)
         self.menu.add_cascade(label="Топливо: запас", menu=resm)
+        vem = tk.Menu(self.menu, tearoff=0)
+        self.ve_res_var = tk.DoubleVar(value=float(cfg.get("ve_reserve", 0.0)))
+        for v in (0.0, 0.5, 1.0, 2.0):
+            vem.add_radiobutton(label=f"запас {v:g} круга" if v else "без запаса", variable=self.ve_res_var, value=v,
+                                command=self.set_ve_reserve)
+        if getattr(self, "game", "lmu") == "lmu":
+            self.menu.add_cascade(label="Энергия (LMU): запас", menu=vem)
         self.new_vars = {}
         for key, label in (("delta", "Дельта к лучшему кругу"), ("alerts", "Предупреждения"),
                            ("tyres", "Шины и тормоза"), ("pitplan", "Пит-стоп и стинт"), ("gaps", "Соперники: гэпы и тренд"),
@@ -5727,6 +5740,11 @@ class Overlay:
 
     def set_reserve(self):
         self.cfg["fuel_reserve"] = float(self.res_var.get())
+        self.fuel._sig = None
+        self.save()
+
+    def set_ve_reserve(self):
+        self.cfg["ve_reserve"] = float(self.ve_res_var.get())
         self.fuel._sig = None
         self.save()
 
@@ -6638,6 +6656,16 @@ class Overlay:
                 xl = W - 14 - self.big.measure(timer) - 12
                 c.create_text(xl, cy + 2, text=caption, fill=DIM, anchor="e", font=self.small)
                 xl -= self.small.measure(caption) + 14
+                if frame and not (0 < frame["max_laps"] < 100_000):      # при гонке «на круги» номер круга уже в таймере
+                    if race_like:
+                        nl = max((x["laps"] for x in cars), default=0)
+                    else:
+                        nl = next((x["laps"] for x in cars if x["player"]), 0)
+                    if nl > 0:
+                        lt = str(nl)
+                        c.create_text(xl, cy + 2, text="КРУГОВ", fill=DIM, anchor="e", font=self.small)
+                        c.create_text(xl - self.small.measure("КРУГОВ") - 8, cy, text=lt, fill=FG, anchor="e", font=self.big)
+                        xl -= self.small.measure("КРУГОВ") + self.big.measure(lt) + 22
             if session and show_s:
                 self.pill(xl, cy, session, ACCENT)
         elif not ok:
