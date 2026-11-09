@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "2.6.7"
+APP_VERSION = "2.6.8"
 import argparse
 import bisect
 import collections
@@ -3913,8 +3913,12 @@ class PitLog:
         if frame.get("kind") != "RACE":
             return
         for c in frame["cars"]:
-            r = self.cars.setdefault(c["key"], {"in": False, "t0": 0.0, "lap": 0, "last": None, "n": 0})
+            r = self.cars.setdefault(c["key"], {"in": False, "t0": 0.0, "lap": 0, "last": None, "n": 0, "armed": False})
             pit = bool(c.get("in_pits"))
+            if not pit and not r["armed"] and (frame.get("game_phase", 5) >= 5 or c["laps"] >= 1):
+                r["armed"] = True                          # машина уже на трассе после старта гонки
+            if not r["armed"]:
+                continue                                   # выезд из боксов на стартовую решётку — не пит-стоп
             if pit and not r["in"]:
                 r["in"], r["t0"], r["lap"] = True, now, int(c["laps"]) + 1
             elif not pit and r["in"]:

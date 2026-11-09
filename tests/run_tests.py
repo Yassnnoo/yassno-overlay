@@ -493,6 +493,21 @@ class LeaderLapsAndVE(unittest.TestCase):
         self.assertIsNone(fc.compute(fr, 0.0, 5, 0.0)["ve"])
 
 
+class PitLogGrid(unittest.TestCase):
+    def test_grid_exit_not_a_stop(self):
+        pl = O.PitLog()
+        car = lambda pit, laps=0: {"key": "a", "in_pits": pit, "laps": laps}
+        fr = lambda pit, ph, laps=0: {"session_start": 1, "kind": "RACE", "game_phase": ph, "cars": [car(pit, laps)]}
+        pl.update(fr(True, 3), 0.0)
+        pl.update(fr(False, 4), 20.0)            # выехал на решётку до старта
+        pl.update(fr(False, 5), 60.0)            # старт
+        self.assertIsNone(pl.info("a", 61.0))
+        pl.update(fr(True, 5, 9), 100.0)         # настоящий стоп
+        pl.update(fr(False, 5, 9), 125.0)
+        self.assertEqual(pl.info("a", 130.0)[0], 10)
+        self.assertAlmostEqual(pl.info("a", 130.0)[1], 25.0)
+
+
 class WetValue(unittest.TestCase):
     def test_full_wet_is_not_dry(self):
         import yassno_readers as R
