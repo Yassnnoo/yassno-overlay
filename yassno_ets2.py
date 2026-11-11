@@ -2137,6 +2137,8 @@ class App:
             self.set_lock(True)
         elif cmd == "unlock":
             self.set_lock(False)
+        elif cmd == "reset":
+            self.reset_positions()
         elif cmd == "quit":
             self.quit()
 

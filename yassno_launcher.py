@@ -66,7 +66,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "2.7.1"
+APP_VERSION = "2.7.2"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -1819,26 +1819,33 @@ class Ets2Page(ttk.Frame):
         center = ttk.Frame(self)
         center.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
         center.columnconfigure(0, weight=1)
-        bar = ttk.Frame(center)
-        bar.grid(row=0, column=0, sticky="ew", pady=(0, 8))
-        self.btn_start = ttk.Button(bar, text="▶ Запустить оверлей", style="Accent.TButton", command=lambda: self.start(False))
-        self.btn_start.pack(side="left")
-        ttk.Button(bar, text="■ Остановить", command=self.stop).pack(side="left", padx=(6, 0))
-        ttk.Button(bar, text="Двигать окна", command=lambda: self.cmd("unlock")).pack(side="left", padx=(12, 0))
-        ttk.Button(bar, text="Закрепить окна", command=lambda: self.cmd("lock")).pack(side="left", padx=(6, 0))
-        ttk.Button(bar, text="Тест без игры", command=lambda: self.start(True)).pack(side="left", padx=(12, 0))
-        self.run_lbl = ttk.Label(center, text="", style="Dim.TLabel", wraplength=640, justify="left")
-        self.run_lbl.grid(row=1, column=0, sticky="w", pady=(0, 6))
         self.title = ttk.Label(center, text="", style="Title.TLabel")
-        self.title.grid(row=2, column=0, sticky="w")
+        self.title.grid(row=0, column=0, sticky="w")
         self.note = ttk.Label(center, text="", style="Dim.TLabel", wraplength=640, justify="left")
-        self.note.grid(row=3, column=0, sticky="w", pady=(2, 10))
+        self.note.grid(row=1, column=0, sticky="w", pady=(2, 10))
         self.pbox = RoundBox(center, radius=16, fill=MOCK_BG, border=mix(UI_BORDER, UI_DIM, 0.3))
-        self.pbox.grid(row=4, column=0, sticky="n")
+        self.pbox.grid(row=2, column=0, sticky="n")
         self.pwrap = tk.Frame(self.pbox.inner, bg=MOCK_BG)
         self.pwrap.pack(padx=11, pady=11)
         self.ctrl = ttk.Frame(center)
-        self.ctrl.grid(row=5, column=0, sticky="w", pady=(10, 0))
+        self.ctrl.grid(row=3, column=0, sticky="w", pady=(10, 0))
+        # --- снизу, как у остальных игр: запуск оверлея ---
+        bar = ttk.Frame(self)
+        bar.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        self.btn_start = ttk.Button(bar, text="Запустить оверлей", style="Accent.TButton", command=lambda: self.start(False))
+        self.btn_start.pack(side="left", padx=(0, 8))
+        ttk.Button(bar, text="Остановить оверлей", command=self.stop).pack(side="left", padx=(0, 8))
+        more = ttk.Menubutton(bar, text=tr("Ещё") + " ▾")
+        mm = tk.Menu(more, tearoff=0, bg=UI_PANEL, fg=UI_FG, activebackground=UI_ACCENT, activeforeground=UI_ACCENT_FG, bd=0, font=("Segoe UI", 10))
+        mm.add_command(label=tr("Двигать окна"), command=lambda: self.cmd("unlock"))
+        mm.add_command(label=tr("Закрепить окна"), command=lambda: self.cmd("lock"))
+        mm.add_command(label=tr("Демо без игры"), command=lambda: self.start(True))
+        mm.add_separator()
+        mm.add_command(label=tr("Сбросить положение окон"), command=self.reset_pos)
+        more.configure(menu=mm)
+        more.pack(side="left")
+        self.run_lbl = ttk.Label(bar, text="", style="Dim.TLabel")
+        self.run_lbl.pack(side="left", padx=(14, 0))
         # --- справа: настройки страницы ---
         holder = ttk.Frame(self, width=self.RW)
         holder.grid(row=0, column=1, sticky="nsew")
@@ -2151,6 +2158,17 @@ class Ets2Page(ttk.Frame):
 
     def save_quiet(self):
         self.save()
+
+    def reset_pos(self):
+        """Вернуть окна оверлея на экран: стираем сохранённые позиции и просим запущенный оверлей переставить окна."""
+        try:
+            c = ETS2.load_cfg()
+            c["pos"] = {}
+            ETS2.save_cfg(c)
+            self.cfg["pos"] = {}
+        except Exception:                                # noqa: BLE001
+            pass
+        self.cmd("reset")
 
     def set_plugin(self, text, fg=None):
         lbl = getattr(self, "plugin_lbl", None)
