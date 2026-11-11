@@ -104,6 +104,19 @@ def speed_col(d, base):
     return _mix(base, "#ff1a1a", min(1.0, (sp - lim) / 20.0))
 
 
+FRAME_LEVELS = ((100, "Сплошной фон"), (75, "Прозрачность 25%"), (50, "Прозрачность 50%"), (25, "Прозрачность 75%"), (0, "Без рамки и фона"))
+STIPPLES = {75: "gray75", 50: "gray50", 25: "gray25"}
+
+
+def frame_level(cfg, key):
+    """Непрозрачность фона и рамки окна, %: 100 — сплошной, 0 — без рамки. Содержимое окна всегда чёткое."""
+    try:
+        v = int(cfg.get("frame_op", {}).get(key, 100))
+    except (TypeError, ValueError, AttributeError):
+        return 100
+    return min(FRAME_LEVELS, key=lambda it: abs(it[0] - v))[0]
+
+
 def win_radius():
     """Скругление окон в базовых координатах."""
     return int(round(BASE_R * STYLE_R))
@@ -137,7 +150,7 @@ def grip_zone(canvas, e):
 
 DEFAULTS = {"locked": False, "alpha": 0.94, "mph": False, "win_map": True, "win_dash": True, "win_trip": True,
             "map_span": 1600.0, "map_heading_up": True, "map_size": 360, "map_auto_zoom": True,
-            "pos": {}, "game_dir": "", "autostart": False, "scale": {}, "hide_idle": True, "dash_style": "classic", "theme": "amber", "win_style": "classic", "win_convoy": False, "convoy_ids": "",
+            "pos": {}, "game_dir": "", "autostart": False, "scale": {}, "hide_idle": True, "dash_style": "classic", "theme": "amber", "win_style": "classic", "frame_op": {}, "win_convoy": False, "convoy_ids": "",
             "win_mfd": True, "mfd_screen": 0, "mfd_keys": "numpad", "mfd_binds": {}}
 
 
@@ -853,10 +866,33 @@ class DemoConvoy:
 # карта: тайлы SCS_Map_Tiles
 # ---------------------------------------------------------------------------
 try:
-    from PIL import Image, ImageDraw, ImageTk
+    from PIL import Image, ImageChops, ImageDraw, ImageTk
     HAVE_PIL = True
 except Exception:                                        # noqa: BLE001
     HAVE_PIL = False
+
+
+_BAYER = ((0, 8, 2, 10), (12, 4, 14, 6), (3, 11, 1, 9), (15, 7, 13, 5))
+
+
+def bayer_mask(w, h, lvl):
+    """Маска-«сито»: видна доля lvl% пикселей (упорядоченный дизеринг 4×4): карта просвечивает, как стеклянная."""
+    on = int(round(lvl / 100.0 * 16))
+    tile = Image.new("L", (4, 4))
+    tile.putdata([255 if _BAYER[y][x] < on else 0 for y in range(4) for x in range(4)])
+    row = tile
+    while row.width < w:
+        nr = Image.new("L", (row.width * 2, 4))
+        nr.paste(row, (0, 0))
+        nr.paste(row, (row.width, 0))
+        row = nr
+    out = row
+    while out.height < h:
+        no = Image.new("L", (out.width, out.height * 2))
+        no.paste(out, (0, 0))
+        no.paste(out, (0, out.height))
+        out = no
+    return out.crop((0, 0, w, h))
 
 
 class TileMap:
@@ -1180,10 +1216,19 @@ class Win:
         c = self.canvas
         w, h = (w or self.w), (h or self.h)
         outline = BORDER if outline is None else outline
+        lvl = self.level()
+        if lvl <= 0 and self.app.cfg.get("locked", True):  # режим «без рамки»: подложки нет, остаётся только содержимое
+            return None
+        st = {"stipple": "gray12", "outlinestipple": "gray12"} if lvl <= 0 else {"stipple": STIPPLES[lvl], "outlinestipple": STIPPLES[lvl]} if lvl in STIPPLES else {}
+        if not fill:
+            st.pop("stipple", None)
         r = win_radius()
         if r > 1:
-            return c.create_polygon(rr_points(0, 0, w - 1, h - 1, r), smooth=True, fill=fill, outline=outline, width=width)
-        return c.create_rectangle(0, 0, w - 1, h - 1, fill=fill, outline=outline, width=width)
+            return c.create_polygon(rr_points(0, 0, w - 1, h - 1, r), smooth=True, fill=fill, outline=outline, width=width, **st)
+        return c.create_rectangle(0, 0, w - 1, h - 1, fill=fill, outline=outline, width=width, **st)
+
+    def level(self):
+        return frame_level(self.app.cfg, self.KEY)
 
     def set_scale(self, k, save=False):
         k = max(SCALE_MIN, min(SCALE_MAX, float(k)))
@@ -1298,6 +1343,10 @@ class Win:
         for pct in (50, 75, 100, 125, 150, 200, 250):
             sm.add_command(label=f"{pct}%" + (" ✓" if abs(self.k * 100 - pct) < 1 else ""), command=lambda p=pct: self.set_scale(p / 100.0, save=True))
         m.add_cascade(label="Размер окна (или тяните уголок)", menu=sm)
+        fm = tk.Menu(m, tearoff=0)
+        for lv, name in FRAME_LEVELS:
+            fm.add_command(label=name + (" ✓" if self.level() == lv else ""), command=lambda v=lv: self.app.set_frame(self.KEY, v))
+        m.add_cascade(label="Фон и рамка этого окна", menu=fm)
         m.add_command(label="Прятать, когда не в мире: " + ("вкл" if self.app.cfg["hide_idle"] else "выкл"), command=self.app.toggle_hide_idle)
         m.add_command(label="Закрыть оверлей", command=self.app.quit)
         try:
@@ -2067,13 +2116,20 @@ class MapWin(Win):
         for px, py in ((0, -13), (9, 10), (0, 5), (-9, 10)):          # поворот на ang против часовой (экранные оси, y вниз)
             pts.append((cx + (px * math.cos(ang) + py * math.sin(ang)) * kk, cy + (-px * math.sin(ang) + py * math.cos(ang)) * kk))
         dr.polygon(pts, fill=(255, 159, 26), outline=(16, 20, 26))
-        rpx = int(win_radius() * kk)
-        if rpx > 1:                                      # скруглённые углы: вне плашки — прозрачный ключевой цвет
+        lvl = self.level()
+        rpx = int(win_radius() * kk) if lvl > 0 else 0      # без рамки — прямая карта без скруглений
+        if rpx > 1 or 0 < lvl < 100:                     # скругления и/или прозрачность: вне маски — ключевой цвет окна
+            key = (pw, ph, rpx, lvl)
             mk = getattr(self, "_mask", None)
-            if mk is None or mk[0] != (pw, ph, rpx):
-                m = Image.new("L", (pw * 3, ph * 3), 0)
-                ImageDraw.Draw(m).rounded_rectangle((0, 0, pw * 3 - 1, ph * 3 - 1), radius=rpx * 3, fill=255)
-                self._mask = mk = ((pw, ph, rpx), m.resize((pw, ph), Image.LANCZOS))
+            if mk is None or mk[0] != key:
+                m = Image.new("L", (pw, ph), 255)
+                if rpx > 1:
+                    m = Image.new("L", (pw * 3, ph * 3), 0)
+                    ImageDraw.Draw(m).rounded_rectangle((0, 0, pw * 3 - 1, ph * 3 - 1), radius=rpx * 3, fill=255)
+                    m = m.resize((pw, ph), Image.LANCZOS)
+                if 0 < lvl < 100:
+                    m = ImageChops.multiply(m, bayer_mask(pw, ph, lvl))
+                self._mask = mk = (key, m)
             bgc = Image.new("RGB", (pw, ph), corner_bg())
             bgc.paste(img, (0, 0), mk[1])
             img = bgc
@@ -2218,6 +2274,21 @@ class App:
         w.CFG = key
         self.wins.append(w)
         return w
+
+    def set_frame(self, key, lvl):
+        """Фон/рамка окна: 100 сплошной … 25 почти прозрачный, 0 — без рамки."""
+        fo = dict(self.cfg.get("frame_op") or {})
+        fo[key] = int(lvl)
+        self.cfg["frame_op"] = fo
+        save_cfg(self.cfg)
+        for w in self.wins:
+            if w.KEY == key:
+                w.last_draw = 0.0
+                w._t_upd = 0.0
+                try:
+                    w.canvas.delete("mv")
+                except tk.TclError:
+                    pass
 
     def set_window(self, key, on):
         """Включить/убрать окно на лету (крестик на окне, кнопки панели перемещения)."""

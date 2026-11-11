@@ -279,3 +279,41 @@ class SpeedColorTests(unittest.TestCase):
         self.assertNotEqual(a, base)
         self.assertGreater(int(a[1:3], 16), int(a[3:5], 16))                           # красный преобладает, но не на максимуме
         self.assertGreater(int(a[3:5], 16), int(b[3:5], 16))
+
+
+class FrameLevelTests(unittest.TestCase):
+    def test_level_parse(self):
+        self.assertEqual(E.frame_level({}, "dash"), 100)
+        self.assertEqual(E.frame_level({"frame_op": {"dash": 0}}, "dash"), 0)
+        self.assertEqual(E.frame_level({"frame_op": {"dash": 60}}, "dash"), 50)       # к ближайшему уровню
+        self.assertEqual(E.frame_level({"frame_op": {"dash": "x"}}, "dash"), 100)
+        self.assertEqual(E.frame_level({"frame_op": 5}, "dash"), 100)
+
+    def test_bayer_share(self):
+        if not E.HAVE_PIL:
+            self.skipTest("нет Pillow")
+        for lvl in (25, 50, 75):
+            m = E.bayer_mask(37, 21, lvl)
+            self.assertEqual(m.size, (37, 21))
+            share = sum(1 for v in m.getdata() if v) / (37 * 21.0)
+            self.assertAlmostEqual(share, lvl / 100.0, delta=0.08)
+
+    def test_panel_modes(self):
+        w = WindowStyleTests()._app(locked=True, win_convoy=False)
+        try:
+            d = next(x for x in w.wins if x.KEY == "dash")
+            c = d.canvas
+            w.set_frame("dash", 0)
+            c.delete("all")
+            self.assertIsNone(d.panel(E.PANEL))                                      # без рамки: подложки нет
+            w.set_frame("dash", 50)
+            c.delete("all")
+            it = d.panel(E.PANEL)
+            self.assertEqual(c.itemcget(it, "stipple"), "gray50")                    # прозрачная подложка, содержимое не затронуто
+            w.set_frame("dash", 100)
+            c.delete("all")
+            it = d.panel(E.PANEL)
+            self.assertEqual(c.itemcget(it, "stipple"), "")
+            self.assertEqual(w.cfg["frame_op"]["dash"], 100)
+        finally:
+            w.quit()

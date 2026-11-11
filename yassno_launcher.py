@@ -66,7 +66,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "2.7.5"
+APP_VERSION = "2.7.6"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -2001,6 +2001,27 @@ class Ets2Page(ttk.Frame):
     def hint(self, parent, text, size=9):
         tk.Label(parent, text=tr(text), bg=UI_BG, fg=UI_DIM, font=("Segoe UI", size), anchor="w", justify="left", wraplength=self.RW - 90).pack(fill="x", pady=(4, 2))
 
+    def frame_row(self, f, key):
+        """Фон и рамка конкретного окна: прозрачность (содержимое остаётся чётким) или режим «без рамки»."""
+        names = dict(ETS2.FRAME_LEVELS)
+        var = tk.StringVar(value=names[ETS2.frame_level(self.cfg, key)])
+        row = tk.Frame(f, bg=UI_BG)
+        row.pack(fill="x", pady=(6, 0))
+        tk.Label(row, text=tr("Фон и рамка окна"), bg=UI_BG, fg=UI_FG, font=("Segoe UI", 10)).pack(side="left")
+        cb = ttk.Combobox(row, textvariable=var, values=[tr(n) for n in names.values()], width=24, state="readonly")
+        cb.pack(side="left", padx=(8, 0))
+
+        def chosen(e=None, key=key, var=var):
+            for lv, n in ETS2.FRAME_LEVELS:
+                if var.get() in (n, tr(n)):
+                    fo = dict(self.cfg.get("frame_op") or {})
+                    fo[key] = lv
+                    self.cfg["frame_op"] = fo
+                    self._frame_dirty = True
+            self.save(keep_look=True)
+            self.redraw_preview()
+        cb.bind("<<ComboboxSelected>>", chosen)
+
     def page_general(self):
         f = self.card("Игра и плагин телеметрии")
         row = tk.Frame(f, bg=UI_BG)
@@ -2064,6 +2085,7 @@ class Ets2Page(ttk.Frame):
     def page_mfd(self):
         f = self.card("МФД")
         self.tgl(f, "win_mfd", "Показывать МФД")
+        self.frame_row(f, "mfd")
         row = tk.Frame(f, bg=UI_BG)
         row.pack(fill="x", pady=(6, 0))
         tk.Label(row, text=tr("Клавиши экранов"), bg=UI_BG, fg=UI_FG, font=("Segoe UI", 10)).pack(side="left")
@@ -2078,6 +2100,7 @@ class Ets2Page(ttk.Frame):
     def page_dash(self):
         f = self.card("Приборы")
         self.tgl(f, "win_dash", "Показывать приборы")
+        self.frame_row(f, "dash")
         row = tk.Frame(f, bg=UI_BG)
         row.pack(fill="x", pady=(6, 0))
         tk.Label(row, text=tr("Вид"), bg=UI_BG, fg=UI_FG, font=("Segoe UI", 10)).pack(side="left")
@@ -2092,11 +2115,13 @@ class Ets2Page(ttk.Frame):
     def page_trip(self):
         f = self.card("Рейс и топливо")
         self.tgl(f, "win_trip", "Показывать окно рейса")
+        self.frame_row(f, "trip")
         self.hint(f, "Топливо и запас хода, расход, AdBlue, расстояние и время до цели, груз, срок доставки и повреждения.")
 
     def page_map(self):
         f = self.card("Карта")
         self.tgl(f, "win_map", "Показывать карту")
+        self.frame_row(f, "map")
         self.tgl(f, "map_heading_up", "Карта поворачивается по ходу движения (иначе север вверху)")
         self.tgl(f, "map_auto_zoom", "Авто-масштаб: на скорости смотреть дальше")
         row = tk.Frame(f, bg=UI_BG)
@@ -2110,6 +2135,7 @@ class Ets2Page(ttk.Frame):
     def page_convoy(self):
         f = self.card("Конвой")
         self.tgl(f, "win_convoy", "Показывать список конвоя")
+        self.frame_row(f, "convoy")
         tk.Label(f, text=tr("TruckersMP ID через запятую"), bg=UI_BG, fg=UI_FG, font=("Segoe UI", 10), anchor="w").pack(fill="x", pady=(6, 2))
         ent = ttk.Entry(f, textvariable=self.convoy_var)
         ent.pack(fill="x")
@@ -2252,6 +2278,9 @@ class Ets2Page(ttk.Frame):
             fresh = ETS2.load_cfg()
             for k in ("pos", "scale", "mfd_screen", "map_span") + (() if keep_look else ("dash_style",)):
                 self.cfg[k] = fresh[k]
+            if not getattr(self, "_frame_dirty", False):          # фон окон мог поменяться в игре (ПКМ → «Фон и рамка»)
+                self.cfg["frame_op"] = fresh.get("frame_op", {})
+            self._frame_dirty = False
             if not keep_look and hasattr(self, "dash_var"):
                 self.dash_var.set(self.dash_names.get(self.cfg["dash_style"], self.dash_var.get()))
         except Exception:                                # noqa: BLE001
