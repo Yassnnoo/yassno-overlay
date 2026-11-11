@@ -160,3 +160,89 @@ class HotkeyTests(unittest.TestCase):
         self.assertEqual(hk["lock"], "Ctrl+Alt+K")
         self.assertEqual(hk["quit"], E.HOTKEY_DEFAULTS["quit"])
         self.assertEqual(E.load_hotkeys(os.path.join(d, "нет"))["hide"], E.HOTKEY_DEFAULTS["hide"])
+
+
+class WindowStyleTests(unittest.TestCase):
+    def _app(self, **extra):
+        import json, tempfile, os
+        d = tempfile.mkdtemp()
+        E.CFG_PATH = os.path.join(d, "c.json")
+        E.STATE_PATH, E.CMD_PATH = E.CFG_PATH + ".state", E.CFG_PATH + ".cmd"
+        json.dump(dict({"hide_idle": False, "win_convoy": True}, **extra), open(E.CFG_PATH, "w"))
+        return E.App(demo=True)
+
+    def test_styles_radius_and_mark(self):
+        E.apply_theme("amber", "square")
+        self.assertEqual(E.win_radius(), 0)
+        E.apply_theme("amber", "soft")
+        self.assertGreater(E.win_radius(), E.BASE_R)
+        self.assertEqual(E.MARK, "#e5322d")
+        E.apply_theme("amber", "minimal")
+        self.assertEqual(E.MARK, "")
+        E.apply_theme("amber", "accent")
+        self.assertEqual(E.MARK, E.ACCENT)
+        E.apply_theme("amber", "nonsense")               # неизвестный стиль — классика
+        self.assertEqual(E.win_radius(), E.BASE_R)
+        E.apply_theme("amber")
+
+    def test_grip_zone(self):
+        class Cv:
+            def cget(self, k):
+                return {"width": 300, "height": 200}[k]
+
+        class Ev:
+            def __init__(self, x, y):
+                self.x, self.y = x, y
+        z = lambda x, y: E.grip_zone(Cv(), Ev(x, y))     # noqa: E731
+        self.assertEqual(z(299, 100), (1, 0))
+        self.assertEqual(z(0, 100), (-1, 0))
+        self.assertEqual(z(150, 199), (0, 1))
+        self.assertEqual(z(150, 0), (0, -1))
+        self.assertEqual(z(299, 199), (1, 1))
+        self.assertEqual(z(0, 0), (-1, -1))
+        self.assertIsNone(z(150, 100))
+        self.assertIsNone(z(290, 10))                    # крестик закрытия
+
+    def test_move_mode_panel_and_close(self):
+        a = self._app(locked=False)
+        try:
+            a.root.update()
+            self.assertIsNotNone(a.move_panel)
+            n = len(a.wins)
+            self.assertTrue(all(w.canvas.find_withtag("mv") for w in a.wins))      # зелёная рамка нарисована
+            a.set_window("win_convoy", False)
+            self.assertEqual(len(a.wins), n - 1)
+            self.assertFalse(a.cfg["win_convoy"])
+            a.set_window("win_convoy", True)
+            self.assertEqual(len(a.wins), n)
+            a.wins[0].visible = True
+            a.toggle_lock()                                                        # закрепили: панель и рамки уходят
+            a.root.update()
+            self.assertIsNone(a.move_panel)
+            a.tick()
+            self.assertFalse(any(w.canvas.find_withtag("mv") for w in a.wins))
+        finally:
+            a.quit()
+
+    def test_edge_resize_keeps_opposite_corner(self):
+        a = self._app(locked=False, win_convoy=False)
+        try:
+            w = next(x for x in a.wins if x.KEY == "dash")
+            w.top.geometry("+200+150")
+            a.root.update()
+
+            class Ev:
+                pass
+            e = Ev()
+            e.x, e.y, e.x_root, e.y_root = 1, 40, 201, 190
+            w._press(e)                                   # левый край
+            self.assertEqual(w._rs, (-1, 0))
+            e.x_root = 161                                # потянули влево на 40 px
+            w._move(e)
+            a.root.update()
+            self.assertGreater(w.k, 1.0)
+            self.assertEqual(w.top.winfo_x() + int(w.w * w.k), 200 + int(w.w * 1.0))   # правый край остался на месте
+            w._release(e)
+            self.assertAlmostEqual(a.cfg["scale"]["dash"], round(w.k, 3))
+        finally:
+            a.quit()

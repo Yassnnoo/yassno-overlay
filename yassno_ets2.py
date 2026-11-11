@@ -52,21 +52,81 @@ THEMES = {
 THEME_ORDER = ("amber", "blue", "red", "green", "black", "light")
 TRACK, DIALBG, TABSEL = "#262d38", "#10151c", "#2a2210"
 
+# стили окон — те же, что в оверлеях остальных игр: (множитель скругления, метка у заголовка)
+WIN_STYLES = {"classic": (1.0, "red"), "square": (0.0, "red"), "soft": (1.9, "red"),
+              "minimal": (0.6, "none"), "accent": (1.0, "accent")}
+WIN_STYLE_NAMES = (("classic", "Классика: красная метка"), ("square", "Строгий: прямые углы"),
+                   ("soft", "Мягкий: сильно скруглённые"), ("minimal", "Минимализм: без цветной метки"),
+                   ("accent", "Акцент: метка и рамка цвета акцента"))
+KEY = "#010203"                                  # служебный цвет: везде, где он, окно прозрачное (скруглённые углы)
+MARK, STYLE_R = "#e5322d", 1.0                   # цвет метки у заголовка ("" — без метки) и множитель скругления
+BASE_R = 12                                      # скругление в базовых координатах при множителе 1.0
+GLOW = ("#2ee26d", "#1f9d4f", "#135c2e")         # зелёное свечение рамки в режиме перемещения
+EDGE = 9                                         # ширина полосы у края окна, за которую его растягивают
+CURSORS = {(1, 0): "size_we", (-1, 0): "size_we", (0, 1): "size_ns", (0, -1): "size_ns",
+           (1, 1): "size_nw_se", (-1, -1): "size_nw_se", (1, -1): "size_ne_sw", (-1, 1): "size_ne_sw"}
+MOVE_NAMES = (("win_mfd", "МФД"), ("win_map", "Карта"), ("win_dash", "Приборы"), ("win_trip", "Рейс"), ("win_convoy", "Конвой"))
 
-def apply_theme(name):
-    """Переключает цвета модуля (окна берут их при каждой перерисовке)."""
-    global BG, PANEL, BORDER, FG, DIM, ACCENT, TRACK, DIALBG, TABSEL
+
+def _mix(a, b, t):
+    """Смесь двух цветов #rrggbb: t=0 — a, t=1 — b."""
+    try:
+        ca = [int(a[i:i + 2], 16) for i in (1, 3, 5)]
+        cb = [int(b[i:i + 2], 16) for i in (1, 3, 5)]
+    except (ValueError, TypeError):
+        return a
+    return "#%02x%02x%02x" % tuple(int(round(x + (y - x) * t)) for x, y in zip(ca, cb))
+
+
+def apply_theme(name, style="classic"):
+    """Переключает цвета и стиль окон модуля (окна берут их при каждой перерисовке)."""
+    global BG, PANEL, BORDER, FG, DIM, ACCENT, TRACK, DIALBG, TABSEL, MARK, STYLE_R
     t = THEMES.get(name) or THEMES["amber"]
     BG, PANEL, BORDER, FG, DIM, ACCENT, TRACK, DIALBG, TABSEL = t[1:]
+    STYLE_R, kind = WIN_STYLES.get(style, WIN_STYLES["classic"])
+    MARK = {"red": "#e5322d", "none": "", "accent": ACCENT}[kind]
+    if kind == "accent":
+        BORDER = _mix(BG, ACCENT, 0.65)
     try:
         MfdWin.ORANGE = ACCENT
     except NameError:
         pass
 
 
+def win_radius():
+    """Скругление окон в базовых координатах."""
+    return int(round(BASE_R * STYLE_R))
+
+
+def corner_bg():
+    """Чем залиты скруглённые углы: прозрачным ключевым цветом (Windows) или фоном темы."""
+    return KEY if sys.platform == "win32" else BG
+
+
+def rr_points(x1, y1, x2, y2, r):
+    return [x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r, x2, y2 - r, x2, y2,
+            x2 - r, y2, x1 + r, y2, x1, y2, x1, y2 - r, x1, y1 + r, x1, y1]
+
+
+def grip_zone(canvas, e):
+    """За какой край/угол схвачено окно: (sx, sy), где -1 — левый/верхний, 1 — правый/нижний, 0 — не затронут. None — не у края."""
+    try:
+        W, H = int(float(canvas.cget("width"))), int(float(canvas.cget("height")))
+    except (tk.TclError, ValueError):
+        return None
+    if e.x >= W - 32 and e.y <= 32:                  # там крестик закрытия
+        return None
+    c = GRIP + 2                                     # в углах зона шире, чем вдоль сторон
+    near_y = e.y < c or e.y >= H - c
+    near_x = e.x < c or e.x >= W - c
+    sx = -1 if e.x < (c if near_y else EDGE) else 1 if e.x >= W - (c if near_y else EDGE) else 0
+    sy = -1 if e.y < (c if near_x else EDGE) else 1 if e.y >= H - (c if near_x else EDGE) else 0
+    return (sx, sy) if (sx or sy) else None
+
+
 DEFAULTS = {"locked": False, "alpha": 0.94, "mph": False, "win_map": True, "win_dash": True, "win_trip": True,
             "map_span": 1600.0, "map_heading_up": True, "map_size": 360, "map_auto_zoom": True,
-            "pos": {}, "game_dir": "", "autostart": False, "scale": {}, "hide_idle": True, "dash_style": "classic", "theme": "amber", "win_convoy": False, "convoy_ids": "",
+            "pos": {}, "game_dir": "", "autostart": False, "scale": {}, "hide_idle": True, "dash_style": "classic", "theme": "amber", "win_style": "classic", "win_convoy": False, "convoy_ids": "",
             "win_mfd": True, "mfd_screen": 0, "mfd_keys": "numpad", "mfd_binds": {}}
 
 
@@ -1062,25 +1122,31 @@ class Win:
         t.title("Yassno ETS2 — " + self.TITLE)
         t.overrideredirect(True)
         t.attributes("-topmost", True)
-        t.configure(bg=BG)
+        t.configure(bg=corner_bg())
         try:
             t.attributes("-alpha", app.cfg["alpha"])
         except tk.TclError:
             pass
+        if sys.platform == "win32":
+            try:
+                t.attributes("-transparentcolor", KEY)
+            except tk.TclError:
+                pass
         pos = app.cfg["pos"].get(self.KEY)
         x, y = (pos if isinstance(pos, list) and len(pos) == 2 else self.default_pos())
         self.w, self.h = self.size()
         sc = app.cfg.get("scale", {}).get(self.KEY, 1.0)
         self.k = max(SCALE_MIN, min(SCALE_MAX, float(sc)))
         t.geometry(f"{int(self.w * self.k)}x{int(self.h * self.k)}+{int(x)}+{int(y)}")
-        self.canvas = ScaledCanvas(t, width=int(self.w * self.k), height=int(self.h * self.k), bg=BG, highlightthickness=0, bd=0)
+        self.canvas = ScaledCanvas(t, width=int(self.w * self.k), height=int(self.h * self.k), bg=corner_bg(), highlightthickness=0, bd=0)
         self.canvas.k = self.k
         self.canvas.pack(fill="both", expand=True)
         self._drag = None
-        self._rs = False
+        self._rs = None
         self.canvas.bind("<ButtonPress-1>", self._press)
         self.canvas.bind("<B1-Motion>", self._move)
         self.canvas.bind("<ButtonRelease-1>", self._release)
+        self.canvas.bind("<Motion>", self._hover)
         self.canvas.bind("<Button-3>", self.menu)
         self.visible = True
         self.build()
@@ -1096,9 +1162,17 @@ class Win:
         pass
 
     def _grip_hit(self, e):
-        if self.app.cfg["locked"]:
-            return False
-        return e.x >= int(self.w * self.k) - GRIP and e.y >= int(self.h * self.k) - GRIP
+        return (not self.app.cfg["locked"]) and grip_zone(self.canvas, e) is not None
+
+    def panel(self, fill, outline=None, width=1, w=None, h=None):
+        """Подложка окна: прямоугольник или скруглённая плашка (по стилю окон)."""
+        c = self.canvas
+        w, h = (w or self.w), (h or self.h)
+        outline = BORDER if outline is None else outline
+        r = win_radius()
+        if r > 1:
+            return c.create_polygon(rr_points(0, 0, w - 1, h - 1, r), smooth=True, fill=fill, outline=outline, width=width)
+        return c.create_rectangle(0, 0, w - 1, h - 1, fill=fill, outline=outline, width=width)
 
     def set_scale(self, k, save=False):
         k = max(SCALE_MIN, min(SCALE_MAX, float(k)))
@@ -1117,32 +1191,87 @@ class Win:
         self.last_draw = 0.0
 
     def draw_grip(self):
+        """Режим перемещения: зелёная рамка со свечением, красный крестик закрытия и зелёные уголки. В закреплённом — ничего."""
         c = self.canvas
-        tk.Canvas.delete(c, "grip")
         if self.app.cfg["locked"] or not self.visible:
+            if c.find_withtag("mv"):
+                tk.Canvas.delete(c, "mv")
             return
         pw, ph = int(self.w * self.k), int(self.h * self.k)
-        for i in (5, 10, 15):
-            tk.Canvas.create_line(c, pw - i, ph - 2, pw - 2, ph - i, fill=ACCENT, width=2, tags="grip")
+        if c.find_withtag("mv") and getattr(c, "_mv_size", None) == (pw, ph):
+            tk.Canvas.tag_raise(c, "mv")
+            return
+        tk.Canvas.delete(c, "mv")
+        c._mv_size = (pw, ph)
+        R = int(win_radius() * self.k)
+        mk = lambda f, *a, **kw: f(c, *a, tags="mv", **kw)       # noqa: E731
+        for i, col in enumerate(GLOW):                           # рамка с убывающим свечением внутрь
+            o, r = 1 + i * 2, max(0, R - i * 2)
+            x1, y1, x2, y2 = o, o, pw - 1 - o, ph - 1 - o
+            if r > 1:
+                mk(tk.Canvas.create_polygon, rr_points(x1, y1, x2, y2, r), smooth=True, fill="", outline=col, width=2)
+            else:
+                mk(tk.Canvas.create_rectangle, x1, y1, x2, y2, outline=col, width=2)
+        bw = 22
+        x0, y0 = pw - bw - 7, 7
+        mk(tk.Canvas.create_rectangle, x0, y0, x0 + bw, y0 + bw, fill="#b3261e", outline="#ffffff", width=1)
+        mk(tk.Canvas.create_line, x0 + 6, y0 + 6, x0 + bw - 6, y0 + bw - 6, fill="#ffffff", width=2)
+        mk(tk.Canvas.create_line, x0 + bw - 6, y0 + 6, x0 + 6, y0 + bw - 6, fill="#ffffff", width=2)
+        g = GRIP - 4                                             # уголки, за которые тоже растягивают
+        for ax, ay, dx, dy in ((pw - 2, ph - 2, -1, -1), (2, ph - 2, 1, -1), (2, 2, 1, 1)):
+            mk(tk.Canvas.create_polygon, ax, ay + dy * g, ax, ay, ax + dx * g, ay, fill="#2ee26d", outline="#0b3d1c", width=1)
+        mk(tk.Canvas.create_polygon, pw - 2, ph - g, pw - 2, ph - 2, pw - g, ph - 2, fill="#2ee26d", outline="#0b3d1c", width=1)
+        tk.Canvas.tag_raise(c, "mv")
+
+    def _hover(self, e):
+        z = None if (self.app.cfg["locked"] or self._rs or self._drag) else grip_zone(self.canvas, e)
+        want = CURSORS.get(z, "") if z else ""
+        if getattr(self.canvas, "_cur", None) != want:
+            self.canvas._cur = want
+            try:
+                self.canvas.config(cursor=want)
+            except tk.TclError:
+                pass
 
     def _press(self, e):
-        if self._grip_hit(e):
-            self._rs = True
+        if self.app.cfg["locked"]:
             return
-        if not self.app.cfg["locked"]:
-            self._drag = (e.x_root - self.top.winfo_x(), e.y_root - self.top.winfo_y())
+        pw = int(self.w * self.k)
+        if e.x >= pw - 32 and e.y <= 32 and getattr(self, "CFG", ""):      # красный крестик: убрать это окно
+            self.app.set_window(self.CFG, False)
+            return
+        z = grip_zone(self.canvas, e)
+        if z:
+            self._rs = z
+            self._g0 = (e.x_root, e.y_root, self.top.winfo_x(), self.top.winfo_y(), pw, int(self.h * self.k), self.k)
+            return
+        self._drag = (e.x_root - self.top.winfo_x(), e.y_root - self.top.winfo_y())
 
     def _move(self, e):
         if self._rs:
-            self.set_scale(max(e.x, 1) / float(self.w))
+            sx, sy = self._rs
+            x0r, y0r, x0, y0, pw0, ph0, k0 = self._g0
+            dx, dy = e.x_root - x0r, e.y_root - y0r
+            f = []
+            if sx:
+                f.append((pw0 + sx * dx) / float(pw0))
+            if sy:
+                f.append((ph0 + sy * dy) / float(ph0))
+            self.set_scale(k0 * max(0.05, sum(f) / len(f)))
+            npw, nph = int(self.w * self.k), int(self.h * self.k)
+            nx = x0 + (pw0 - npw) if sx < 0 else x0
+            ny = y0 + (ph0 - nph) if sy < 0 else y0
+            self.top.geometry(f"{npw}x{nph}+{nx}+{ny}")
             return
         if self._drag:
             self.top.geometry(f"+{e.x_root - self._drag[0]}+{e.y_root - self._drag[1]}")
 
     def _release(self, e):
         if self._rs:
-            self._rs = False
+            self._rs = None
             self.set_scale(self.k, save=True)
+            self.app.cfg["pos"][self.KEY] = [self.top.winfo_x(), self.top.winfo_y()]
+            save_cfg(self.app.cfg)
             return
         if self._drag:
             self._drag = None
@@ -1185,11 +1314,13 @@ class Win:
     def frame(self, title):
         c = self.canvas
         c.delete("all")
-        c.create_rectangle(0, 0, self.w - 1, self.h - 1, fill=PANEL, outline=BORDER)
-        c.create_rectangle(8, 8, 11, 22, fill=ACCENT, outline="")
-        c.create_text(18, 15, text=title, fill=FG, anchor="w", font=("Segoe UI Semibold", 10))
-        if not self.app.cfg["locked"]:
-            c.create_text(self.w - 8, 15, text=f"тяните мышью • {self.app.hk_label('lock')} — закрепить", fill=ACCENT, anchor="e", font=("Segoe UI", 8))
+        self.panel(PANEL)
+        r = win_radius()
+        tx = 10 + (r // 3)
+        if MARK:
+            c.create_rectangle(tx, 8, tx + 3, 22, fill=MARK, outline="")
+            tx += 10
+        c.create_text(tx + 0, 15, text=title, fill=FG, anchor="w", font=("Segoe UI Semibold", 10))
 
     def waiting(self, text):
         self.frame(self.TITLE)
@@ -1296,7 +1427,7 @@ class DashWin(Win):
         k = 0.621371 if mph else 1.0
         c, W = self.canvas, self.w
         c.delete("all")
-        c.create_rectangle(0, 0, W - 1, self.h - 1, fill=PANEL, outline=BORDER)
+        self.panel(PANEL, w=W)
         sp = abs(d["speed"]) * k
         vmax = 180 if mph else 260
         self.dial(W / 2, 128, 112, sp, vmax, 10 if mph else 20, 2, "миль/ч" if mph else "км/ч", ACCENT, red_from=None)
@@ -1319,7 +1450,7 @@ class DashWin(Win):
         k = 0.621371 if mph else 1.0
         c, W = self.canvas, self.w
         c.delete("all")
-        c.create_rectangle(0, 0, W - 1, self.h - 1, fill=PANEL, outline=BORDER)
+        self.panel(PANEL, w=W)
         sp = abs(d["speed"]) * k
         vmax = 180 if mph else 260
         self.dial(122, 118, 104, sp, vmax, 10 if mph else 20, 2, "миль/ч" if mph else "км/ч", ACCENT)
@@ -1347,7 +1478,7 @@ class DashWin(Win):
         k = 0.621371 if mph else 1.0
         c, W = self.canvas, self.w
         c.delete("all")
-        c.create_rectangle(0, 0, W - 1, self.h - 1, fill=PANEL, outline=BORDER)
+        self.panel(PANEL, w=W)
         sp = abs(d["speed"]) * k
         c.create_text(14, 46, text=f"{sp:.0f}", fill=FG, anchor="w", font=("Segoe UI Semibold", 34))
         c.create_text(14, 84, text="миль/ч" if mph else "км/ч", fill=DIM, anchor="w", font=("Segoe UI", 8))
@@ -1379,7 +1510,7 @@ class DashWin(Win):
         k = 0.621371 if mph else 1.0
         c, W = self.canvas, self.w
         c.delete("all")
-        c.create_rectangle(0, 0, W - 1, self.h - 1, fill=PANEL, outline=BORDER)
+        self.panel(PANEL, w=W)
         sp = abs(d["speed"]) * k
         c.create_text(12, 40, text=f"{sp:.0f}", fill=FG, anchor="w", font=("Segoe UI Semibold", 30))
         c.create_text(92, 52, text="миль/ч" if mph else "км/ч", fill=DIM, anchor="w", font=("Segoe UI", 8))
@@ -1592,7 +1723,7 @@ class MfdWin(Win):
     def chrome(self, d, title, right=""):
         c, W, H = self.canvas, self.w, self.h
         c.delete("all")
-        c.create_rectangle(0, 0, W - 1, H - 1, fill=BG, outline=BORDER, width=2)
+        self.panel(BG, width=2, w=W, h=H)
         # статус-бар
         k = 0.621371 if self.app.cfg["mph"] else 1.0
         sp = abs(d["speed"]) * k if d else 0
@@ -1628,7 +1759,7 @@ class MfdWin(Win):
             key = (bind_name(self.app.cfg.get("mfd_binds", {}).get(f"s{i}", "")) if mode == "custom"
                    else str(i + 1) if mode == "numpad" else f"F{5 + i}")
             c.create_text(x0 + tw / 2, self.TAB_Y + 26, text=key, fill=DIM, font=self.f_s)
-        c.create_text(W // 2, H - 10, text=("клавиши: " + self.key_names() + (f" • тяните мышью • {self.app.hk_label('lock')} — закрепить" if not self.app.cfg["locked"] else "")),
+        c.create_text(W // 2, H - 10, text=("клавиши: " + self.key_names() + ""),
                       fill=DIM, font=self.f_s)
 
     def update(self, d):
@@ -1900,7 +2031,7 @@ class MapWin(Win):
             if self._shown != "wait":
                 self._shown = "wait"
                 self.canvas.delete("all")
-                self.canvas.create_rectangle(0, 0, w - 1, h - 1, fill=PANEL, outline=BORDER)
+                self.panel(PANEL)
                 self.canvas.create_text(w // 2, h // 2, text=self.app.reason(), fill=DIM, font=("Segoe UI", 10), justify="center", width=w - 40)
             return
         self._shown = "map"
@@ -1925,14 +2056,25 @@ class MapWin(Win):
         for px, py in ((0, -13), (9, 10), (0, 5), (-9, 10)):          # поворот на ang против часовой (экранные оси, y вниз)
             pts.append((cx + (px * math.cos(ang) + py * math.sin(ang)) * kk, cy + (-px * math.sin(ang) + py * math.cos(ang)) * kk))
         dr.polygon(pts, fill=(255, 159, 26), outline=(16, 20, 26))
+        rpx = int(win_radius() * kk)
+        if rpx > 1:                                      # скруглённые углы: вне плашки — прозрачный ключевой цвет
+            mk = getattr(self, "_mask", None)
+            if mk is None or mk[0] != (pw, ph, rpx):
+                m = Image.new("L", (pw * 3, ph * 3), 0)
+                ImageDraw.Draw(m).rounded_rectangle((0, 0, pw * 3 - 1, ph * 3 - 1), radius=rpx * 3, fill=255)
+                self._mask = mk = ((pw, ph, rpx), m.resize((pw, ph), Image.LANCZOS))
+            bgc = Image.new("RGB", (pw, ph), corner_bg())
+            bgc.paste(img, (0, 0), mk[1])
+            img = bgc
         self.photo = ImageTk.PhotoImage(img)
         c = self.canvas
         c.delete("all")
         c.create_image(0, 0, image=self.photo, anchor="nw")
-        c.create_rectangle(0, 0, w - 1, h - 1, outline=BORDER)
+        self.panel("", BORDER)
         if not self.app.cfg["locked"]:
-            c.create_rectangle(0, 0, w, 20, fill=BG, outline="")
-            c.create_text(8, 10, text=f"КАРТА • колесо — масштаб • ПКМ — меню • {self.app.hk_label('lock')}", fill=ACCENT, anchor="w", font=("Segoe UI", 8))
+            rr = win_radius()
+            c.create_rectangle(rr, 1, w - rr, 20, fill=BG, outline="")
+            c.create_text(rr + 4, 10, text=f"КАРТА • колесо — масштаб • ПКМ — меню", fill=ACCENT, anchor="w", font=("Segoe UI", 8))
         c.create_text(w - 8, h - 10, text=f"{rspan:.0f} м", fill=FG, anchor="e", font=("Segoe UI", 8))
         if rup:                                                                 # где на повёрнутой карте север
             a = math.radians(rhead)
@@ -2007,7 +2149,7 @@ class Preview:
         if w is None:
             return
         self.app.cfg = dict(self.cfg, locked=True)
-        apply_theme(self.cfg.get("theme", "amber"))
+        apply_theme(self.cfg.get("theme", "amber"), self.cfg.get("win_style", "classic"))
         self.canvas.configure(bg=BG)
         if isinstance(w, DashWin):
             w._style = self.cfg.get("dash_style", "classic")
@@ -2034,26 +2176,121 @@ class App:
         self.d = None
         self.wins = []
         self.convoy = DemoConvoy() if demo else ConvoyFeed(self.cfg["convoy_ids"])
-        for key, cls in (("win_mfd", MfdWin), ("win_map", MapWin), ("win_dash", DashWin), ("win_trip", TripWin), ("win_convoy", ConvoyWin)):
+        apply_theme(self.cfg.get("theme", "amber"), self.cfg.get("win_style", "classic"))
+        self.hidden = False
+        self.move_panel = None
+        for key, cls in self.WINDOWS:
             if self.cfg[key]:
-                self.wins.append(cls(self))
+                self.make_window(key, cls)
         if not self.wins:
-            self.wins.append(DashWin(self))
-        apply_theme(self.cfg.get("theme", "amber"))
+            self.cfg["win_dash"] = True
+            self.make_window("win_dash", DashWin)
         self.hk = load_hotkeys()
         self._hk_vks = {n: parse_hotkey(t) for n, t in self.hk.items()}
         self._hk_down = {}
         self._hk_t = 0.0
         self.manual_hide = False
         self.running = True
-        self.hidden = False
         self._t_val = None
         self._t_chg = time.monotonic()
         self._out_since = None
         self._f8 = False
         self._cmd_t = 0.0
         self.write_state()
+        self.sync_move_panel()
         self.tick()
+
+    WINDOWS = (("win_mfd", MfdWin), ("win_map", MapWin), ("win_dash", DashWin), ("win_trip", TripWin), ("win_convoy", ConvoyWin))
+
+    def make_window(self, key, cls):
+        w = cls(self)
+        w.CFG = key
+        self.wins.append(w)
+        return w
+
+    def set_window(self, key, on):
+        """Включить/убрать окно на лету (крестик на окне, кнопки панели перемещения)."""
+        on = bool(on)
+        cur = [w for w in self.wins if getattr(w, "CFG", "") == key]
+        if on == bool(cur):
+            return
+        self.cfg[key] = on
+        save_cfg(self.cfg)
+        if on:
+            cls = dict(self.WINDOWS)[key]
+            w = self.make_window(key, cls)
+            if self.hidden:
+                w.visible = False
+                w.top.withdraw()
+        else:
+            for w in cur:
+                self.wins.remove(w)
+                w.destroy()
+        self.refresh_move_panel()
+
+    # ---- панель режима перемещения (как у остальных игр) ----
+    def sync_move_panel(self):
+        if self.cfg["locked"]:
+            mp, self.move_panel = self.move_panel, None
+            if mp is not None:
+                try:
+                    mp.destroy()
+                except tk.TclError:
+                    pass
+        elif self.move_panel is None and not isinstance(self.root, type(None)):
+            try:
+                self.build_move_panel()
+            except tk.TclError:
+                self.move_panel = None
+
+    def build_move_panel(self):
+        mp = self.move_panel = tk.Toplevel(self.root)
+        mp.overrideredirect(True)
+        mp.attributes("-topmost", True)
+        mp.configure(bg=GREEN)
+        body = tk.Frame(mp, bg="#12171f")
+        body.pack(padx=2, pady=2)
+        f_s, f_b = ("Segoe UI", 9), ("Segoe UI", 9, "bold")
+        l1 = tk.Label(body, text="РЕЖИМ ПЕРЕМЕЩЕНИЯ", bg="#12171f", fg=GREEN, font=f_b, cursor="fleur")
+        l1.grid(row=0, column=0, columnspan=3, sticky="ew", pady=(6, 0))
+        l2 = tk.Label(body, text="тяните окно · за край или угол — размер · красный крестик — убрать окно", bg="#12171f", fg="#8b95a5", font=f_s, cursor="fleur")
+        l2.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(0, 4), padx=6)
+
+        def d_start(e):
+            mp._dx, mp._dy = e.x_root - mp.winfo_x(), e.y_root - mp.winfo_y()
+
+        def d_move(e):
+            mp.geometry(f"+{e.x_root - mp._dx}+{e.y_root - mp._dy}")
+        for wdg in (l1, l2, body, mp):                   # панель можно перетащить за заголовок и за фон
+            wdg.bind("<ButtonPress-1>", d_start)
+            wdg.bind("<B1-Motion>", d_move)
+        self.mp_btns = {}
+        for i, (key, name) in enumerate(MOVE_NAMES):
+            b = tk.Label(body, text=name, font=f_s, width=12, pady=2, cursor="hand2")
+            b.grid(row=2 + i // 3, column=i % 3, padx=2, pady=1)
+            b.bind("<Button-1>", lambda e, k=key: self.set_window(k, not self.cfg.get(k, False)))
+            self.mp_btns[key] = b
+        done = tk.Label(body, text="Готово — закрепить окна", bg=GREEN, fg="#04210b", font=f_b, pady=3, cursor="hand2")
+        done.grid(row=2 + (len(MOVE_NAMES) + 2) // 3, column=0, columnspan=3, sticky="ew", padx=4, pady=(5, 6))
+        done.bind("<Button-1>", lambda e: self.toggle_lock())
+        self.refresh_move_panel()
+        mp.update_idletasks()
+        w, h = mp.winfo_reqwidth(), mp.winfo_reqheight()
+        mp.geometry(f"+{max(0, (self.root.winfo_screenwidth() - w) // 2)}+{max(0, (self.root.winfo_screenheight() - h) // 2)}")
+
+    def refresh_move_panel(self):
+        mp = self.move_panel
+        if mp is None:
+            return
+        for key, b in self.mp_btns.items():
+            if self.cfg.get(key, False):
+                b.config(bg="#1f9d4f", fg="#ffffff")
+            else:
+                b.config(bg="#262d38", fg="#6b7585")
+        try:
+            mp.lift()
+        except tk.TclError:
+            pass
 
     def reason(self):
         if self.demo:
@@ -2072,7 +2309,11 @@ class App:
         save_cfg(self.cfg)
         for w in self.wins:
             w.apply_lock()
+            w.last_draw = 0.0
+            w._t_upd = 0.0
+            w.draw_grip()
         self.write_state()
+        self.sync_move_panel()
 
     def set_lock(self, val):
         if bool(val) != bool(self.cfg["locked"]):
@@ -2223,6 +2464,9 @@ class App:
                         w.draw_grip()
             self.check_hotkey()
             self.check_cmd()
+            if self.move_panel is not None and time.monotonic() - getattr(self, "_mp_lift", 0.0) > 1.0:
+                self._mp_lift = time.monotonic()
+                self.move_panel.lift()
         except Exception as e:                           # noqa: BLE001
             print("ошибка:", repr(e), file=sys.stderr)
         self.root.after(15, self.tick)
@@ -2251,6 +2495,11 @@ class App:
             pass
         for w in self.wins:
             w.destroy()
+        if self.move_panel is not None:
+            try:
+                self.move_panel.destroy()
+            except tk.TclError:
+                pass
         self.root.destroy()
 
     def run(self):

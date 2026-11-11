@@ -66,7 +66,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "2.7.2"
+APP_VERSION = "2.7.3"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -1811,6 +1811,8 @@ class Ets2Page(ttk.Frame):
         self.alpha_var = tk.DoubleVar(value=float(self.cfg.get("alpha", 0.94)))
         self.dash_names = {n: label for n, label, _ in ETS2.DashWin.STYLES}
         self.dash_var = tk.StringVar(value=self.dash_names.get(self.cfg.get("dash_style", "classic"), self.dash_names["classic"]))
+        self.wstyle_names = dict(ETS2.WIN_STYLE_NAMES)
+        self.wstyle_var = tk.StringVar(value=self.wstyle_names.get(self.cfg.get("win_style", "classic"), self.wstyle_names["classic"]))
         self.build_nav()
         self.columnconfigure(0, weight=1)
         self.columnconfigure(1, minsize=self.RW)
@@ -2010,11 +2012,18 @@ class Ets2Page(ttk.Frame):
         row.pack(fill="x", pady=(4, 0))
         tk.Label(row, text=tr("Непрозрачность окон"), bg=UI_BG, fg=UI_FG, font=("Segoe UI", 10)).pack(side="left")
         ttk.Scale(row, from_=0.3, to=1.0, variable=self.alpha_var, length=200, command=lambda v: self.after_idle(self.save_quiet)).pack(side="left", padx=(10, 0))
+        row = tk.Frame(f, bg=UI_BG)
+        row.pack(fill="x", pady=(6, 0))
+        tk.Label(row, text=tr("Стиль окон"), bg=UI_BG, fg=UI_FG, font=("Segoe UI", 10)).pack(side="left")
+        cb = ttk.Combobox(row, textvariable=self.wstyle_var, values=[tr(n) for n in self.wstyle_names.values()], width=34, state="readonly")
+        cb.pack(side="left", padx=(8, 0))
+        cb.bind("<<ComboboxSelected>>", lambda e: self.wstyle_changed())
+        self.hint(f, "Форма углов и цветная метка у заголовков — как в оверлеях других игр.")
         f = self.card("Общие")
         self.tgl(f, "mph", "Мили и мили в час вместо километров")
         self.tgl(f, "autostart", "Запускать оверлей сам, когда запущена игра")
         self.tgl(f, "hide_idle", "Прятать оверлей, когда вы не в мире (меню, пауза, загрузка)")
-        self.hint(f, "Окна двигаются мышью в режиме перемещения; размер меняется оранжевым уголком в правом нижнем углу окна или через ПКМ. Настройки применяются при следующем запуске оверлея.")
+        self.hint(f, "Окна двигаются мышью в режиме перемещения; размер меняется за любой край или угол (зелёная рамка), красный крестик убирает окно; то же — через ПКМ. Настройки применяются при следующем запуске оверлея.")
         f = self.card("Горячие клавиши")
         hk = ETS2.load_hotkeys()
         for lab, k in (("Закрепить / двигать окна", "lock"), ("Вернуть окна на экран", "reset"), ("Спрятать / показать", "hide"), ("Вид приборов", "tim"), ("Вид карты", "map"), ("Выйти из оверлея", "quit")):
@@ -2124,6 +2133,14 @@ class Ets2Page(ttk.Frame):
         self.save(keep_look=True)
         self.redraw_preview()
 
+    def wstyle_changed(self):
+        cur = self.wstyle_var.get()
+        for n, label in self.wstyle_names.items():
+            if tr(label) == cur or label == cur:
+                self.cfg["win_style"] = n
+        self.save(keep_look=True)
+        self.redraw_preview()
+
     def look_changed(self):
         for n, label in self.dash_names.items():
             if label == self.dash_var.get():
@@ -2186,6 +2203,13 @@ class Ets2Page(ttk.Frame):
             self.cfg["alpha"] = round(float(self.alpha_var.get()), 2)
         if hasattr(self, "convoy_var"):
             self.cfg["convoy_ids"] = self.convoy_var.get().strip()
+        try:                                             # окна, которые оверлей включил/убрал сам (крестик, панель перемещения), не затираем
+            fresh0 = ETS2.load_cfg()
+            for k, var in self.v.items():
+                if k.startswith("win_") and bool(var.get()) == bool(self.cfg.get(k)) and k in fresh0:
+                    var.set(bool(fresh0[k]))
+        except Exception:                                # noqa: BLE001
+            pass
         for k, var in self.v.items():
             self.cfg[k] = bool(var.get())
         try:
