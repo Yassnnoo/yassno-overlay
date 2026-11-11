@@ -538,5 +538,8 @@ class DaytonaPack(unittest.TestCase):
             self.assertEqual((S.file_track(n), S.car_key(n)), ("Daytonarc", "rcf"))
 
 
+from test_ets2 import *  # noqa: E402,F401,F403  (проверки ETS2: структура телеметрии, карта, конвой, масштаб)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

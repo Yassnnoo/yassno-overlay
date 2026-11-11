@@ -1,6 +1,6 @@
 {
- "version": "2.6.8",
- "notes": "Стендинг: выезд на стартовую решётку больше не считается пит-стопом",
+ "version": "2.7.0",
+ "notes": "Euro Truck Simulator 2: оверлей с картой, МФД, приборами и конвоем",
  "files": [
   "README.txt",
   "diagnose.cmd",
@@ -39,6 +39,8 @@
   "logos/porsche.png",
   "logos/tile_ac_off.png",
   "logos/tile_ac_on.png",
+  "logos/tile_ets2_off.png",
+  "logos/tile_ets2_on.png",
   "logos/tile_iracing_off.png",
   "logos/tile_iracing_on.png",
   "logos/tile_lmu_off.png",
@@ -51,6 +53,7 @@
   "run-launcher-debug.cmd",
   "run-launcher.cmd",
   "run.cmd",
+  "yassno_ets2.py",
   "yassno_launcher.py",
   "yassno_overlay.py",
   "yassno_readers.py",

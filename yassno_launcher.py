@@ -31,6 +31,11 @@ import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import colorchooser, filedialog, messagebox, ttk
 try:
+    import yassno_ets2 as ETS2
+except Exception:                                      # noqa: BLE001
+    ETS2 = None
+ETS2_TEST_BUILD = False                                # True — тестовая сборка: онлайн-обновление выключено
+try:
     import yassno_setups as setups                # бесплатные сетапы LMU из открытого репозитория
 except Exception:
     setups = None
@@ -61,7 +66,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "2.6.8"
+APP_VERSION = "2.7.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -204,7 +209,7 @@ MODES = {"stand_mode": [("table", "Таблица"), ("compact", "Компакт
          "tyres_view": [("table", "Подробная"), ("compact", "Компактная: шины рисунком"),
                        ("wear", "Износ: остаток и за круг")]}
 MAP_RADII = [200, 300, 500, 800, 1200]
-UPDATE_FILES = ("yassno_overlay.py", "yassno_launcher.py", "yassno_svgmap.py", "yassno_readers.py", "README.txt")
+UPDATE_FILES = ("yassno_overlay.py", "yassno_launcher.py", "yassno_svgmap.py", "yassno_readers.py", "yassno_ets2.py", "README.txt")
 BACKUP_DIR = os.path.join(HERE, "backup")
 UPDATE_REPO, UPDATE_BRANCH = "Yassnnoo/yassno-overlay", "main"        # откуда лаунчер сам берёт обновления
 UPDATE_EXT = (".py", ".txt", ".png", ".cmd")
@@ -409,7 +414,7 @@ def check_online_update():
     except Exception as e:
         return None, str(e)
     return {"version": ver, "notes": str(data.get("notes", ""))[:700], "files": files,
-            "newer": ver_tuple(ver) > ver_tuple(APP_VERSION)}, None
+            "newer": ver_tuple(ver) > ver_tuple(APP_VERSION) and not ETS2_TEST_BUILD}, None
 
 
 def apply_online_update(info):
@@ -1764,6 +1769,477 @@ class AcSoonPage(ttk.Frame):
         ttk.Label(self, text="Во всех трёх сработают панели по данным твоей машины: ввод и шифт-лайт, спидометр, шины, двигатель, топливо, "
                              "журнал кругов, дельта и предупреждения. Таблица и релатив — в ACC, радар — в ACC и AC.",
                   style="Dim.TLabel", wraplength=760, justify="left").pack(anchor="w", pady=(14, 0))
+
+
+class Ets2Page(ttk.Frame):
+    """Euro Truck Simulator 2: плагин телеметрии, запуск оверлея с картой, настройки окон."""
+    SIZES = [("300", 300), ("360", 360), ("450", 450), ("560", 560)]
+    KEYSETS = {"numpad": "Num1–Num6, Num+ / Num−", "ctrlf": "Ctrl+F5 … Ctrl+F10", "custom": "Свои (кнопка «Назначить»)"}
+
+    def __init__(self, parent, app):
+        super().__init__(parent, padding=18)
+        self.app = app
+        self.proc = None
+        self.busy = False
+        self.cfg = ETS2.load_cfg() if ETS2 else {}
+        self.v = {}
+        self.columnconfigure(0, weight=1)
+        self.rowconfigure(0, weight=1)
+        cv = tk.Canvas(self, bg=UI_BG, highlightthickness=0, borderwidth=0)
+        sbar = ttk.Scrollbar(self, orient="vertical", command=cv.yview)
+        cv.configure(yscrollcommand=sbar.set)
+        cv.grid(row=0, column=0, sticky="nsew")
+        sbar.grid(row=0, column=1, sticky="ns")
+        P = ttk.Frame(cv)
+        win = cv.create_window(0, 0, window=P, anchor="nw")
+        cv.bind("<Configure>", lambda e: cv.itemconfigure(win, width=e.width))
+        P.bind("<Configure>", lambda e: cv.configure(scrollregion=cv.bbox("all")))
+        enable_wheel(cv, self)
+        self.page = P
+        ttk.Label(P, text="Euro Truck Simulator 2: приборы, рейс и карта", style="Head.TLabel").pack(anchor="w")
+        ttk.Label(P, text="Оверлей читает данные из плагина телеметрии SCS. Положение грузовика рисуется на карте Европы, "
+                             "тайлы карты докачиваются из интернета по мере поездки и кэшируются в папке ets2_tiles.",
+                  style="Dim.TLabel", wraplength=760, justify="left").pack(anchor="w", pady=(6, 12))
+        if ETS2 is None:
+            ttk.Label(P, text="Не найден файл yassno_ets2.py рядом с лаунчером.", style="Dim.TLabel").pack(anchor="w")
+            return
+        # --- игра и плагин ---
+        box = tk.Frame(P, bg=UI_PANEL, highlightthickness=1, highlightbackground=UI_BORDER)
+        box.pack(fill="x", pady=4)
+        tk.Label(box, text="1. Игра и плагин телеметрии", bg=UI_PANEL, fg=UI_FG, font=("Segoe UI Semibold", 11), anchor="w").pack(fill="x", padx=12, pady=(10, 4))
+        row = tk.Frame(box, bg=UI_PANEL)
+        row.pack(fill="x", padx=12)
+        self.dir_var = tk.StringVar(value=self.cfg.get("game_dir", ""))
+        ttk.Entry(row, textvariable=self.dir_var).pack(side="left", fill="x", expand=True)
+        ttk.Button(row, text="Выбрать папку…", command=self.browse).pack(side="left", padx=(8, 0))
+        ttk.Button(row, text="Найти в Steam", command=self.autodetect).pack(side="left", padx=(8, 0))
+        self.plugin_lbl = tk.Label(box, text="", bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 10), anchor="w", justify="left", wraplength=720)
+        self.plugin_lbl.pack(fill="x", padx=12, pady=(8, 2))
+        row2 = tk.Frame(box, bg=UI_PANEL)
+        row2.pack(fill="x", padx=12, pady=(0, 10))
+        self.btn_install = ttk.Button(row2, text="Установить / обновить плагин", command=self.install)
+        self.btn_install.pack(side="left")
+        ttk.Button(row2, text="Страница плагина", command=lambda: webbrowser.open(ETS2.PLUGIN_PAGE)).pack(side="left", padx=(8, 0))
+        # --- запуск ---
+        box = tk.Frame(P, bg=UI_PANEL, highlightthickness=1, highlightbackground=UI_BORDER)
+        box.pack(fill="x", pady=4)
+        tk.Label(box, text="2. Оверлей", bg=UI_PANEL, fg=UI_FG, font=("Segoe UI Semibold", 11), anchor="w").pack(fill="x", padx=12, pady=(10, 4))
+        row = tk.Frame(box, bg=UI_PANEL)
+        row.pack(fill="x", padx=12)
+        self.btn_start = ttk.Button(row, text="▶ Запустить оверлей", style="Accent.TButton", command=lambda: self.start(False))
+        self.btn_start.pack(side="left")
+        ttk.Button(row, text="■ Остановить", command=self.stop).pack(side="left", padx=(8, 0))
+        ttk.Button(row, text="Двигать окна", command=lambda: self.cmd("unlock")).pack(side="left", padx=(16, 0))
+        ttk.Button(row, text="Закрепить окна", command=lambda: self.cmd("lock")).pack(side="left", padx=(8, 0))
+        ttk.Button(row, text="Тест без игры", command=lambda: self.start(True)).pack(side="left", padx=(16, 0))
+        self.run_lbl = tk.Label(box, text="", bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 10), anchor="w", justify="left", wraplength=720)
+        self.run_lbl.pack(fill="x", padx=12, pady=(8, 10))
+        # --- настройки ---
+        box = tk.Frame(P, bg=UI_PANEL, highlightthickness=1, highlightbackground=UI_BORDER)
+        box.pack(fill="x", pady=4)
+        tk.Label(box, text="3. Окна и единицы", bg=UI_PANEL, fg=UI_FG, font=("Segoe UI Semibold", 11), anchor="w").pack(fill="x", padx=12, pady=(10, 4))
+        for key, label in (("win_mfd", "МФД: экраны обзор, груз, урон, топливо, двигатель, рейс (листаются клавишами)"),
+                           ("win_map", "Карта с положением грузовика"), ("win_dash", "Приборы: скорость, передача, обороты, ограничение"),
+                           ("win_trip", "Рейс: топливо, расстояние до цели, груз, повреждения"), ("mph", "Мили и мили в час вместо километров"),
+                           ("autostart", "Запускать оверлей сам, когда запущена игра"),
+                           ("hide_idle", "Прятать оверлей, когда вы не в мире (меню, пауза, загрузка)"),
+                           ("win_convoy", "Конвой: кто в конвое и как далеко от вас (нужны TruckersMP ID, см. ниже)")):
+            self.v[key] = tk.BooleanVar(value=bool(self.cfg.get(key)))
+            Toggle(box, label, self.v[key], bg=UI_PANEL, command=self.save).pack(anchor="w", padx=12, pady=2)
+        row = tk.Frame(box, bg=UI_PANEL)
+        row.pack(fill="x", padx=12, pady=(6, 10))
+        tk.Label(row, text="Клавиши МФД", bg=UI_PANEL, fg=UI_FG, font=("Segoe UI", 10)).pack(side="left")
+        self.keys_var = tk.StringVar(value=self.KEYSETS.get(self.cfg.get("mfd_keys", "numpad"), self.KEYSETS["numpad"]))
+        kb = ttk.Combobox(row, textvariable=self.keys_var, values=list(self.KEYSETS.values()), width=30, state="readonly")
+        kb.pack(side="left", padx=(8, 8))
+        kb.bind("<<ComboboxSelected>>", lambda e: self.save())
+        ttk.Button(row, text="Назначить…", command=self.bind_dialog).pack(side="left", padx=(0, 24))
+        tk.Label(row, text="Размер карты, px", bg=UI_PANEL, fg=UI_FG, font=("Segoe UI", 10)).pack(side="left")
+        self.size_var = tk.StringVar(value=str(int(self.cfg.get("map_size", 360))))
+        cb = ttk.Combobox(row, textvariable=self.size_var, values=[n for n, _ in self.SIZES], width=6, state="readonly")
+        cb.pack(side="left", padx=(8, 0))
+        cb.bind("<<ComboboxSelected>>", lambda e: self.save())
+        tk.Label(box, text="Окна двигаются мышью в режиме перемещения; размер меняется оранжевым уголком в правом нижнем углу окна или через ПКМ. "
+                           "На карте колесо мыши меняет масштаб. Настройки применяются при следующем запуске оверлея.",
+                 bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 9), anchor="w", justify="left", wraplength=720).pack(fill="x", padx=12, pady=(0, 10))
+        self.build_look()
+        tk.Label(P, text="При первом запуске ETS2 после установки плагина игра спросит подтверждение для расширенных функций SDK — ответьте «Да». "
+                            "Плагин работает в одиночной игре; в мультиплеере проверьте правила сервера.",
+                 bg=UI_BG, fg=UI_DIM, font=("Segoe UI", 9), anchor="w", justify="left", wraplength=760).pack(fill="x", pady=(8, 0))
+        self.autodetect(quiet=True)
+        self.refresh_plugin()
+        self._procs = set()
+        self.after(1500, self.tick)
+        self.after(2500, self.poll_game)
+
+    # ---- оформление, конвой, предпросмотр ----
+    def build_look(self):
+        P = self.page
+        box = tk.Frame(P, bg=UI_PANEL, highlightthickness=1, highlightbackground=UI_BORDER)
+        box.pack(fill="x", pady=4)
+        tk.Label(box, text="4. Оформление, конвой и предпросмотр", bg=UI_PANEL, fg=UI_FG, font=("Segoe UI Semibold", 11), anchor="w").pack(fill="x", padx=12, pady=(10, 4))
+        tk.Label(box, text="Тема оверлея — один клик меняет цвета всех окон:", bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 9), anchor="w").pack(fill="x", padx=12)
+        sw = tk.Frame(box, bg=UI_PANEL)
+        sw.pack(fill="x", padx=12, pady=(4, 6))
+        self.theme_cv = {}
+        for i, name in enumerate(ETS2.THEME_ORDER):
+            t = ETS2.THEMES[name]
+            cv = tk.Canvas(sw, width=118, height=46, bg=UI_PANEL, highlightthickness=2, highlightbackground=UI_PANEL, cursor="hand2")
+            cv.grid(row=i // 3, column=i % 3, padx=(0, 6), pady=(0, 6))
+            cv.create_rectangle(3, 3, 115, 43, fill=t[1], outline=t[3])
+            cv.create_rectangle(3, 3, 115, 15, fill=t[2], outline="")
+            cv.create_rectangle(3, 3, 6, 15, fill=t[6], outline="")
+            cv.create_text(11, 9, text=tr({"amber": "Янтарь", "blue": "Синяя", "red": "Красная", "green": "Зелёная", "black": "AMOLED", "light": "Светлая"}[name]), fill=t[4], anchor="w", font=("Segoe UI", 7, "bold"))
+            cv.create_rectangle(8, 22, 62, 27, fill=t[7], outline="")
+            cv.create_rectangle(8, 22, 38, 27, fill=t[6], outline="")
+            cv.create_text(8, 35, text="83 км/ч", fill=t[4], anchor="w", font=("Segoe UI", 8))
+            cv.bind("<Button-1>", lambda e, n=name: self.set_theme(n))
+            self.theme_cv[name] = cv
+        row = tk.Frame(box, bg=UI_PANEL)
+        row.pack(fill="x", padx=12, pady=(2, 4))
+        tk.Label(row, text="Вид приборов", bg=UI_PANEL, fg=UI_FG, font=("Segoe UI", 10)).pack(side="left")
+        self.dash_names = {n: label for n, label, _ in ETS2.DashWin.STYLES}
+        cur = self.cfg.get("dash_style", "classic")
+        self.dash_var = tk.StringVar(value=self.dash_names.get(cur, self.dash_names["classic"]))
+        cb = ttk.Combobox(row, textvariable=self.dash_var, values=list(self.dash_names.values()), width=44, state="readonly")
+        cb.pack(side="left", padx=(8, 0))
+        cb.bind("<<ComboboxSelected>>", lambda e: self.look_changed())
+        row = tk.Frame(box, bg=UI_PANEL)
+        row.pack(fill="x", padx=12, pady=(2, 4))
+        tk.Label(row, text="Непрозрачность окон", bg=UI_PANEL, fg=UI_FG, font=("Segoe UI", 10)).pack(side="left")
+        self.alpha_var = tk.DoubleVar(value=float(self.cfg.get("alpha", 0.94)))
+        sc = ttk.Scale(row, from_=0.3, to=1.0, variable=self.alpha_var, length=220, command=lambda v: self.after_idle(self.save_quiet))
+        sc.pack(side="left", padx=(8, 0))
+        row = tk.Frame(box, bg=UI_PANEL)
+        row.pack(fill="x", padx=12, pady=(6, 2))
+        tk.Label(row, text="Конвой: TruckersMP ID через запятую", bg=UI_PANEL, fg=UI_FG, font=("Segoe UI", 10)).pack(side="left")
+        self.convoy_var = tk.StringVar(value=self.cfg.get("convoy_ids", ""))
+        ent = ttk.Entry(row, textvariable=self.convoy_var, width=40)
+        ent.pack(side="left", padx=(8, 0))
+        ent.bind("<FocusOut>", lambda e: self.save())
+        ent.bind("<Return>", lambda e: self.save())
+        tk.Label(box, text="ID — число из адреса профиля на truckersmp.com/user/…; можно с подписью: 123456=Вася. Данные о положении других игроков "
+                           "берутся из открытого API (Trucky/TruckersMP): плагин SCS их не отдаёт. Расстояние видно, если сервис отдаёт координаты, иначе — город и статус «в сети».",
+                 bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 8), anchor="w", justify="left", wraplength=720).pack(fill="x", padx=12, pady=(0, 6))
+        hk = ETS2.load_hotkeys()
+        tk.Label(box, text="Горячие клавиши (общие для всех игр, меняются в Настройки → «Горячие клавиши оверлея»): закрепить окна — " + hk["lock"] +
+                           ", вернуть окна на экран — " + hk["reset"] + ", спрятать — " + hk["hide"] + ", вид приборов — " + hk["tim"] +
+                           ", вид карты — " + hk["map"] + ", выйти — " + hk["quit"] + ".",
+                 bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 8), anchor="w", justify="left", wraplength=720).pack(fill="x", padx=12, pady=(0, 8))
+        # предпросмотр
+        pr = tk.Frame(box, bg=UI_PANEL)
+        pr.pack(fill="x", padx=12, pady=(0, 4))
+        tk.Label(pr, text="Предпросмотр:", bg=UI_PANEL, fg=UI_FG, font=("Segoe UI", 10)).pack(side="left")
+        self.prev_kind = "dash"
+        for k, label, _ in ETS2.Preview.KINDS:
+            ttk.Button(pr, text=label, command=lambda k=k: self.show_preview(k)).pack(side="left", padx=(6, 0))
+        self.mfd_screen = 0
+        ttk.Button(pr, text="след. экран МФД", command=self.next_screen).pack(side="left", padx=(14, 0))
+        holder = tk.Frame(box, bg=UI_PANEL)
+        holder.pack(fill="x", padx=12, pady=(4, 12))
+        self.preview = None
+        try:
+            self.preview = ETS2.Preview(holder, self.cfg, "dash", 1.0)
+            self.preview.canvas.pack(anchor="w")
+        except Exception:                                # noqa: BLE001
+            self.preview = None
+        self.mark_theme()
+        self.after(250, self.tick_preview)
+
+    def mark_theme(self):
+        cur = self.cfg.get("theme", "amber")
+        for n, cv in self.theme_cv.items():
+            cv.config(highlightbackground=UI_ACCENT if n == cur else UI_PANEL)
+
+    def set_theme(self, name):
+        self.cfg["theme"] = name
+        self.mark_theme()
+        self.look_changed()
+
+    def look_changed(self):
+        for n, label in self.dash_names.items():
+            if label == self.dash_var.get():
+                self.cfg["dash_style"] = n
+        self.save(keep_look=True)
+        self.redraw_preview()
+
+    def show_preview(self, kind):
+        self.prev_kind = kind
+        if self.preview:
+            self.preview.set_kind(kind)
+            if kind == "mfd":
+                self.preview.draw(self.mfd_screen)
+
+    def next_screen(self):
+        self.mfd_screen = (self.mfd_screen + 1) % 6
+        self.show_preview("mfd")
+
+    def redraw_preview(self):
+        if self.preview:
+            self.preview.cfg = self.cfg
+            self.preview.draw(self.mfd_screen if self.prev_kind == "mfd" else None)
+
+    def tick_preview(self):
+        try:
+            if self.preview and self.winfo_ismapped():
+                self.redraw_preview()
+        except tk.TclError:
+            return
+        self.after(500, self.tick_preview)
+
+    def save_quiet(self):
+        self.save()
+
+    # ---- настройки ----
+    def save(self, keep_look=False):
+        if not ETS2:
+            return
+        if hasattr(self, "alpha_var"):
+            self.cfg["alpha"] = round(float(self.alpha_var.get()), 2)
+        if hasattr(self, "convoy_var"):
+            self.cfg["convoy_ids"] = self.convoy_var.get().strip()
+        for k, var in self.v.items():
+            self.cfg[k] = bool(var.get())
+        try:
+            self.cfg["map_size"] = int(self.size_var.get())
+        except ValueError:
+            pass
+        self.cfg["game_dir"] = self.dir_var.get().strip()
+        for k, name in self.KEYSETS.items():
+            if getattr(self, "keys_var", None) is not None and self.keys_var.get() == name:
+                self.cfg["mfd_keys"] = k
+        try:                                             # то, что оверлей поменял сам (позиции, размеры, экран МФД), не затираем
+            fresh = ETS2.load_cfg()
+            for k in ("pos", "scale", "mfd_screen", "map_span", "map_heading_up", "map_auto_zoom") + (() if keep_look else ("dash_style",)):
+                self.cfg[k] = fresh[k]
+            if not keep_look and hasattr(self, "dash_var"):
+                self.dash_var.set(self.dash_names.get(self.cfg["dash_style"], self.dash_var.get()))
+        except Exception:                                # noqa: BLE001
+            pass
+        ETS2.save_cfg(self.cfg)
+
+    # ---- свои кнопки МФД ----
+    LABELS = [("s0", "Экран 1: Обзор"), ("s1", "Экран 2: Груз"), ("s2", "Экран 3: Урон"), ("s3", "Экран 4: Топливо"),
+              ("s4", "Экран 5: Двигатель"), ("s5", "Экран 6: Рейс"), ("next", "Следующий экран"), ("prev", "Предыдущий экран")]
+
+    def bind_dialog(self):
+        """Окно назначения: жмёшь «Назначить» у строки, затем клавишу клавиатуры или кнопку руля."""
+        top = tk.Toplevel(self.winfo_toplevel())
+        top.title(tr("Кнопки МФД"))
+        top.configure(bg=UI_BG)
+        top.transient(self.winfo_toplevel())
+        binds = dict(self.cfg.get("mfd_binds", {}))
+        btns, state = {}, {"wait": None, "base": set()}
+        tk.Label(top, text=tr("Нажмите «Назначить», затем клавишу или кнопку руля. Esc — отмена, «Сброс» — очистить."), bg=UI_BG, fg=UI_DIM,
+                 font=("Segoe UI", 9), wraplength=420, justify="left").grid(row=0, column=0, columnspan=3, padx=14, pady=(12, 6), sticky="w")
+
+        def show():
+            for n, b in btns.items():
+                b.config(text=tr("жду нажатия…") if state["wait"] == n else ETS2.bind_name(binds.get(n, "")))
+
+        def arm(n):
+            state["wait"], state["base"] = n, ETS2.joy_state()
+            show()
+            top.focus_force()
+            watch()
+
+        def take(n, spec):
+            if spec:
+                binds[n] = spec
+            state["wait"] = None
+            self.cfg["mfd_binds"] = binds
+            self.cfg["mfd_keys"] = "custom"
+            self.keys_var.set(self.KEYSETS["custom"])
+            ETS2.save_cfg(self.cfg)
+            show()
+
+        def watch():
+            n = state["wait"]
+            if n is None:
+                return
+            now = ETS2.joy_state()
+            for j in sorted(now - state["base"]):
+                take(n, f"j:{j[0]}:{j[1]}")
+                return
+            state["base"] &= now
+            top.after(50, watch)
+
+        def on_key(e):
+            n = state["wait"]
+            if n is None:
+                return
+            if e.keysym == "Escape":
+                state["wait"] = None
+                show()
+            elif e.keycode:
+                take(n, f"k:{e.keycode}")
+        top.bind("<KeyPress>", on_key)
+        for i, (n, label) in enumerate(self.LABELS):
+            tk.Label(top, text=tr(label), bg=UI_BG, fg=UI_FG, font=("Segoe UI", 10), anchor="w").grid(row=i + 1, column=0, padx=(14, 8), pady=3, sticky="w")
+            b = tk.Label(top, text="", bg=UI_PANEL, fg=UI_FG, width=26, font=("Segoe UI", 10), relief="flat", highlightthickness=1, highlightbackground=UI_BORDER)
+            b.grid(row=i + 1, column=1, pady=3, padx=4)
+            btns[n] = b
+            ttk.Button(top, text=tr("Назначить"), command=lambda n=n: arm(n)).grid(row=i + 1, column=2, padx=(4, 14), pady=3)
+
+        def reset():
+            binds.clear()
+            state["wait"] = None
+            self.cfg["mfd_binds"] = {}
+            ETS2.save_cfg(self.cfg)
+            show()
+        ttk.Button(top, text=tr("Сброс"), command=reset).grid(row=len(self.LABELS) + 1, column=0, padx=14, pady=10, sticky="w")
+        ttk.Button(top, text=tr("Готово"), command=top.destroy).grid(row=len(self.LABELS) + 1, column=2, padx=14, pady=10)
+        show()
+        translate_tree(top)
+
+    # ---- игра и плагин ----
+    def browse(self):
+        d = filedialog.askdirectory(parent=self.winfo_toplevel(), title=tr("Папка Euro Truck Simulator 2"))
+        if d:
+            self.dir_var.set(os.path.normpath(d))
+            self.save()
+            self.refresh_plugin()
+
+    def autodetect(self, quiet=False):
+        cur = self.dir_var.get().strip()
+        if cur and ETS2.looks_like_game_dir(cur):
+            return
+        d = ETS2.find_game_dir(steam_libraries())
+        if d:
+            self.dir_var.set(d)
+            self.save()
+        elif not quiet:
+            mb_info("Euro Truck Simulator 2", "Не нашёл игру в библиотеках Steam. Выберите папку, где лежит bin\\win_x64\\eurotrucks2.exe.")
+        self.refresh_plugin()
+
+    def refresh_plugin(self):
+        d = self.dir_var.get().strip()
+        if not ETS2.looks_like_game_dir(d):
+            self.plugin_lbl.config(text=tr("Папка игры не выбрана или в ней нет bin\\win_x64\\eurotrucks2.exe."), fg=UI_DIM)
+        elif ETS2.plugin_installed(d):
+            self.plugin_lbl.config(text=tr("Плагин телеметрии установлен: ") + ETS2.plugins_dir(d), fg=UI_GREEN)
+        else:
+            self.plugin_lbl.config(text=tr("Плагин телеметрии не установлен. Нажмите «Установить плагин» — лаунчер скачает его и положит в папку игры."), fg=UI_DIM)
+
+    def install(self):
+        if self.busy:
+            return
+        self.save()
+        d = self.dir_var.get().strip()
+        if not ETS2.looks_like_game_dir(d):
+            mb_info("Euro Truck Simulator 2", "Сначала выберите папку игры.")
+            return
+        if not messagebox.askyesno(tr("Установка плагина"), tr("Скачать плагин телеметрии SCS (RenCloud/scs-sdk-plugin с GitHub) и положить scs-telemetry.dll в:") + "\n" + ETS2.plugins_dir(d) + "\n\n" + tr("Продолжить?")):
+            return
+        self.busy = True
+        self.plugin_lbl.config(text=tr("Устанавливаю…"), fg=UI_DIM)
+
+        def work():
+            err = ETS2.install_plugin(d, lambda t: self.app.tray_q.put(("ets2_msg", t)))
+            self.app.tray_q.put(("ets2_done", err))
+        threading.Thread(target=work, daemon=True).start()
+
+    def on_msg(self, text):
+        try:
+            self.plugin_lbl.config(text=tr(text), fg=UI_DIM)
+        except tk.TclError:
+            pass
+
+    def on_done(self, err):
+        self.busy = False
+        self.refresh_plugin()
+        if err:
+            mb_error("Установка плагина", err)
+        else:
+            mb_info("Установка плагина", "Плагин установлен. Запустите (или перезапустите) игру: она спросит подтверждение для расширенных функций SDK — ответьте «Да».")
+
+    # ---- оверлей ----
+    def running(self):
+        return self.proc is not None and self.proc.poll() is None
+
+    def start(self, demo):
+        if not ETS2:
+            return
+        if self.running():
+            self.stop()
+        self._manual_stop = False
+        self.save()
+        script = os.path.join(HERE, "yassno_ets2.py")
+        if not os.path.isfile(script):
+            mb_error("Euro Truck Simulator 2", "Нет файла yassno_ets2.py рядом с лаунчером.")
+            return
+        exe = sys.executable or "python"
+        if exe.lower().endswith("python.exe"):
+            w = exe[:-10] + "pythonw.exe"
+            exe = w if os.path.isfile(w) else exe
+        cmd = [exe, script] + (["--demo"] if demo else [])
+        for n in ("yassno_ets2.cmd", "yassno_ets2.state"):
+            try:
+                os.remove(os.path.join(HERE, n))
+            except OSError:
+                pass
+        os.makedirs(LOGS, exist_ok=True)
+        log = open(os.path.join(LOGS, "overlay-ets2.log"), "w", encoding="utf-8")
+        self.proc = subprocess.Popen(cmd, cwd=HERE, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, creationflags=NO_WINDOW)
+        self.demo = demo
+        self.app.say("Запускаю оверлей ETS2…")
+
+    def stop(self):
+        self._manual_stop = True
+        if self.running():
+            try:
+                self.proc.terminate()
+                self.proc.wait(timeout=3)
+            except Exception:
+                try:
+                    self.proc.kill()
+                except Exception:
+                    pass
+        self.proc = None
+
+    def cmd(self, text):
+        try:
+            with open(os.path.join(HERE, "yassno_ets2.cmd"), "w", encoding="utf-8") as f:
+                f.write(text)
+        except OSError:
+            pass
+
+    def tick(self):
+        try:
+            if self.running():
+                st = read_json(os.path.join(HERE, "yassno_ets2.state"))
+                if getattr(self, "demo", False):
+                    t = tr("Оверлей запущен в тестовом режиме (без игры).")
+                elif st.get("connected"):
+                    t = tr("Оверлей запущен, телеметрия идёт.")
+                else:
+                    t = tr("Оверлей запущен, жду данные игры…")
+                self.run_lbl.config(text=t, fg=UI_GREEN if "идёт" in t else UI_DIM)
+            else:
+                self.run_lbl.config(text=tr("Оверлей не запущен."), fg=UI_DIM)
+            self.btn_install.state(["disabled"] if self.busy else ["!disabled"])
+        except tk.TclError:
+            return
+        self.after(1500, self.tick)
+
+    def poll_game(self):
+        """Автозапуск: следим за процессом игры в фоне (tasklist небыстрый)."""
+        try:
+            if not self.winfo_exists():
+                return
+        except tk.TclError:
+            return
+        if self.cfg.get("autostart") and not self.running() and os.name == "nt":
+            def work():
+                self.app.tray_q.put(("ets2_proc", ETS2.ETS2_PROCESS in process_names()))
+            threading.Thread(target=work, daemon=True).start()
+        self.after(6000, self.poll_game)
+
+    def on_proc(self, present):
+        if not present:
+            self._manual_stop = False
+        if present and self.cfg.get("autostart") and not self.running() and not getattr(self, "_manual_stop", False):
+            self.start(False)
 
 
 class GameTile(tk.Frame):
@@ -6640,6 +7116,10 @@ class App:
         t = GameTile(tiles, "Assetto Corsa", self.show_ac, game="ac")
         t.pack(side="left", padx=(0, 8), anchor="s")
         self.tiles["ac"] = t
+        if ETS2 is not None:
+            t = GameTile(tiles, "Euro Truck Simulator 2", self.show_ets2, game="ets2")
+            t.pack(side="left", padx=(0, 8), anchor="s")
+            self.tiles["ets2"] = t
         ttk.Button(tiles, text="Остановить оверлей", command=self.stop_overlay).pack(side="right", anchor="s", pady=(0, 2))
         ttk.Button(tiles, text="▶ Запустить игру", style="Accent.TButton", command=lambda: self.launch_game()).pack(side="right", anchor="s", padx=(0, 10), pady=(0, 2))
 
@@ -6672,7 +7152,10 @@ class App:
         self.settings_page = SettingsPage(self.holder, self)
         self.stats_page = StatsPage(self.holder, self)
         self.ac_page = AcSoonPage(self.holder, self)
-        if self.view == "ac":
+        self.ets2_page = Ets2Page(self.holder, self)
+        if self.view == "ets2":
+            self.show_ets2()
+        elif self.view == "ac":
             self.show_ac()
         elif self.view == "settings":
             self.show_settings()
@@ -6717,6 +7200,7 @@ class App:
         self.settings_page.pack_forget()
         self.stats_page.pack_forget()
         self.ac_page.pack_forget()
+        self.ets2_page.pack_forget()
         if game not in self.panels:
             self.make_panel(game)
             translate_tree(self.panels[game])
@@ -6733,7 +7217,19 @@ class App:
             p.pack_forget()
         self.settings_page.pack_forget()
         self.stats_page.pack_forget()
+        self.ets2_page.pack_forget()
         self.ac_page.pack(fill="both", expand=True)
+        self.update_tiles()
+
+    def show_ets2(self):
+        self.view = "ets2"
+        for p in self.panels.values():
+            p.pack_forget()
+        self.settings_page.pack_forget()
+        self.stats_page.pack_forget()
+        self.ac_page.pack_forget()
+        self.ets2_page.pack(fill="both", expand=True)
+        self.ets2_page.refresh_plugin()
         self.update_tiles()
 
     def show_settings(self):
@@ -6742,6 +7238,7 @@ class App:
             p.pack_forget()
         self.stats_page.pack_forget()
         self.ac_page.pack_forget()
+        self.ets2_page.pack_forget()
         self.settings_page.pack(fill="both", expand=True)
         self.update_tiles()
 
@@ -6751,6 +7248,7 @@ class App:
             p.pack_forget()
         self.settings_page.pack_forget()
         self.ac_page.pack_forget()
+        self.ets2_page.pack_forget()
         self.stats_page.pack(fill="both", expand=True)
         self.stats_page.reload()
         self.update_tiles()
@@ -6763,7 +7261,7 @@ class App:
         for g, t in self.tiles.items():
             t.set_state(g == self.view, g == self.detected)
         for g, p in self.panels.items():                    # левый список — от выбранной игры, подсветка — по текущей странице
-            if g == self.selected and self.view != "ac":
+            if g == self.selected and self.view not in ("ac", "ets2"):
                 p.nav.pack(fill="both", expand=True)
                 p.mark_view(self.view)
             else:
@@ -6825,6 +7323,13 @@ class App:
     def launch_game(self, game=None):
         if game is None and self.view == "ac":
             mb_info("Assetto Corsa", "Поддержка Assetto Corsa пока в разработке — запускать оверлей рано.")
+            return
+        if game is None and self.view == "ets2":
+            try:
+                os.startfile("steam://rungameid/227300")
+                self.say("Запускаю Euro Truck Simulator 2…")
+            except Exception as e:
+                mb_error("Не удалось запустить игру", str(e))
             return
         game = game or self.selected
         if self.detected == game:
@@ -6936,7 +7441,7 @@ class App:
                 self.last_auto_game = None
                 if self.close_var.get() and r.running() and r.auto:
                     r.stop()
-        if game and changed and self.view not in ("settings", "stats", "ac"):
+        if game and changed and self.view not in ("settings", "stats", "ac", "ets2"):
             self.select_game(game)
         self.refresh_status()
 
@@ -7028,6 +7533,12 @@ class App:
                         self.on_update_info(*cmd[1:])
                     elif cmd[0] == "upd_done":
                         self.after_update(*cmd[1:])
+                    elif cmd[0] == "ets2_msg":
+                        self.ets2_page.on_msg(cmd[1])
+                    elif cmd[0] == "ets2_done":
+                        self.ets2_page.on_done(cmd[1])
+                    elif cmd[0] == "ets2_proc":
+                        self.ets2_page.on_proc(cmd[1])
                 elif cmd == "show":
                     self.show_from_tray()
                 elif cmd == "stop":
@@ -7083,6 +7594,10 @@ class App:
     def quit_app(self, stop=False):
         if stop:
             self.runner.stop()
+            try:
+                self.ets2_page.stop()
+            except Exception:
+                pass
             if self.cfg.get("apps_close", True):
                 self.companions.stop()
         if self.tray is not None:
