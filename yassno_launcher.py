@@ -66,7 +66,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "2.7.0"
+APP_VERSION = "2.7.1"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -1772,189 +1772,350 @@ class AcSoonPage(ttk.Frame):
 
 
 class Ets2Page(ttk.Frame):
-    """Euro Truck Simulator 2: плагин телеметрии, запуск оверлея с картой, настройки окон."""
+    """Euro Truck Simulator 2: как у остальных игр — слева список панелей оверлея, по центру предпросмотр, справа настройки."""
     SIZES = [("300", 300), ("360", 360), ("450", 450), ("560", 560)]
     KEYSETS = {"numpad": "Num1–Num6, Num+ / Num−", "ctrlf": "Ctrl+F5 … Ctrl+F10", "custom": "Свои (кнопка «Назначить»)"}
+    PAGES = [("general", "Игра и оформление"), ("mfd", "МФД"), ("dash", "Приборы"), ("trip", "Рейс и топливо"), ("map", "Карта"), ("convoy", "Конвой")]
+    GROUPS = [("", ("general",)), ("Окна оверлея", ("mfd", "dash", "trip", "map", "convoy"))]
+    ICONS = {"general": "⚙", "mfd": "▦", "dash": "◎", "trip": "◍", "map": "⌖", "convoy": "⇅"}
+    WIN = {"mfd": "win_mfd", "dash": "win_dash", "trip": "win_trip", "map": "win_map", "convoy": "win_convoy"}
+    NOTES = {"general": "Игра, плагин телеметрии, запуск оверлея и общий вид. Тема, прозрачность и единицы действуют на все окна.",
+             "mfd": "Многофункциональный дисплей на 6 экранов: обзор, груз, урон, топливо, двигатель, рейс. Экраны листаются клавишами прямо в игре.",
+             "dash": "Приборы: пять видов. Выберите вид кнопками под предпросмотром — окно в игре поменяется сразу.",
+             "trip": "Топливо, расстояние и время до цели, груз и повреждения одним окном.",
+             "map": "Карта Европы с положением грузовика. Тайлы докачиваются из интернета по мере поездки и кэшируются в папке ets2_tiles.",
+             "convoy": "Список друзей из конвоя TruckersMP: кто в сети, где и как далеко от вас."}
+    RW = 500
 
     def __init__(self, parent, app):
-        super().__init__(parent, padding=18)
+        super().__init__(parent, padding=12)
         self.app = app
         self.proc = None
         self.busy = False
         self.cfg = ETS2.load_cfg() if ETS2 else {}
         self.v = {}
-        self.columnconfigure(0, weight=1)
-        self.rowconfigure(0, weight=1)
-        cv = tk.Canvas(self, bg=UI_BG, highlightthickness=0, borderwidth=0)
-        sbar = ttk.Scrollbar(self, orient="vertical", command=cv.yview)
-        cv.configure(yscrollcommand=sbar.set)
-        cv.grid(row=0, column=0, sticky="nsew")
-        sbar.grid(row=0, column=1, sticky="ns")
-        P = ttk.Frame(cv)
-        win = cv.create_window(0, 0, window=P, anchor="nw")
-        cv.bind("<Configure>", lambda e: cv.itemconfigure(win, width=e.width))
-        P.bind("<Configure>", lambda e: cv.configure(scrollregion=cv.bbox("all")))
-        enable_wheel(cv, self)
-        self.page = P
-        ttk.Label(P, text="Euro Truck Simulator 2: приборы, рейс и карта", style="Head.TLabel").pack(anchor="w")
-        ttk.Label(P, text="Оверлей читает данные из плагина телеметрии SCS. Положение грузовика рисуется на карте Европы, "
-                             "тайлы карты докачиваются из интернета по мере поездки и кэшируются в папке ets2_tiles.",
-                  style="Dim.TLabel", wraplength=760, justify="left").pack(anchor="w", pady=(6, 12))
+        self.key = "general"
+        self.rows_ui = {}
+        self.nav = None
+        self.preview = None
+        self.mfd_screen = 0
         if ETS2 is None:
-            ttk.Label(P, text="Не найден файл yassno_ets2.py рядом с лаунчером.", style="Dim.TLabel").pack(anchor="w")
+            ttk.Label(self, text="Не найден файл yassno_ets2.py рядом с лаунчером.", style="Dim.TLabel").pack(anchor="w")
             return
-        # --- игра и плагин ---
-        box = tk.Frame(P, bg=UI_PANEL, highlightthickness=1, highlightbackground=UI_BORDER)
-        box.pack(fill="x", pady=4)
-        tk.Label(box, text="1. Игра и плагин телеметрии", bg=UI_PANEL, fg=UI_FG, font=("Segoe UI Semibold", 11), anchor="w").pack(fill="x", padx=12, pady=(10, 4))
-        row = tk.Frame(box, bg=UI_PANEL)
-        row.pack(fill="x", padx=12)
+        for k in ("win_mfd", "win_map", "win_dash", "win_trip", "win_convoy", "mph", "autostart", "hide_idle", "map_heading_up", "map_auto_zoom"):
+            self.v[k] = tk.BooleanVar(value=bool(self.cfg.get(k)))
         self.dir_var = tk.StringVar(value=self.cfg.get("game_dir", ""))
-        ttk.Entry(row, textvariable=self.dir_var).pack(side="left", fill="x", expand=True)
-        ttk.Button(row, text="Выбрать папку…", command=self.browse).pack(side="left", padx=(8, 0))
-        ttk.Button(row, text="Найти в Steam", command=self.autodetect).pack(side="left", padx=(8, 0))
-        self.plugin_lbl = tk.Label(box, text="", bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 10), anchor="w", justify="left", wraplength=720)
-        self.plugin_lbl.pack(fill="x", padx=12, pady=(8, 2))
-        row2 = tk.Frame(box, bg=UI_PANEL)
-        row2.pack(fill="x", padx=12, pady=(0, 10))
-        self.btn_install = ttk.Button(row2, text="Установить / обновить плагин", command=self.install)
-        self.btn_install.pack(side="left")
-        ttk.Button(row2, text="Страница плагина", command=lambda: webbrowser.open(ETS2.PLUGIN_PAGE)).pack(side="left", padx=(8, 0))
-        # --- запуск ---
-        box = tk.Frame(P, bg=UI_PANEL, highlightthickness=1, highlightbackground=UI_BORDER)
-        box.pack(fill="x", pady=4)
-        tk.Label(box, text="2. Оверлей", bg=UI_PANEL, fg=UI_FG, font=("Segoe UI Semibold", 11), anchor="w").pack(fill="x", padx=12, pady=(10, 4))
-        row = tk.Frame(box, bg=UI_PANEL)
-        row.pack(fill="x", padx=12)
-        self.btn_start = ttk.Button(row, text="▶ Запустить оверлей", style="Accent.TButton", command=lambda: self.start(False))
-        self.btn_start.pack(side="left")
-        ttk.Button(row, text="■ Остановить", command=self.stop).pack(side="left", padx=(8, 0))
-        ttk.Button(row, text="Двигать окна", command=lambda: self.cmd("unlock")).pack(side="left", padx=(16, 0))
-        ttk.Button(row, text="Закрепить окна", command=lambda: self.cmd("lock")).pack(side="left", padx=(8, 0))
-        ttk.Button(row, text="Тест без игры", command=lambda: self.start(True)).pack(side="left", padx=(16, 0))
-        self.run_lbl = tk.Label(box, text="", bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 10), anchor="w", justify="left", wraplength=720)
-        self.run_lbl.pack(fill="x", padx=12, pady=(8, 10))
-        # --- настройки ---
-        box = tk.Frame(P, bg=UI_PANEL, highlightthickness=1, highlightbackground=UI_BORDER)
-        box.pack(fill="x", pady=4)
-        tk.Label(box, text="3. Окна и единицы", bg=UI_PANEL, fg=UI_FG, font=("Segoe UI Semibold", 11), anchor="w").pack(fill="x", padx=12, pady=(10, 4))
-        for key, label in (("win_mfd", "МФД: экраны обзор, груз, урон, топливо, двигатель, рейс (листаются клавишами)"),
-                           ("win_map", "Карта с положением грузовика"), ("win_dash", "Приборы: скорость, передача, обороты, ограничение"),
-                           ("win_trip", "Рейс: топливо, расстояние до цели, груз, повреждения"), ("mph", "Мили и мили в час вместо километров"),
-                           ("autostart", "Запускать оверлей сам, когда запущена игра"),
-                           ("hide_idle", "Прятать оверлей, когда вы не в мире (меню, пауза, загрузка)"),
-                           ("win_convoy", "Конвой: кто в конвое и как далеко от вас (нужны TruckersMP ID, см. ниже)")):
-            self.v[key] = tk.BooleanVar(value=bool(self.cfg.get(key)))
-            Toggle(box, label, self.v[key], bg=UI_PANEL, command=self.save).pack(anchor="w", padx=12, pady=2)
-        row = tk.Frame(box, bg=UI_PANEL)
-        row.pack(fill="x", padx=12, pady=(6, 10))
-        tk.Label(row, text="Клавиши МФД", bg=UI_PANEL, fg=UI_FG, font=("Segoe UI", 10)).pack(side="left")
         self.keys_var = tk.StringVar(value=self.KEYSETS.get(self.cfg.get("mfd_keys", "numpad"), self.KEYSETS["numpad"]))
-        kb = ttk.Combobox(row, textvariable=self.keys_var, values=list(self.KEYSETS.values()), width=30, state="readonly")
-        kb.pack(side="left", padx=(8, 8))
-        kb.bind("<<ComboboxSelected>>", lambda e: self.save())
-        ttk.Button(row, text="Назначить…", command=self.bind_dialog).pack(side="left", padx=(0, 24))
-        tk.Label(row, text="Размер карты, px", bg=UI_PANEL, fg=UI_FG, font=("Segoe UI", 10)).pack(side="left")
         self.size_var = tk.StringVar(value=str(int(self.cfg.get("map_size", 360))))
-        cb = ttk.Combobox(row, textvariable=self.size_var, values=[n for n, _ in self.SIZES], width=6, state="readonly")
-        cb.pack(side="left", padx=(8, 0))
-        cb.bind("<<ComboboxSelected>>", lambda e: self.save())
-        tk.Label(box, text="Окна двигаются мышью в режиме перемещения; размер меняется оранжевым уголком в правом нижнем углу окна или через ПКМ. "
-                           "На карте колесо мыши меняет масштаб. Настройки применяются при следующем запуске оверлея.",
-                 bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 9), anchor="w", justify="left", wraplength=720).pack(fill="x", padx=12, pady=(0, 10))
-        self.build_look()
-        tk.Label(P, text="При первом запуске ETS2 после установки плагина игра спросит подтверждение для расширенных функций SDK — ответьте «Да». "
-                            "Плагин работает в одиночной игре; в мультиплеере проверьте правила сервера.",
-                 bg=UI_BG, fg=UI_DIM, font=("Segoe UI", 9), anchor="w", justify="left", wraplength=760).pack(fill="x", pady=(8, 0))
+        self.convoy_var = tk.StringVar(value=self.cfg.get("convoy_ids", ""))
+        self.alpha_var = tk.DoubleVar(value=float(self.cfg.get("alpha", 0.94)))
+        self.dash_names = {n: label for n, label, _ in ETS2.DashWin.STYLES}
+        self.dash_var = tk.StringVar(value=self.dash_names.get(self.cfg.get("dash_style", "classic"), self.dash_names["classic"]))
+        self.build_nav()
+        self.columnconfigure(0, weight=1)
+        self.columnconfigure(1, minsize=self.RW)
+        self.rowconfigure(0, weight=1)
+        # --- центр: запуск, заголовок, предпросмотр ---
+        center = ttk.Frame(self)
+        center.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
+        center.columnconfigure(0, weight=1)
+        bar = ttk.Frame(center)
+        bar.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        self.btn_start = ttk.Button(bar, text="▶ Запустить оверлей", style="Accent.TButton", command=lambda: self.start(False))
+        self.btn_start.pack(side="left")
+        ttk.Button(bar, text="■ Остановить", command=self.stop).pack(side="left", padx=(6, 0))
+        ttk.Button(bar, text="Двигать окна", command=lambda: self.cmd("unlock")).pack(side="left", padx=(12, 0))
+        ttk.Button(bar, text="Закрепить окна", command=lambda: self.cmd("lock")).pack(side="left", padx=(6, 0))
+        ttk.Button(bar, text="Тест без игры", command=lambda: self.start(True)).pack(side="left", padx=(12, 0))
+        self.run_lbl = ttk.Label(center, text="", style="Dim.TLabel", wraplength=640, justify="left")
+        self.run_lbl.grid(row=1, column=0, sticky="w", pady=(0, 6))
+        self.title = ttk.Label(center, text="", style="Title.TLabel")
+        self.title.grid(row=2, column=0, sticky="w")
+        self.note = ttk.Label(center, text="", style="Dim.TLabel", wraplength=640, justify="left")
+        self.note.grid(row=3, column=0, sticky="w", pady=(2, 10))
+        self.pbox = RoundBox(center, radius=16, fill=MOCK_BG, border=mix(UI_BORDER, UI_DIM, 0.3))
+        self.pbox.grid(row=4, column=0, sticky="n")
+        self.pwrap = tk.Frame(self.pbox.inner, bg=MOCK_BG)
+        self.pwrap.pack(padx=11, pady=11)
+        self.ctrl = ttk.Frame(center)
+        self.ctrl.grid(row=5, column=0, sticky="w", pady=(10, 0))
+        # --- справа: настройки страницы ---
+        holder = ttk.Frame(self, width=self.RW)
+        holder.grid(row=0, column=1, sticky="nsew")
+        holder.grid_propagate(False)
+        holder.columnconfigure(0, weight=1)
+        holder.rowconfigure(0, weight=1)
+        self.scroll = tk.Canvas(holder, bg=UI_BG, highlightthickness=0, borderwidth=0)
+        sb = ttk.Scrollbar(holder, orient="vertical", command=self.scroll.yview)
+        self.scroll.configure(yscrollcommand=sb.set)
+        self.scroll.grid(row=0, column=0, sticky="nsew")
+        sb.grid(row=0, column=1, sticky="ns")
+        self.settings = ttk.Frame(self.scroll)
+        self.settings.columnconfigure(0, weight=1)
+        win = self.scroll.create_window(0, 0, window=self.settings, anchor="nw")
+        self.scroll.bind("<Configure>", lambda e: self.scroll.itemconfigure(win, width=e.width))
+        self.settings.bind("<Configure>", lambda e: self.scroll.configure(scrollregion=self.scroll.bbox("all")))
+        enable_wheel(self.scroll, holder)
         self.autodetect(quiet=True)
-        self.refresh_plugin()
         self._procs = set()
+        self.open_page("general")
         self.after(1500, self.tick)
         self.after(2500, self.poll_game)
+        self.after(500, self.tick_preview)
 
-    # ---- оформление, конвой, предпросмотр ----
-    def build_look(self):
-        P = self.page
-        box = tk.Frame(P, bg=UI_PANEL, highlightthickness=1, highlightbackground=UI_BORDER)
-        box.pack(fill="x", pady=4)
-        tk.Label(box, text="4. Оформление, конвой и предпросмотр", bg=UI_PANEL, fg=UI_FG, font=("Segoe UI Semibold", 11), anchor="w").pack(fill="x", padx=12, pady=(10, 4))
-        tk.Label(box, text="Тема оверлея — один клик меняет цвета всех окон:", bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 9), anchor="w").pack(fill="x", padx=12)
-        sw = tk.Frame(box, bg=UI_PANEL)
-        sw.pack(fill="x", padx=12, pady=(4, 6))
+    # ---- левый список ----
+    def build_nav(self):
+        nav = self.nav = tk.Frame(self.app.navhost, bg=UI_PANEL, width=248)
+        nav.pack_propagate(False)
+        tk.Label(nav, text="ПАНЕЛИ ОВЕРЛЕЯ", bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI Semibold", 9), anchor="w").pack(fill="x", padx=14, pady=(12, 4))
+        prog = tk.Frame(nav, bg=UI_PANEL)
+        prog.pack(side="bottom", fill="x", pady=(0, 6))
+        mid = tk.Frame(nav, bg=UI_PANEL)
+        mid.pack(side="top", fill="both", expand=True)
+        rpad = 4 if self.app.root.winfo_screenheight() < 1000 else 8
+
+        def make_row(text, cmd, dot=True, parent=None, icon=""):
+            row = tk.Frame(parent or mid, bg=UI_PANEL, cursor="hand2")
+            row.pack(fill="x")
+            strip = tk.Frame(row, bg=UI_PANEL, width=4)
+            strip.pack(side="left", fill="y")
+            ic = tk.Label(row, text=icon, bg=UI_PANEL, fg=UI_ACCENT, font=("Segoe UI Symbol", 12), width=2, anchor="center", cursor="hand2")
+            ic.pack(side="left", padx=(10, 0))
+            row._icon = ic
+            lbl = tk.Label(row, text=tr(text), bg=UI_PANEL, fg=UI_FG, font=("Segoe UI", 11), anchor="w", padx=8, pady=rpad)
+            lbl.pack(side="left", fill="x", expand=True)
+            d = tk.Label(row, text="", bg=UI_PANEL, fg=UI_GREEN, font=("Segoe UI", 9), padx=10)
+            d.pack(side="right")
+            for w in (row, lbl, d, strip, ic):
+                w.bind("<Button-1>", lambda e: cmd())
+
+            def hov(on, row=row, lbl=lbl, d=d):
+                try:
+                    if str(lbl.cget("bg")) == UI_FIELD:
+                        return
+                    bg = UI_ACTIVE if on else UI_PANEL
+                    for w_ in (row, lbl, d, row._icon):
+                        w_.config(bg=bg)
+                except tk.TclError:
+                    pass
+            for w in (row, lbl, d, strip, ic):
+                w.bind("<Enter>", lambda e, h=hov: h(True), add="+")
+                w.bind("<Leave>", lambda e, h=hov: h(False), add="+")
+            return row, lbl, d, strip
+        titles = dict(self.PAGES)
+        for gname, keys in self.GROUPS:
+            if gname:
+                tk.Label(mid, text=tr(gname).upper(), bg=UI_PANEL, fg=UI_ACCENT, font=("Segoe UI Semibold", 11), anchor="w", padx=14, pady=3).pack(fill="x")
+            for k in keys:
+                self.rows_ui[k] = make_row(titles[k], lambda k=k: self.open_page(k), icon=self.ICONS.get(k, "•"))
+        tk.Frame(prog, bg=UI_BORDER, height=1).pack(fill="x", padx=14, pady=(6, 0))
+        tk.Label(prog, text="ПРОГРАММА", bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI Semibold", 9), anchor="w").pack(fill="x", padx=14, pady=(8, 2))
+        make_row("Статистика", self.app.show_stats, dot=False, parent=prog, icon="▤")
+        make_row("Настройки лаунчера", self.app.show_settings, dot=False, parent=prog, icon="⚙")
+        self.refresh_dots()
+
+    def refresh_dots(self):
+        for k, (row, lbl, dot, strip) in self.rows_ui.items():
+            wk = self.WIN.get(k)
+            dot.config(text="●" if wk and self.v[wk].get() else "")
+            sel = k == self.key
+            bg = UI_FIELD if sel else UI_PANEL
+            for w in (row, lbl, dot, row._icon):
+                w.config(bg=bg)
+            strip.config(bg=UI_ACCENT if sel else UI_PANEL)
+
+    # ---- страницы ----
+    def open_page(self, key):
+        self.key = key
+        self.title.config(text=tr(dict(self.PAGES)[key]))
+        self.note.config(text=tr(self.NOTES[key]))
+        for w in self.settings.winfo_children():
+            w.destroy()
+        for w in self.ctrl.winfo_children():
+            w.destroy()
+        for w in self.pwrap.winfo_children():
+            w.destroy()
+        self.preview = None
+        self.map_cv = None
+        self.plugin_lbl = None
+        self.btn_install = None
+        getattr(self, "page_" + key)()
+        self.refresh_dots()
+        self.scroll.yview_moveto(0)
+        self.show_preview({"general": "dash"}.get(key, key))
+        translate_tree(self.settings)
+
+    def card(self, title):
+        wrap = RoundBox(self.settings, radius=14, fill=UI_BG, border=mix(UI_BORDER, UI_DIM, 0.35))
+        wrap.pack(fill="x", pady=(0, 10))
+        tk.Label(wrap.inner, text=tr(title).upper(), bg=UI_BG, fg=UI_ACCENT, font=("Segoe UI Semibold", 10), anchor="w", padx=14, pady=10).pack(fill="x")
+        f = tk.Frame(wrap.inner, bg=UI_BG)
+        f.pack(fill="x", padx=14, pady=(0, 12))
+        return f
+
+    def tgl(self, parent, key, text):
+        Toggle(parent, text, self.v[key], bg=UI_BG, command=self.toggled).pack(anchor="w", pady=3)
+
+    def toggled(self):
+        self.save()
+        self.refresh_dots()
+        self.redraw_preview()
+
+    def hint(self, parent, text, size=9):
+        tk.Label(parent, text=tr(text), bg=UI_BG, fg=UI_DIM, font=("Segoe UI", size), anchor="w", justify="left", wraplength=self.RW - 90).pack(fill="x", pady=(4, 2))
+
+    def page_general(self):
+        f = self.card("Игра и плагин телеметрии")
+        row = tk.Frame(f, bg=UI_BG)
+        row.pack(fill="x")
+        ttk.Entry(row, textvariable=self.dir_var).pack(side="left", fill="x", expand=True)
+        ttk.Button(row, text="Выбрать папку…", command=self.browse).pack(side="left", padx=(6, 0))
+        ttk.Button(row, text="Найти в Steam", command=self.autodetect).pack(side="left", padx=(6, 0))
+        self.plugin_lbl = tk.Label(f, text="", bg=UI_BG, fg=UI_DIM, font=("Segoe UI", 9), anchor="w", justify="left", wraplength=self.RW - 90)
+        self.plugin_lbl.pack(fill="x", pady=(8, 4))
+        row = tk.Frame(f, bg=UI_BG)
+        row.pack(fill="x")
+        self.btn_install = ttk.Button(row, text="Установить / обновить плагин", command=self.install)
+        self.btn_install.pack(side="left")
+        ttk.Button(row, text="Страница плагина", command=lambda: webbrowser.open(ETS2.PLUGIN_PAGE)).pack(side="left", padx=(6, 0))
+        self.hint(f, "При первом запуске ETS2 после установки плагина игра спросит подтверждение для расширенных функций SDK — ответьте «Да». Плагин работает в одиночной игре; в мультиплеере проверьте правила сервера.", 8)
+        self.refresh_plugin()
+        f = self.card("Тема оверлея")
+        sw = tk.Frame(f, bg=UI_BG)
+        sw.pack(fill="x")
         self.theme_cv = {}
+        short = {"amber": "Янтарь", "blue": "Синяя", "red": "Красная", "green": "Зелёная", "black": "AMOLED", "light": "Светлая"}
         for i, name in enumerate(ETS2.THEME_ORDER):
             t = ETS2.THEMES[name]
-            cv = tk.Canvas(sw, width=118, height=46, bg=UI_PANEL, highlightthickness=2, highlightbackground=UI_PANEL, cursor="hand2")
+            cv = tk.Canvas(sw, width=118, height=46, bg=UI_BG, highlightthickness=2, highlightbackground=UI_BG, cursor="hand2")
             cv.grid(row=i // 3, column=i % 3, padx=(0, 6), pady=(0, 6))
             cv.create_rectangle(3, 3, 115, 43, fill=t[1], outline=t[3])
             cv.create_rectangle(3, 3, 115, 15, fill=t[2], outline="")
             cv.create_rectangle(3, 3, 6, 15, fill=t[6], outline="")
-            cv.create_text(11, 9, text=tr({"amber": "Янтарь", "blue": "Синяя", "red": "Красная", "green": "Зелёная", "black": "AMOLED", "light": "Светлая"}[name]), fill=t[4], anchor="w", font=("Segoe UI", 7, "bold"))
+            cv.create_text(11, 9, text=tr(short[name]), fill=t[4], anchor="w", font=("Segoe UI", 7, "bold"))
             cv.create_rectangle(8, 22, 62, 27, fill=t[7], outline="")
             cv.create_rectangle(8, 22, 38, 27, fill=t[6], outline="")
             cv.create_text(8, 35, text="83 км/ч", fill=t[4], anchor="w", font=("Segoe UI", 8))
             cv.bind("<Button-1>", lambda e, n=name: self.set_theme(n))
             self.theme_cv[name] = cv
-        row = tk.Frame(box, bg=UI_PANEL)
-        row.pack(fill="x", padx=12, pady=(2, 4))
-        tk.Label(row, text="Вид приборов", bg=UI_PANEL, fg=UI_FG, font=("Segoe UI", 10)).pack(side="left")
-        self.dash_names = {n: label for n, label, _ in ETS2.DashWin.STYLES}
-        cur = self.cfg.get("dash_style", "classic")
-        self.dash_var = tk.StringVar(value=self.dash_names.get(cur, self.dash_names["classic"]))
-        cb = ttk.Combobox(row, textvariable=self.dash_var, values=list(self.dash_names.values()), width=44, state="readonly")
+        self.mark_theme()
+        row = tk.Frame(f, bg=UI_BG)
+        row.pack(fill="x", pady=(4, 0))
+        tk.Label(row, text=tr("Непрозрачность окон"), bg=UI_BG, fg=UI_FG, font=("Segoe UI", 10)).pack(side="left")
+        ttk.Scale(row, from_=0.3, to=1.0, variable=self.alpha_var, length=200, command=lambda v: self.after_idle(self.save_quiet)).pack(side="left", padx=(10, 0))
+        f = self.card("Общие")
+        self.tgl(f, "mph", "Мили и мили в час вместо километров")
+        self.tgl(f, "autostart", "Запускать оверлей сам, когда запущена игра")
+        self.tgl(f, "hide_idle", "Прятать оверлей, когда вы не в мире (меню, пауза, загрузка)")
+        self.hint(f, "Окна двигаются мышью в режиме перемещения; размер меняется оранжевым уголком в правом нижнем углу окна или через ПКМ. Настройки применяются при следующем запуске оверлея.")
+        f = self.card("Горячие клавиши")
+        hk = ETS2.load_hotkeys()
+        for lab, k in (("Закрепить / двигать окна", "lock"), ("Вернуть окна на экран", "reset"), ("Спрятать / показать", "hide"), ("Вид приборов", "tim"), ("Вид карты", "map"), ("Выйти из оверлея", "quit")):
+            r = tk.Frame(f, bg=UI_BG)
+            r.pack(fill="x")
+            tk.Label(r, text=tr(lab), bg=UI_BG, fg=UI_FG, font=("Segoe UI", 10), anchor="w").pack(side="left")
+            tk.Label(r, text=hk[k], bg=UI_BG, fg=UI_ACCENT, font=("Segoe UI Semibold", 10)).pack(side="right")
+        self.hint(f, "Сочетания общие для всех игр и меняются в «Настройки лаунчера» → «Горячие клавиши оверлея».")
+
+    def page_mfd(self):
+        f = self.card("МФД")
+        self.tgl(f, "win_mfd", "Показывать МФД")
+        row = tk.Frame(f, bg=UI_BG)
+        row.pack(fill="x", pady=(6, 0))
+        tk.Label(row, text=tr("Клавиши экранов"), bg=UI_BG, fg=UI_FG, font=("Segoe UI", 10)).pack(side="left")
+        kb = ttk.Combobox(row, textvariable=self.keys_var, values=list(self.KEYSETS.values()), width=26, state="readonly")
+        kb.pack(side="left", padx=(8, 6))
+        kb.bind("<<ComboboxSelected>>", lambda e: self.save())
+        ttk.Button(row, text="Назначить…", command=self.bind_dialog).pack(side="left")
+        self.hint(f, "Экраны: 1 обзор, 2 груз, 3 урон, 4 топливо, 5 двигатель, 6 рейс. Клавиши работают поверх игры; свои кнопки можно назначить и на руль.")
+        for i, n in enumerate(ETS2.MfdWin.SCREENS):
+            ttk.Button(self.ctrl, text=f"{i + 1}. {n.capitalize()}", command=lambda i=i: self.set_screen(i)).pack(side="left", padx=(0, 4))
+
+    def page_dash(self):
+        f = self.card("Приборы")
+        self.tgl(f, "win_dash", "Показывать приборы")
+        row = tk.Frame(f, bg=UI_BG)
+        row.pack(fill="x", pady=(6, 0))
+        tk.Label(row, text=tr("Вид"), bg=UI_BG, fg=UI_FG, font=("Segoe UI", 10)).pack(side="left")
+        cb = ttk.Combobox(row, textvariable=self.dash_var, values=list(self.dash_names.values()), width=40, state="readonly")
         cb.pack(side="left", padx=(8, 0))
         cb.bind("<<ComboboxSelected>>", lambda e: self.look_changed())
-        row = tk.Frame(box, bg=UI_PANEL)
-        row.pack(fill="x", padx=12, pady=(2, 4))
-        tk.Label(row, text="Непрозрачность окон", bg=UI_PANEL, fg=UI_FG, font=("Segoe UI", 10)).pack(side="left")
-        self.alpha_var = tk.DoubleVar(value=float(self.cfg.get("alpha", 0.94)))
-        sc = ttk.Scale(row, from_=0.3, to=1.0, variable=self.alpha_var, length=220, command=lambda v: self.after_idle(self.save_quiet))
-        sc.pack(side="left", padx=(8, 0))
-        row = tk.Frame(box, bg=UI_PANEL)
-        row.pack(fill="x", padx=12, pady=(6, 2))
-        tk.Label(row, text="Конвой: TruckersMP ID через запятую", bg=UI_PANEL, fg=UI_FG, font=("Segoe UI", 10)).pack(side="left")
-        self.convoy_var = tk.StringVar(value=self.cfg.get("convoy_ids", ""))
-        ent = ttk.Entry(row, textvariable=self.convoy_var, width=40)
-        ent.pack(side="left", padx=(8, 0))
+        self.tgl(f, "mph", "Мили и мили в час вместо километров")
+        self.hint(f, "В игре вид приборов переключается горячей клавишей (по умолчанию Ctrl+Shift+T).")
+        for n, label, _ in ETS2.DashWin.STYLES:
+            ttk.Button(self.ctrl, text=label.split(":")[0], command=lambda n=n: self.pick_dash(n)).pack(side="left", padx=(0, 4))
+
+    def page_trip(self):
+        f = self.card("Рейс и топливо")
+        self.tgl(f, "win_trip", "Показывать окно рейса")
+        self.hint(f, "Топливо и запас хода, расход, AdBlue, расстояние и время до цели, груз, срок доставки и повреждения.")
+
+    def page_map(self):
+        f = self.card("Карта")
+        self.tgl(f, "win_map", "Показывать карту")
+        self.tgl(f, "map_heading_up", "Карта поворачивается по ходу движения (иначе север вверху)")
+        self.tgl(f, "map_auto_zoom", "Авто-масштаб: на скорости смотреть дальше")
+        row = tk.Frame(f, bg=UI_BG)
+        row.pack(fill="x", pady=(6, 0))
+        tk.Label(row, text=tr("Размер карты, px"), bg=UI_BG, fg=UI_FG, font=("Segoe UI", 10)).pack(side="left")
+        cb = ttk.Combobox(row, textvariable=self.size_var, values=[n for n, _ in self.SIZES], width=6, state="readonly")
+        cb.pack(side="left", padx=(8, 0))
+        cb.bind("<<ComboboxSelected>>", lambda e: (self.save(), self.redraw_preview()))
+        self.hint(f, "Колесо мыши на карте меняет масштаб, ПКМ открывает меню. Окно можно растянуть уголком.")
+
+    def page_convoy(self):
+        f = self.card("Конвой")
+        self.tgl(f, "win_convoy", "Показывать список конвоя")
+        tk.Label(f, text=tr("TruckersMP ID через запятую"), bg=UI_BG, fg=UI_FG, font=("Segoe UI", 10), anchor="w").pack(fill="x", pady=(6, 2))
+        ent = ttk.Entry(f, textvariable=self.convoy_var)
+        ent.pack(fill="x")
         ent.bind("<FocusOut>", lambda e: self.save())
         ent.bind("<Return>", lambda e: self.save())
-        tk.Label(box, text="ID — число из адреса профиля на truckersmp.com/user/…; можно с подписью: 123456=Вася. Данные о положении других игроков "
-                           "берутся из открытого API (Trucky/TruckersMP): плагин SCS их не отдаёт. Расстояние видно, если сервис отдаёт координаты, иначе — город и статус «в сети».",
-                 bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 8), anchor="w", justify="left", wraplength=720).pack(fill="x", padx=12, pady=(0, 6))
-        hk = ETS2.load_hotkeys()
-        tk.Label(box, text="Горячие клавиши (общие для всех игр, меняются в Настройки → «Горячие клавиши оверлея»): закрепить окна — " + hk["lock"] +
-                           ", вернуть окна на экран — " + hk["reset"] + ", спрятать — " + hk["hide"] + ", вид приборов — " + hk["tim"] +
-                           ", вид карты — " + hk["map"] + ", выйти — " + hk["quit"] + ".",
-                 bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 8), anchor="w", justify="left", wraplength=720).pack(fill="x", padx=12, pady=(0, 8))
-        # предпросмотр
-        pr = tk.Frame(box, bg=UI_PANEL)
-        pr.pack(fill="x", padx=12, pady=(0, 4))
-        tk.Label(pr, text="Предпросмотр:", bg=UI_PANEL, fg=UI_FG, font=("Segoe UI", 10)).pack(side="left")
-        self.prev_kind = "dash"
-        for k, label, _ in ETS2.Preview.KINDS:
-            ttk.Button(pr, text=label, command=lambda k=k: self.show_preview(k)).pack(side="left", padx=(6, 0))
-        self.mfd_screen = 0
-        ttk.Button(pr, text="след. экран МФД", command=self.next_screen).pack(side="left", padx=(14, 0))
-        holder = tk.Frame(box, bg=UI_PANEL)
-        holder.pack(fill="x", padx=12, pady=(4, 12))
-        self.preview = None
+        self.hint(f, "ID — число из адреса профиля на truckersmp.com/user/…; можно с подписью: 123456=Вася. Данные о положении других игроков берутся из открытого API (Trucky/TruckersMP): плагин SCS их не отдаёт. Расстояние видно, если сервис отдаёт координаты, иначе — город и статус «в сети».", 8)
+
+    # ---- предпросмотр ----
+    def show_preview(self, kind):
+        for w in self.pwrap.winfo_children():
+            w.destroy()
+        self.preview = self.map_cv = None
+        if kind == "map":
+            self.map_cv = tk.Canvas(self.pwrap, width=360, height=360, bg=MOCK_BG, highlightthickness=0)
+            self.map_cv.pack()
+            self.map_tm = getattr(self, "map_tm", None) or (ETS2.TileMap() if ETS2.HAVE_PIL else None)
+            self.map_t0 = time.monotonic()
+            self.redraw_preview()
+            return
         try:
-            self.preview = ETS2.Preview(holder, self.cfg, "dash", 1.0)
-            self.preview.canvas.pack(anchor="w")
+            self.preview = ETS2.Preview(self.pwrap, self.cfg, kind, 1.0)
+            self.preview.canvas.pack()
+            if kind == "mfd":
+                self.preview.draw(self.mfd_screen)
         except Exception:                                # noqa: BLE001
             self.preview = None
-        self.mark_theme()
-        self.after(250, self.tick_preview)
+
+    def pick_dash(self, name):
+        self.cfg["dash_style"] = name
+        self.dash_var.set(self.dash_names.get(name, ""))
+        self.save(keep_look=True)
+        self.redraw_preview()
+
+    def set_screen(self, i):
+        self.mfd_screen = i
+        self.redraw_preview()
 
     def mark_theme(self):
         cur = self.cfg.get("theme", "amber")
-        for n, cv in self.theme_cv.items():
-            cv.config(highlightbackground=UI_ACCENT if n == cur else UI_PANEL)
+        for n, cv in getattr(self, "theme_cv", {}).items():
+            try:
+                cv.config(highlightbackground=UI_ACCENT if n == cur else UI_BG)
+            except tk.TclError:
+                pass
 
     def set_theme(self, name):
         self.cfg["theme"] = name
         self.mark_theme()
-        self.look_changed()
+        self.save(keep_look=True)
+        self.redraw_preview()
 
     def look_changed(self):
         for n, label in self.dash_names.items():
@@ -1963,32 +2124,41 @@ class Ets2Page(ttk.Frame):
         self.save(keep_look=True)
         self.redraw_preview()
 
-    def show_preview(self, kind):
-        self.prev_kind = kind
-        if self.preview:
-            self.preview.set_kind(kind)
-            if kind == "mfd":
-                self.preview.draw(self.mfd_screen)
-
-    def next_screen(self):
-        self.mfd_screen = (self.mfd_screen + 1) % 6
-        self.show_preview("mfd")
-
     def redraw_preview(self):
-        if self.preview:
-            self.preview.cfg = self.cfg
-            self.preview.draw(self.mfd_screen if self.prev_kind == "mfd" else None)
+        try:
+            if self.map_cv is not None and self.map_tm is not None:
+                d = ETS2.DemoReader().read()
+                sz = int(self.cfg.get("map_size", 360))
+                sz = min(sz, 420)
+                img = ETS2.map_frame(self.map_tm, d, float(self.cfg.get("map_span", 1600.0)), sz, sz, bool(self.cfg.get("map_heading_up", True)))
+                self.map_photo = ETS2.ImageTk.PhotoImage(img)
+                self.map_cv.config(width=sz, height=sz)
+                self.map_cv.delete("all")
+                self.map_cv.create_image(0, 0, image=self.map_photo, anchor="nw")
+            elif self.preview:
+                self.preview.cfg = self.cfg
+                self.preview.draw(self.mfd_screen if self.key == "mfd" else None)
+        except Exception:                                # noqa: BLE001
+            pass
 
     def tick_preview(self):
         try:
-            if self.preview and self.winfo_ismapped():
+            if self.winfo_ismapped():
                 self.redraw_preview()
         except tk.TclError:
             return
-        self.after(500, self.tick_preview)
+        self.after(700, self.tick_preview)
 
     def save_quiet(self):
         self.save()
+
+    def set_plugin(self, text, fg=None):
+        lbl = getattr(self, "plugin_lbl", None)
+        try:
+            if lbl is not None and lbl.winfo_exists():
+                lbl.config(text=text, fg=fg or UI_DIM)
+        except tk.TclError:
+            pass
 
     # ---- настройки ----
     def save(self, keep_look=False):
@@ -2010,7 +2180,7 @@ class Ets2Page(ttk.Frame):
                 self.cfg["mfd_keys"] = k
         try:                                             # то, что оверлей поменял сам (позиции, размеры, экран МФД), не затираем
             fresh = ETS2.load_cfg()
-            for k in ("pos", "scale", "mfd_screen", "map_span", "map_heading_up", "map_auto_zoom") + (() if keep_look else ("dash_style",)):
+            for k in ("pos", "scale", "mfd_screen", "map_span") + (() if keep_look else ("dash_style",)):
                 self.cfg[k] = fresh[k]
             if not keep_look and hasattr(self, "dash_var"):
                 self.dash_var.set(self.dash_names.get(self.cfg["dash_style"], self.dash_var.get()))
@@ -2115,11 +2285,11 @@ class Ets2Page(ttk.Frame):
     def refresh_plugin(self):
         d = self.dir_var.get().strip()
         if not ETS2.looks_like_game_dir(d):
-            self.plugin_lbl.config(text=tr("Папка игры не выбрана или в ней нет bin\\win_x64\\eurotrucks2.exe."), fg=UI_DIM)
+            self.set_plugin(tr("Папка игры не выбрана или в ней нет bin\\win_x64\\eurotrucks2.exe."), UI_DIM)
         elif ETS2.plugin_installed(d):
-            self.plugin_lbl.config(text=tr("Плагин телеметрии установлен: ") + ETS2.plugins_dir(d), fg=UI_GREEN)
+            self.set_plugin(tr("Плагин телеметрии установлен: ") + ETS2.plugins_dir(d), UI_GREEN)
         else:
-            self.plugin_lbl.config(text=tr("Плагин телеметрии не установлен. Нажмите «Установить плагин» — лаунчер скачает его и положит в папку игры."), fg=UI_DIM)
+            self.set_plugin(tr("Плагин телеметрии не установлен. Нажмите «Установить плагин» — лаунчер скачает его и положит в папку игры."), UI_DIM)
 
     def install(self):
         if self.busy:
@@ -2132,7 +2302,7 @@ class Ets2Page(ttk.Frame):
         if not messagebox.askyesno(tr("Установка плагина"), tr("Скачать плагин телеметрии SCS (RenCloud/scs-sdk-plugin с GitHub) и положить scs-telemetry.dll в:") + "\n" + ETS2.plugins_dir(d) + "\n\n" + tr("Продолжить?")):
             return
         self.busy = True
-        self.plugin_lbl.config(text=tr("Устанавливаю…"), fg=UI_DIM)
+        self.set_plugin(tr("Устанавливаю…"), UI_DIM)
 
         def work():
             err = ETS2.install_plugin(d, lambda t: self.app.tray_q.put(("ets2_msg", t)))
@@ -2141,7 +2311,7 @@ class Ets2Page(ttk.Frame):
 
     def on_msg(self, text):
         try:
-            self.plugin_lbl.config(text=tr(text), fg=UI_DIM)
+            self.set_plugin(tr(text), UI_DIM)
         except tk.TclError:
             pass
 
@@ -2214,12 +2384,14 @@ class Ets2Page(ttk.Frame):
                     t = tr("Оверлей запущен, телеметрия идёт.")
                 else:
                     t = tr("Оверлей запущен, жду данные игры…")
-                self.run_lbl.config(text=t, fg=UI_GREEN if "идёт" in t else UI_DIM)
+                self.run_lbl.config(text=t, foreground=UI_GREEN if "идёт" in t else UI_DIM)
             else:
-                self.run_lbl.config(text=tr("Оверлей не запущен."), fg=UI_DIM)
-            self.btn_install.state(["disabled"] if self.busy else ["!disabled"])
+                self.run_lbl.config(text=tr("Оверлей не запущен."), foreground=UI_DIM)
+            bi = getattr(self, "btn_install", None)
+            if bi is not None and bi.winfo_exists():
+                bi.state(["disabled"] if self.busy else ["!disabled"])
         except tk.TclError:
-            return
+            pass
         self.after(1500, self.tick)
 
     def poll_game(self):
@@ -7266,6 +7438,12 @@ class App:
                 p.mark_view(self.view)
             else:
                 p.nav.pack_forget()
+        en = getattr(getattr(self, "ets2_page", None), "nav", None)      # левый список ETS2 показываем только на его странице
+        if en is not None:
+            if self.view == "ets2":
+                en.pack(fill="both", expand=True)
+            else:
+                en.pack_forget()
 
     # ---------- настройки лаунчера ----------
     def on_paths_changed(self):

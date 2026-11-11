@@ -1960,6 +1960,19 @@ class _PreviewApp:
         return ""
 
 
+def map_frame(tm, d, span, w, h, up=True):
+    """Кадр карты для предпросмотра в лаунчере: тайлы вокруг точки d и стрелка грузовика."""
+    img = tm.render(d["x"], d["z"], span, w, h, heading=d["heading"] if up else None)
+    dr = ImageDraw.Draw(img)
+    cx, cy = w // 2, h // 2
+    ang = 0.0 if up else math.radians(d["heading"])
+    pts = []
+    for px, py in ((0, -13), (9, 10), (0, 5), (-9, 10)):
+        pts.append((cx + px * math.cos(ang) + py * math.sin(ang), cy - px * math.sin(ang) + py * math.cos(ang)))
+    dr.polygon(pts, fill=(255, 159, 26), outline=(16, 20, 26))
+    return img
+
+
 class Preview:
     """Предпросмотр окна оверлея внутри лаунчера. canvas кладёт вызывающий; draw() перерисовывает по текущим настройкам."""
     KINDS = (("dash", "Приборы", DashWin), ("mfd", "МФД", MfdWin), ("trip", "Рейс", TripWin), ("convoy", "Конвой", ConvoyWin))
