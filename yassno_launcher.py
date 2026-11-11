@@ -66,7 +66,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "2.7.3"
+APP_VERSION = "2.7.4"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -617,7 +617,7 @@ def default_launcher():
     return {"autostart": True, "close_with_game": True, "theme": "dark", "lang": "ru", "win_start": False,
             "start_min": False, "min_tray": False, "close_tray": False, "stop_on_exit": False, "poll_sec": 2.5,
             "apps_close": True, "launch_with_game": True, "telemetry": True, "i2_path": "", "tel_strips": [],
-            "auto_update": True, "shortcut_asked": False}
+            "auto_update": True, "shortcut_asked": False, "last_view": ""}
 
 
 def load_launcher():
@@ -702,6 +702,34 @@ def read_locked(game):
     """True — окна закреплены, False — режим перемещения, None — оверлей ещё не сообщил."""
     d = read_json(os.path.splitext(profile_path(game))[0] + ".state")
     return d.get("locked") if isinstance(d.get("locked"), bool) else None
+
+
+def pid_alive(pid):
+    """Жив ли процесс с таким pid."""
+    try:
+        if os.name == "nt":
+            import ctypes
+            h = ctypes.windll.kernel32.OpenProcess(0x1000, False, int(pid))       # PROCESS_QUERY_LIMITED_INFORMATION
+            if not h:
+                return False
+            code = ctypes.c_ulong()
+            ok = ctypes.windll.kernel32.GetExitCodeProcess(h, ctypes.byref(code))
+            ctypes.windll.kernel32.CloseHandle(h)
+            return bool(ok) and code.value == 259                                  # STILL_ACTIVE
+        os.kill(int(pid), 0)
+        return True
+    except Exception:
+        return False
+
+
+def kill_pid(pid):
+    try:
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/PID", str(int(pid)), "/F"], creationflags=NO_WINDOW, capture_output=True, timeout=5)
+        else:
+            os.kill(int(pid), 15)
+    except Exception:
+        pass
 
 
 class Runner:
@@ -2366,8 +2394,18 @@ class Ets2Page(ttk.Frame):
             mb_info("Установка плагина", "Плагин установлен. Запустите (или перезапустите) игру: она спросит подтверждение для расширенных функций SDK — ответьте «Да».")
 
     # ---- оверлей ----
+    STATE_FILE = "yassno_ets2.state"
+
+    def state_pid(self):
+        """pid оверлея из state-файла: так видим оверлей, запущенный прошлым экземпляром лаунчера."""
+        try:
+            pid = int(read_json(os.path.join(HERE, self.STATE_FILE)).get("pid", 0))
+        except (TypeError, ValueError):
+            return 0
+        return pid if pid > 0 and pid != os.getpid() and pid_alive(pid) else 0
+
     def running(self):
-        return self.proc is not None and self.proc.poll() is None
+        return (self.proc is not None and self.proc.poll() is None) or bool(self.state_pid())
 
     def start(self, demo):
         if not ETS2:
@@ -2398,7 +2436,8 @@ class Ets2Page(ttk.Frame):
 
     def stop(self):
         self._manual_stop = True
-        if self.running():
+        pid = self.state_pid()
+        if self.proc is not None and self.proc.poll() is None:
             try:
                 self.proc.terminate()
                 self.proc.wait(timeout=3)
@@ -2408,6 +2447,16 @@ class Ets2Page(ttk.Frame):
                 except Exception:
                     pass
         self.proc = None
+        if pid and pid_alive(pid):                       # оверлей от прошлого лаунчера: закрываем по pid, чтобы окна не дублировались
+            kill_pid(pid)
+            for _ in range(30):
+                if not pid_alive(pid):
+                    break
+                time.sleep(0.1)
+        try:
+            os.remove(os.path.join(HERE, self.STATE_FILE))
+        except OSError:
+            pass
 
     def cmd(self, text):
         try:
@@ -7245,6 +7294,8 @@ class App:
         self._busy = False
         self.selected = self.cfg.get("last_game") if self.cfg.get("last_game") in GAMES else next(iter(GAMES))
         self.view = self.selected                          # игра или "settings"
+        if self.cfg.get("last_view") in ("ac", "ets2"):    # последняя открытая плитка не из списка GAMES
+            self.view = self.cfg["last_view"] if (self.cfg["last_view"] != "ets2" or ETS2 is not None) else self.selected
         self.panels, self.tray = {}, None
         self.tray_q = queue.Queue()
         self.auto_var = tk.BooleanVar(value=self.cfg["autostart"])
@@ -7403,8 +7454,18 @@ class App:
     def rebuild(self):
         self.build()
 
+    def remember_view(self, view=""):
+        """Запоминаем последнюю открытую плитку (для AC и ETS2, которых нет в GAMES)."""
+        if self.cfg.get("last_view", "") != view:
+            self.cfg["last_view"] = view
+            try:
+                write_json(LAUNCHER_CFG, self.cfg)
+            except Exception:
+                pass
+
     def select_game(self, game):
         self.selected, self.view = game, game
+        self.remember_view("")
         if self.cfg.get("last_game") != game:
             self.cfg["last_game"] = game
             try:
@@ -7427,6 +7488,7 @@ class App:
 
     def show_ac(self):
         self.view = "ac"
+        self.remember_view("ac")
         for p in self.panels.values():
             p.pack_forget()
         self.settings_page.pack_forget()
@@ -7437,6 +7499,7 @@ class App:
 
     def show_ets2(self):
         self.view = "ets2"
+        self.remember_view("ets2")
         for p in self.panels.values():
             p.pack_forget()
         self.settings_page.pack_forget()
@@ -7827,11 +7890,17 @@ class App:
                 pass
         self.root.destroy()
 
+    def ets2_running(self):
+        try:
+            return bool(self.ets2_page.running())
+        except Exception:
+            return False
+
     def on_close(self):
         if self.cfg.get("close_tray") and tray_supported():
             if self.hide_to_tray():
                 return
-        if self.runner.running():
+        if self.runner.running() or self.ets2_running():
             if self.cfg.get("stop_on_exit"):
                 self.quit_app(stop=True)
                 return

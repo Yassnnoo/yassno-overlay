@@ -246,3 +246,23 @@ class WindowStyleTests(unittest.TestCase):
             self.assertAlmostEqual(a.cfg["scale"]["dash"], round(w.k, 3))
         finally:
             a.quit()
+
+
+class LauncherLifecycle(unittest.TestCase):
+    def test_pid_alive_and_adopt(self):
+        import os, subprocess, sys, time
+        import yassno_launcher as L
+        self.assertTrue(L.pid_alive(os.getpid()))
+        self.assertFalse(L.pid_alive(2 ** 22 + 12345))
+        p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        try:
+            self.assertTrue(L.pid_alive(p.pid))
+            L.kill_pid(p.pid)
+            p.wait(timeout=5)
+            self.assertFalse(L.pid_alive(p.pid))
+        finally:
+            p.kill()
+
+    def test_last_view_default_and_persist(self):
+        import yassno_launcher as L
+        self.assertEqual(L.default_launcher()["last_view"], "")
