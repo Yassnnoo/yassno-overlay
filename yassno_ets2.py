@@ -93,6 +93,17 @@ def apply_theme(name, style="classic"):
         pass
 
 
+def speed_col(d, base):
+    """Цвет скорости: в пределах лимита — обычный, при превышении плавно краснеет (полностью красный при +20 км/ч)."""
+    try:
+        lim, sp = float(d["limit"]), abs(float(d["speed"]))
+    except (TypeError, ValueError, KeyError):
+        return base
+    if lim <= 1 or sp <= lim + 0.5:
+        return base
+    return _mix(base, "#ff1a1a", min(1.0, (sp - lim) / 20.0))
+
+
 def win_radius():
     """Скругление окон в базовых координатах."""
     return int(round(BASE_R * STYLE_R))
@@ -1430,8 +1441,8 @@ class DashWin(Win):
         self.panel(PANEL, w=W)
         sp = abs(d["speed"]) * k
         vmax = 180 if mph else 260
-        self.dial(W / 2, 128, 112, sp, vmax, 10 if mph else 20, 2, "миль/ч" if mph else "км/ч", ACCENT, red_from=None)
-        c.create_text(W / 2, 96, text=f"{sp:.0f}", fill=FG, font=("Segoe UI Semibold", 28))
+        self.dial(W / 2, 128, 112, sp, vmax, 10 if mph else 20, 2, "миль/ч" if mph else "км/ч", speed_col(d, ACCENT), red_from=None)
+        c.create_text(W / 2, 96, text=f"{sp:.0f}", fill=speed_col(d, FG), font=("Segoe UI Semibold", 28))
         c.create_text(W / 2 - 40, 190, text=self.gear_text(d), fill=ACCENT, font=("Segoe UI Semibold", 22))
         rm = max(1000.0, d["rpm_max"] or 2500.0)
         c.create_text(W / 2 + 40, 190, text=f"{d['rpm'] / 1000.0:.1f}", fill=GREEN if d["rpm"] < rm * 0.8 else RED, font=("Segoe UI Semibold", 14))
@@ -1453,8 +1464,8 @@ class DashWin(Win):
         self.panel(PANEL, w=W)
         sp = abs(d["speed"]) * k
         vmax = 180 if mph else 260
-        self.dial(122, 118, 104, sp, vmax, 10 if mph else 20, 2, "миль/ч" if mph else "км/ч", ACCENT)
-        c.create_text(122, 92, text=f"{sp:.0f}", fill=FG, font=("Segoe UI Semibold", 24))
+        self.dial(122, 118, 104, sp, vmax, 10 if mph else 20, 2, "миль/ч" if mph else "км/ч", speed_col(d, ACCENT))
+        c.create_text(122, 92, text=f"{sp:.0f}", fill=speed_col(d, FG), font=("Segoe UI Semibold", 24))
         rm = max(1000.0, d["rpm_max"] or 2500.0)
         top = 3000 if rm <= 3000 else int(math.ceil(rm / 500.0) * 500)
         self.dial(W - 100, 118, 84, d["rpm"], top, 250, 4, "об/мин ×100", GREEN if d["rpm"] < rm * 0.8 else RED, scale=0.1, red_from=rm * 0.9)
@@ -1480,7 +1491,7 @@ class DashWin(Win):
         c.delete("all")
         self.panel(PANEL, w=W)
         sp = abs(d["speed"]) * k
-        c.create_text(14, 46, text=f"{sp:.0f}", fill=FG, anchor="w", font=("Segoe UI Semibold", 34))
+        c.create_text(14, 46, text=f"{sp:.0f}", fill=speed_col(d, FG), anchor="w", font=("Segoe UI Semibold", 34))
         c.create_text(14, 84, text="миль/ч" if mph else "км/ч", fill=DIM, anchor="w", font=("Segoe UI", 8))
         c.create_text(122, 46, text=self.gear_text(d), fill=ACCENT, anchor="w", font=("Segoe UI Semibold", 30))
         rm = max(1000.0, d["rpm_max"] or 2500.0)
@@ -1512,7 +1523,7 @@ class DashWin(Win):
         c.delete("all")
         self.panel(PANEL, w=W)
         sp = abs(d["speed"]) * k
-        c.create_text(12, 40, text=f"{sp:.0f}", fill=FG, anchor="w", font=("Segoe UI Semibold", 30))
+        c.create_text(12, 40, text=f"{sp:.0f}", fill=speed_col(d, FG), anchor="w", font=("Segoe UI Semibold", 30))
         c.create_text(92, 52, text="миль/ч" if mph else "км/ч", fill=DIM, anchor="w", font=("Segoe UI", 8))
         c.create_text(150, 38, text=self.gear_text(d), fill=ACCENT, anchor="w", font=("Segoe UI Semibold", 26))
         self.limit_sign(d, W - 28, 30, 17, k, 10)
@@ -1528,7 +1539,7 @@ class DashWin(Win):
         c, W = self.canvas, self.w
         sp = abs(d["speed"]) * k
         fnt = self.big
-        c.create_text(18, 78, text=f"{sp:.0f}", fill=FG, anchor="w", font=fnt)
+        c.create_text(18, 78, text=f"{sp:.0f}", fill=speed_col(d, FG), anchor="w", font=fnt)
         c.create_text(18 + fnt.measure(f"{sp:.0f}") + 8, 92, text="миль/ч" if mph else "км/ч", fill=DIM, anchor="w", font=("Segoe UI", 10))
         g = d["gear"]
         gt = "R" if g < 0 else "N" if g == 0 else str(g)
@@ -1727,7 +1738,7 @@ class MfdWin(Win):
         # статус-бар
         k = 0.621371 if self.app.cfg["mph"] else 1.0
         sp = abs(d["speed"]) * k if d else 0
-        c.create_text(14, 17, text=f"{sp:.0f} {'миль/ч' if self.app.cfg['mph'] else 'км/ч'}", fill=FG, anchor="w", font=self.f_b)
+        c.create_text(14, 17, text=f"{sp:.0f} {'миль/ч' if self.app.cfg['mph'] else 'км/ч'}", fill=speed_col(d, FG) if d else FG, anchor="w", font=self.f_b)
         if d:
             g = d["gear"]
             c.create_text(118, 17, text="R" if g < 0 else "N" if g == 0 else f"D{g}", fill=ACCENT, anchor="w", font=self.f_b)
@@ -1785,7 +1796,7 @@ class MfdWin(Win):
     def scr_0(self, d, k, unit):
         c, W = self.canvas, self.w
         lim = d["limit"] * k
-        c.create_text(22, 100, text=f"{abs(d['speed']) * k:.0f}", fill=FG, anchor="w", font=self.f_big)
+        c.create_text(22, 100, text=f"{abs(d['speed']) * k:.0f}", fill=speed_col(d, FG), anchor="w", font=self.f_big)
         c.create_text(22 + self.f_big.measure(f"{abs(d['speed']) * k:.0f}") + 8, 108, text="миль/ч" if self.app.cfg["mph"] else "км/ч", fill=DIM, anchor="w", font=self.f_n)
         if lim > 1:
             over = abs(d["speed"]) > d["limit"] + 3

@@ -266,3 +266,16 @@ class LauncherLifecycle(unittest.TestCase):
     def test_last_view_default_and_persist(self):
         import yassno_launcher as L
         self.assertEqual(L.default_launcher()["last_view"], "")
+
+
+class SpeedColorTests(unittest.TestCase):
+    def test_gradient(self):
+        base = "#e8edf3"
+        self.assertEqual(E.speed_col({"limit": 80, "speed": 70}, base), base)
+        self.assertEqual(E.speed_col({"limit": 0, "speed": 200}, base), base)          # лимит неизвестен
+        a = E.speed_col({"limit": 80, "speed": 88}, base)
+        b = E.speed_col({"limit": 80, "speed": 100}, base)
+        self.assertEqual(b, "#ff1a1a")
+        self.assertNotEqual(a, base)
+        self.assertGreater(int(a[1:3], 16), int(a[3:5], 16))                           # красный преобладает, но не на максимуме
+        self.assertGreater(int(a[3:5], 16), int(b[3:5], 16))
