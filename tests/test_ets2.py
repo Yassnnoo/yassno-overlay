@@ -317,3 +317,19 @@ class FrameLevelTests(unittest.TestCase):
             self.assertEqual(w.cfg["frame_op"]["dash"], 100)
         finally:
             w.quit()
+
+
+class FrameAllTests(unittest.TestCase):
+    def test_all_overrides_and_expands(self):
+        self.assertEqual(E.frame_level({"frame_all": 0, "frame_op": {"dash": 100}}, "dash"), 0)
+        self.assertEqual(E.frame_level({"frame_all": -1, "frame_op": {"dash": 50}}, "dash"), 50)
+        w = WindowStyleTests()._app(locked=True, win_convoy=False, frame_all=0)
+        try:
+            d = next(x for x in w.wins if x.KEY == "dash")
+            self.assertEqual(d.level(), 0)
+            w.set_frame("dash", 100)                      # одно окно вернули — остальные остались без рамки
+            self.assertEqual(w.cfg["frame_all"], -1)
+            self.assertEqual(E.frame_level(w.cfg, "dash"), 100)
+            self.assertEqual(E.frame_level(w.cfg, "map"), 0)
+        finally:
+            w.quit()

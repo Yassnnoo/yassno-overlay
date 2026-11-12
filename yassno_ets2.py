@@ -111,7 +111,8 @@ STIPPLES = {75: "gray75", 50: "gray50", 25: "gray25"}
 def frame_level(cfg, key):
     """Непрозрачность фона и рамки окна, %: 100 — сплошной, 0 — без рамки. Содержимое окна всегда чёткое."""
     try:
-        v = int(cfg.get("frame_op", {}).get(key, 100))
+        allv = int(cfg.get("frame_all", -1))
+        v = allv if allv >= 0 else int(cfg.get("frame_op", {}).get(key, 100))
     except (TypeError, ValueError, AttributeError):
         return 100
     return min(FRAME_LEVELS, key=lambda it: abs(it[0] - v))[0]
@@ -150,7 +151,7 @@ def grip_zone(canvas, e):
 
 DEFAULTS = {"locked": False, "alpha": 0.94, "mph": False, "win_map": True, "win_dash": True, "win_trip": True,
             "map_span": 1600.0, "map_heading_up": True, "map_size": 360, "map_auto_zoom": True,
-            "pos": {}, "game_dir": "", "autostart": False, "scale": {}, "hide_idle": True, "dash_style": "classic", "theme": "amber", "win_style": "classic", "frame_op": {}, "win_convoy": False, "convoy_ids": "",
+            "pos": {}, "game_dir": "", "autostart": False, "scale": {}, "hide_idle": True, "dash_style": "classic", "theme": "amber", "win_style": "classic", "frame_op": {}, "frame_all": -1, "win_convoy": False, "convoy_ids": "",
             "win_mfd": True, "mfd_screen": 0, "mfd_keys": "numpad", "mfd_binds": {}}
 
 
@@ -2278,11 +2279,14 @@ class App:
     def set_frame(self, key, lvl):
         """Фон/рамка окна: 100 сплошной … 25 почти прозрачный, 0 — без рамки."""
         fo = dict(self.cfg.get("frame_op") or {})
+        if int(self.cfg.get("frame_all", -1)) >= 0:        # было «для всех»: разворачиваем в настройки окон и меняем одно
+            fo = {k[4:]: int(self.cfg["frame_all"]) for k, _ in self.WINDOWS}
+            self.cfg["frame_all"] = -1
         fo[key] = int(lvl)
         self.cfg["frame_op"] = fo
         save_cfg(self.cfg)
         for w in self.wins:
-            if w.KEY == key:
+            if True:
                 w.last_draw = 0.0
                 w._t_upd = 0.0
                 try:

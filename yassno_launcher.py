@@ -66,7 +66,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "2.7.6"
+APP_VERSION = "2.7.7"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -2015,6 +2015,9 @@ class Ets2Page(ttk.Frame):
             for lv, n in ETS2.FRAME_LEVELS:
                 if var.get() in (n, tr(n)):
                     fo = dict(self.cfg.get("frame_op") or {})
+                    if int(self.cfg.get("frame_all", -1)) >= 0:
+                        fo = {k: int(self.cfg["frame_all"]) for k in ("mfd", "map", "dash", "trip", "convoy")}
+                        self.cfg["frame_all"] = -1
                     fo[key] = lv
                     self.cfg["frame_op"] = fo
                     self._frame_dirty = True
@@ -2068,6 +2071,24 @@ class Ets2Page(ttk.Frame):
         cb.pack(side="left", padx=(8, 0))
         cb.bind("<<ComboboxSelected>>", lambda e: self.wstyle_changed())
         self.hint(f, "Форма углов и цветная метка у заголовков — как в оверлеях других игр.")
+        row = tk.Frame(f, bg=UI_BG)
+        row.pack(fill="x", pady=(6, 0))
+        tk.Label(row, text=tr("Фон и рамка всех окон"), bg=UI_BG, fg=UI_FG, font=("Segoe UI", 10)).pack(side="left")
+        names = {-1: "Для каждого окна отдельно"}
+        names.update(dict(ETS2.FRAME_LEVELS))
+        fvar = tk.StringVar(value=names.get(int(self.cfg.get("frame_all", -1)), names[-1]))
+        fcb = ttk.Combobox(row, textvariable=fvar, values=[tr(n) for n in names.values()], width=26, state="readonly")
+        fcb.pack(side="left", padx=(8, 0))
+
+        def frame_all_chosen(e=None):
+            for lv, n in names.items():
+                if fvar.get() in (n, tr(n)):
+                    self.cfg["frame_all"] = lv
+                    self._frame_dirty = True
+            self.save(keep_look=True)
+            self.redraw_preview()
+        fcb.bind("<<ComboboxSelected>>", frame_all_chosen)
+        self.hint(f, "«Без рамки и фона» убирает подложку и обводку у всех окон сразу, остаются только цифры и приборы. Для отдельного окна — на его странице.")
         f = self.card("Общие")
         self.tgl(f, "mph", "Мили и мили в час вместо километров")
         self.tgl(f, "autostart", "Запускать оверлей сам, когда запущена игра")
@@ -2280,6 +2301,7 @@ class Ets2Page(ttk.Frame):
                 self.cfg[k] = fresh[k]
             if not getattr(self, "_frame_dirty", False):          # фон окон мог поменяться в игре (ПКМ → «Фон и рамка»)
                 self.cfg["frame_op"] = fresh.get("frame_op", {})
+                self.cfg["frame_all"] = fresh.get("frame_all", -1)
             self._frame_dirty = False
             if not keep_look and hasattr(self, "dash_var"):
                 self.dash_var.set(self.dash_names.get(self.cfg["dash_style"], self.dash_var.get()))
