@@ -333,3 +333,30 @@ class FrameAllTests(unittest.TestCase):
             self.assertEqual(E.frame_level(w.cfg, "map"), 0)
         finally:
             w.quit()
+
+
+class IntroTests(unittest.TestCase):
+    def test_intro_draws_and_finishes(self):
+        import tkinter as tk
+        import yassno_launcher as L
+        L.set_ui_theme(L.default_launcher()["theme"])
+        r = tk.Tk()
+        try:
+            r.geometry("900x600+0+0")
+            r.update()
+            it = L.Intro(r, 900, 600)
+            r.after_cancel(it.after_id)
+            for t in (0.0, 0.4, 1.0, 1.6, it.DUR - 0.3, it.DUR - 0.01):
+                it.draw(t)
+                r.update()
+            self.assertTrue(it.cv.find_all())
+            it.finish()
+            self.assertTrue(it.done)
+            it.finish()                                   # повторный вызов безопасен
+            self.assertAlmostEqual(float(r.attributes("-alpha")), 1.0, places=1)
+        finally:
+            r.destroy()
+
+    def test_intro_default_on(self):
+        import yassno_launcher as L
+        self.assertTrue(L.default_launcher()["intro_anim"])

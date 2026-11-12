@@ -66,7 +66,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "2.7.7"
+APP_VERSION = "2.7.8"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -617,7 +617,7 @@ def default_launcher():
     return {"autostart": True, "close_with_game": True, "theme": "dark", "lang": "ru", "win_start": False,
             "start_min": False, "min_tray": False, "close_tray": False, "stop_on_exit": False, "poll_sec": 2.5,
             "apps_close": True, "launch_with_game": True, "telemetry": True, "i2_path": "", "tel_strips": [],
-            "auto_update": True, "shortcut_asked": False, "last_view": ""}
+            "auto_update": True, "shortcut_asked": False, "last_view": "", "intro_anim": True}
 
 
 def load_launcher():
@@ -1702,6 +1702,135 @@ def section(parent, title):
     inner._outer = rb
     ttk.Frame.pack(inner, fill="x")
     return inner
+
+
+class Intro:
+    """Заставка при запуске лаунчера: циферблат с разгоном стрелки, надпись по буквам, затем шторка уходит вверх.
+    Клик или любая клавиша пропускают. Выключается в «Настройках лаунчера»."""
+    DUR = 2.3
+    REVEAL = 0.55
+
+    def __init__(self, root, w=1240, h=700):
+        self.root, self.hw, self.hh = root, w, h
+        self.t0 = None
+        self.done = False
+        self.cv = tk.Canvas(root, bg=UI_BG, highlightthickness=0, bd=0, takefocus=1)
+        self.cv.place(x=0, y=0, relwidth=1, relheight=1)
+        tk.Misc.lift(self.cv)
+        self.cv.bind("<Button-1>", self.finish)
+        self.cv.bind("<Key>", self.finish)
+        try:
+            self.cv.focus_set()
+            root.attributes("-alpha", 0.0)
+        except tk.TclError:
+            pass
+        self.f1 = tkfont.Font(family="Segoe UI Semibold", size=44)
+        self.f2 = tkfont.Font(family="Segoe UI", size=15)
+        self.f3 = tkfont.Font(family="Segoe UI", size=10)
+        self.after_id = self.root.after(16, self.tick)
+
+    @staticmethod
+    def clamp(x):
+        return 0.0 if x < 0 else 1.0 if x > 1 else x
+
+    @classmethod
+    def ease_out(cls, x):
+        x = cls.clamp(x)
+        return 1 - (1 - x) ** 3
+
+    @classmethod
+    def ease_in(cls, x):
+        x = cls.clamp(x)
+        return x ** 3
+
+    def tick(self):
+        if self.done:
+            return
+        now = time.monotonic()
+        if self.t0 is None:                              # отсчёт с первого кадра: время сборки интерфейса не съедает анимацию
+            self.t0 = now
+        t = now - self.t0
+        if t >= self.DUR:
+            self.finish()
+            return
+        try:
+            self.root.attributes("-alpha", min(1.0, t / 0.35))
+        except tk.TclError:
+            pass
+        self.draw(t)
+        self.after_id = self.root.after(16, self.tick)
+
+    def finish(self, e=None):
+        if self.done:
+            return
+        self.done = True
+        try:
+            self.root.after_cancel(self.after_id)
+        except Exception:
+            pass
+        try:
+            self.cv.destroy()
+            self.root.attributes("-alpha", 1.0)
+        except tk.TclError:
+            pass
+
+    def spaced(self, cv, text, font, cx, y, gap, t, t0, step, col_to, rise=18):
+        """Надпись по буквам: каждая выезжает снизу и проявляется из фона."""
+        widths = [font.measure(ch) for ch in text]
+        total = sum(widths) + gap * (len(text) - 1)
+        x = cx - total / 2.0
+        for i, ch in enumerate(text):
+            q = self.ease_out((t - (t0 + step * i)) / 0.38)
+            if q > 0:
+                cv.create_text(x + widths[i] / 2.0, y + (1 - q) * rise, text=ch, font=font, fill=mix(UI_BG, col_to, q))
+            x += widths[i] + gap
+
+    def draw(self, t):
+        cv = self.cv
+        W = cv.winfo_width() if cv.winfo_width() > 50 else self.hw
+        H = cv.winfo_height() if cv.winfo_height() > 50 else self.hh
+        cv.delete("all")
+        cx, cy = W / 2.0, H / 2.0 - 46
+        R = max(70, min(W, H) * 0.17)
+        # шторка: в конце весь экран уезжает вверх
+        rv = self.ease_in((t - (self.DUR - self.REVEAL)) / self.REVEAL)
+        try:
+            cv.place_configure(y=int(-rv * H))
+        except tk.TclError:
+            return
+        p = self.ease_out(t / 1.05)                      # заполнение дуги
+        glow = mix(UI_BG, UI_ACCENT, 0.18)
+        cv.create_arc(cx - R, cy - R, cx + R, cy + R, start=210, extent=-240, style="arc", outline=mix(UI_BG, UI_DIM, 0.35 * self.ease_out(t / 0.4)), width=3)
+        n = 33
+        for i in range(n):                               # риски шкалы
+            f = i / float(n - 1)
+            if f > p + 0.001:
+                break
+            a = math.radians(210 - 240 * f)
+            big = i % 4 == 0
+            r1, r2 = R + 10, R + (24 if big else 17)
+            head = max(0.0, 1 - (p - f) * 5)             # риски у «головы» горят ярче
+            col = mix(mix(UI_BG, UI_DIM, 0.8), UI_ACCENT, min(1.0, 0.25 + head))
+            cv.create_line(cx + r1 * math.cos(a), cy - r1 * math.sin(a), cx + r2 * math.cos(a), cy - r2 * math.sin(a), fill=col, width=3 if big else 2)
+        if p > 0:
+            cv.create_arc(cx - R, cy - R, cx + R, cy + R, start=210, extent=-240 * p, style="arc", outline=glow, width=14)
+            cv.create_arc(cx - R, cy - R, cx + R, cy + R, start=210, extent=-240 * p, style="arc", outline=UI_ACCENT, width=5)
+        # стрелка: разгон до красной зоны и возврат на «холостые»
+        nf = self.ease_out(t / 0.95) if t < 1.0 else 1 - 0.38 * self.ease_out((t - 1.0) / 0.45)
+        a = math.radians(210 - 240 * nf)
+        L = R * 0.86
+        cv.create_line(cx, cy, cx + L * math.cos(a), cy - L * math.sin(a), fill=UI_FG, width=4, capstyle="round")
+        cv.create_oval(cx - 9, cy - 9, cx + 9, cy + 9, fill=UI_BG, outline=UI_ACCENT, width=3)
+        # надпись
+        ty = cy + R + 78
+        self.spaced(cv, "YASSNO", self.f1, cx, ty, 16, t, 0.35, 0.075, UI_FG)
+        self.spaced(cv, "OVERLAY", self.f2, cx, ty + 50, 12, t, 1.0, 0.05, UI_ACCENT, 10)
+        lw = self.ease_out((t - 1.25) / 0.5) * 150           # линия расходится от центра
+        if lw > 1:
+            cv.create_line(cx - lw, ty + 78, cx + lw, ty + 78, fill=UI_ACCENT, width=2)
+        q = self.ease_out((t - 1.45) / 0.4)
+        if q > 0:
+            cv.create_text(cx, ty + 98, text="v" + APP_VERSION, font=self.f3, fill=mix(UI_BG, UI_DIM, q))
 
 
 class Toggle(tk.Frame):
@@ -6893,6 +7022,7 @@ class SettingsPage(ttk.Frame):
             "poll_sec": tk.DoubleVar(value=float(cfg["poll_sec"])),
             "telemetry": tk.BooleanVar(value=bool(cfg.get("telemetry", True))),
             "auto_update": tk.BooleanVar(value=bool(cfg.get("auto_update", True))),
+            "intro_anim": tk.BooleanVar(value=bool(cfg.get("intro_anim", True))),
         }
         self.i2_var = tk.StringVar(value=str(cfg.get("i2_path", "")))
         self.columnconfigure(0, weight=1)
@@ -6944,6 +7074,7 @@ class SettingsPage(ttk.Frame):
         self.tg(box, 1, "Крестик окна сворачивает в трей, а не закрывает", "close_tray")
         self.tray_lbl = ttk.Label(box, text="", style="Dim.TLabel", wraplength=380, justify="left")
         self.tray_lbl.grid(row=2, column=0, sticky="w", pady=(4, 0))
+        self.tg(box, 3, "Анимация заставки при запуске лаунчера", "intro_anim")
         self.tray_btn = ttk.Button(box, text="Установить поддержку трея", command=self.install_tray)
         self.tray_btn.grid(row=3, column=0, sticky="w", pady=(6, 0))
 
@@ -7040,7 +7171,7 @@ class SettingsPage(ttk.Frame):
         ttk.Button(box, text="Сбросить настройки лаунчера", command=self.reset).pack(anchor="w")
         ttk.Label(box, text="Профили оверлея (LMU и rFactor 2) не затрагиваются.", style="Dim.TLabel").pack(anchor="w", pady=(4, 0))
 
-        for key in ("win_start", "start_min", "min_tray", "close_tray", "stop_on_exit", "telemetry", "auto_update"):
+        for key in ("win_start", "start_min", "min_tray", "close_tray", "stop_on_exit", "telemetry", "auto_update", "intro_anim"):
             self.v[key].trace_add("write", lambda *a: self.apply())
         self.refresh_tray()
 
@@ -7085,7 +7216,7 @@ class SettingsPage(ttk.Frame):
 
     def apply(self):
         cfg = self.app.cfg
-        for k in ("win_start", "start_min", "min_tray", "close_tray", "stop_on_exit", "telemetry", "auto_update"):
+        for k in ("win_start", "start_min", "min_tray", "close_tray", "stop_on_exit", "telemetry", "auto_update", "intro_anim"):
             cfg[k] = bool(self.v[k].get())
         cfg["i2_path"] = self.i2_var.get().strip()
         try:
@@ -7361,6 +7492,12 @@ class App:
         self.runner.on_start = self.after_start
         self.runner.on_stop = self.after_stop
         self.build()
+        self.intro = None
+        if self.cfg.get("intro_anim", True) and "--minimized" not in sys.argv and not self.cfg.get("start_min_now"):
+            try:
+                self.intro = Intro(self.root, ww, wh)
+            except Exception as e:                       # noqa: BLE001
+                log_error("intro: " + repr(e))
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.root.bind("<Unmap>", self.on_unmap)
         self.root.after(500, self.poll)
