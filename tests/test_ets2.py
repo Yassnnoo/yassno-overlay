@@ -1,6 +1,7 @@
-import ctypes, os, sys, tempfile, unittest
+import ctypes, os, sys, tempfile, time, unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import yassno_ets2 as E
+import yassno_launcher  # noqa: F401  (раньше любых Tk-тестов: иначе GC чужого Tk в импорте роняет процесс)
 
 
 class Layout(unittest.TestCase):
@@ -360,3 +361,60 @@ class IntroTests(unittest.TestCase):
     def test_intro_default_on(self):
         import yassno_launcher as L
         self.assertTrue(L.default_launcher()["intro_anim"])
+
+
+class RouteTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        import yassno_route as R
+        cls.R = R
+        cls.g = R.RoadGraph(os.path.dirname(os.path.dirname(os.path.abspath(R.__file__))) if False else os.path.dirname(os.path.abspath(R.__file__)))
+
+    def test_cities_lookup(self):
+        for n in ("Hannover", "BREMEN", "hannover", "Aalborg"):
+            self.assertIsNotNone(self.g.city_px(n), n)
+        self.assertIsNone(self.g.city_px("Нигдеград"))
+
+    def test_hannover_bremen(self):
+        R = self.R
+        a, b = self.g.city_px("Hannover"), self.g.city_px("Bremen")
+        r = self.g.route_px(a, b)
+        self.assertIsNotNone(r)
+        straight = ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5 * R.M_PER_PX / 1000
+        self.assertGreater(r["km"], straight * 0.99)
+        self.assertLess(r["km"], straight * 3.5)            # не должен петлять через пол-Европы
+        self.assertGreater(len(r["pts"]), 20)
+
+    def test_long_route_across_water(self):
+        a, b = self.g.city_px("Calais"), self.g.city_px("London")
+        r = self.g.route_px(a, b)
+        self.assertIsNotNone(r)                              # через тоннель/паром связь есть
+
+    def test_draw_route(self):
+        from PIL import Image, ImageDraw
+        img = Image.new("RGB", (200, 200), (40, 40, 40))
+        pts = [(i * 20.0, i * 5.0) for i in range(100)]
+        E.draw_route(ImageDraw.Draw(img), pts, 0.0, 0.0, 0.5, 100, 100, 0.7, 1.0)
+        self.assertNotEqual(img.getpixel((100, 100)), (40, 40, 40))   # линия через центр нарисована
+        E.draw_route(ImageDraw.Draw(img), [], 0, 0, 1, 100, 100, 0, 1)      # пустой маршрут не падает
+
+    def test_manager_follows_and_recomputes(self):
+        class A:
+            cfg = {"show_route": True}
+        m = E.RouteMgr(A())
+        src = self.g.city_px("Hannover")
+        R = self.R
+        gx, gz = R.X1 + src[0] / R.S * R.XW, R.Y1 + src[1] / R.S * R.YH
+        d = {"on_job": True, "city_dst": "Bremen", "city_dst_id": "bremen", "x": gx, "z": gz}
+        m.update(d)
+        t0 = time.time()
+        while m.busy and time.time() - t0 < 20:
+            time.sleep(0.05)
+        pts = m.update(d)
+        self.assertGreater(len(pts), 20)
+        A.cfg["show_route"] = False
+        self.assertEqual(m.update(d), [])
+        A.cfg["show_route"] = True
+        d2 = dict(d, on_job=False)
+        self.assertEqual(m.update(d2), [])                   # без груза маршрута нет
+        self.assertIsNone(m.key)

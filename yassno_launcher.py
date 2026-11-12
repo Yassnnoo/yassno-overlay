@@ -66,7 +66,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "2.7.8"
+APP_VERSION = "2.8.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -209,7 +209,7 @@ MODES = {"stand_mode": [("table", "Таблица"), ("compact", "Компакт
          "tyres_view": [("table", "Подробная"), ("compact", "Компактная: шины рисунком"),
                        ("wear", "Износ: остаток и за круг")]}
 MAP_RADII = [200, 300, 500, 800, 1200]
-UPDATE_FILES = ("yassno_overlay.py", "yassno_launcher.py", "yassno_svgmap.py", "yassno_readers.py", "yassno_ets2.py", "README.txt")
+UPDATE_FILES = ("yassno_overlay.py", "yassno_launcher.py", "yassno_svgmap.py", "yassno_readers.py", "yassno_ets2.py", "yassno_route.py", "ets2_roads.txt", "ets2_cities.txt", "README.txt")
 BACKUP_DIR = os.path.join(HERE, "backup")
 UPDATE_REPO, UPDATE_BRANCH = "Yassnnoo/yassno-overlay", "main"        # откуда лаунчер сам берёт обновления
 UPDATE_EXT = (".py", ".txt", ".png", ".cmd")
@@ -1959,7 +1959,7 @@ class Ets2Page(ttk.Frame):
         if ETS2 is None:
             ttk.Label(self, text="Не найден файл yassno_ets2.py рядом с лаунчером.", style="Dim.TLabel").pack(anchor="w")
             return
-        for k in ("win_mfd", "win_map", "win_dash", "win_trip", "win_convoy", "mph", "autostart", "hide_idle", "map_heading_up", "map_auto_zoom"):
+        for k in ("win_mfd", "win_map", "win_dash", "win_trip", "win_convoy", "mph", "autostart", "hide_idle", "map_heading_up", "map_auto_zoom", "show_route"):
             self.v[k] = tk.BooleanVar(value=bool(self.cfg.get(k)))
         self.dir_var = tk.StringVar(value=self.cfg.get("game_dir", ""))
         self.keys_var = tk.StringVar(value=self.KEYSETS.get(self.cfg.get("mfd_keys", "numpad"), self.KEYSETS["numpad"]))
@@ -2274,6 +2274,7 @@ class Ets2Page(ttk.Frame):
         self.frame_row(f, "map")
         self.tgl(f, "map_heading_up", "Карта поворачивается по ходу движения (иначе север вверху)")
         self.tgl(f, "map_auto_zoom", "Авто-масштаб: на скорости смотреть дальше")
+        self.tgl(f, "show_route", "Маршрут по дорогам до пункта назначения (если есть груз)")
         row = tk.Frame(f, bg=UI_BG)
         row.pack(fill="x", pady=(6, 0))
         tk.Label(row, text=tr("Размер карты, px"), bg=UI_BG, fg=UI_FG, font=("Segoe UI", 10)).pack(side="left")

@@ -11,6 +11,7 @@
 import argparse
 import collections
 import ctypes
+import gc
 import json
 import math
 import mmap
@@ -151,7 +152,7 @@ def grip_zone(canvas, e):
 
 DEFAULTS = {"locked": False, "alpha": 0.94, "mph": False, "win_map": True, "win_dash": True, "win_trip": True,
             "map_span": 1600.0, "map_heading_up": True, "map_size": 360, "map_auto_zoom": True,
-            "pos": {}, "game_dir": "", "autostart": False, "scale": {}, "hide_idle": True, "dash_style": "classic", "theme": "amber", "win_style": "classic", "frame_op": {}, "frame_all": -1, "win_convoy": False, "convoy_ids": "",
+            "pos": {}, "game_dir": "", "autostart": False, "scale": {}, "hide_idle": True, "dash_style": "classic", "theme": "amber", "win_style": "classic", "show_route": True, "frame_op": {}, "frame_all": -1, "win_convoy": False, "convoy_ids": "",
             "win_mfd": True, "mfd_screen": 0, "mfd_keys": "numpad", "mfd_binds": {}}
 
 
@@ -598,7 +599,7 @@ def parse_map(buf):
         "park": bool(b.parkBrake), "engine_on": bool(b.engineEnabled), "beam_low": bool(b.lightsBeamLow), "beam_high": bool(b.lightsBeamHigh),
         "blink_l": bool(b.blinkerLeftOn), "blink_r": bool(b.blinkerRightOn), "hazard": bool(b.lightsHazard),
         "x": dp.coordinateX, "y": dp.coordinateY, "z": dp.coordinateZ, "heading": (head % 1.0) * 360.0,
-        "cargo": _txt(m.config_s.cargo), "city_src": _txt(m.config_s.citySrc), "city_dst": _txt(m.config_s.cityDst),
+        "cargo": _txt(m.config_s.cargo), "city_src": _txt(m.config_s.citySrc), "city_dst": _txt(m.config_s.cityDst), "city_dst_id": _txt(m.config_s.cityDstId),
         "comp_src": _txt(m.config_s.compSrc), "comp_dst": _txt(m.config_s.compDst), "brand": _txt(m.config_s.truckBrand),
         "truck": _txt(m.config_s.truckName), "on_job": bool(m.special_b.onJob), "income": m.config_ull.jobIncome,
         "cargo_mass": m.config_f.cargoMass, "delivery_minutes": m.config_ui.time_abs_delivery,
@@ -2003,6 +2004,126 @@ class ConvoyWin(Win):
             c.create_text(10, self.h - 10, text=feed.err, fill=YELLOW, anchor="w", font=("Segoe UI", 7))
 
 
+def draw_route(dr, pts, gx, gz, s, cx, cy, a, kk):
+    """Линия маршрута на кадре карты. pts — мировые координаты; s — пикселей на единицу; a — поворот карты (рад)."""
+    ca, sa = math.cos(a), math.sin(a)
+    lim = max(cx, cy) * 1.6
+    line = []
+    for wx, wz in pts:
+        dx, dz = (wx - gx) * s, (wz - gz) * s
+        x, y = cx + dx * ca - dz * sa, cy + dx * sa + dz * ca
+        if abs(x - cx) > lim * 4 or abs(y - cy) > lim * 4:
+            if len(line) > 1:
+                break                                    # дальше маршрут ушёл за кадр
+            line = []
+            continue
+        line.append((x, y))
+    if len(line) > 1:
+        dr.line(line, fill=(14, 22, 34), width=max(3, int(round(7 * kk))), joint="curve")
+        dr.line(line, fill=(43, 217, 255), width=max(2, int(round(4 * kk))), joint="curve")
+        ex, ey = line[-1]
+        if abs(ex - cx) < lim and abs(ey - cy) < lim:
+            r = 6 * kk
+            dr.ellipse((ex - r, ey - r, ex + r, ey + r), fill=(43, 217, 255), outline=(14, 22, 34), width=2)
+
+
+class RouteMgr:
+    """Оптимальный маршрут по дорогам до города назначения. Граф и A* — в yassno_route.py, считаем в фоновом потоке."""
+
+    OFF = 140.0                                          # дальше стольких игровых единиц от линии — считаем, что съехали
+
+    def __init__(self, app):
+        self.app = app
+        self.pts = []                                    # [(gx, gz)]
+        self.i = 0
+        self.key = None
+        self.busy = False
+        self.graph = None
+        self.err = ""
+        self.off_since = 0.0
+        self.lock = threading.Lock()
+
+    def reset(self):
+        with self.lock:
+            self.pts, self.i, self.key = [], 0, None
+
+    def _graph(self):
+        if self.graph is None:
+            sys.path.insert(0, HERE) if HERE not in sys.path else None
+            import yassno_route
+            self.graph = yassno_route.RoadGraph(HERE)
+        return self.graph
+
+    def _job(self, key, name_a, name_b, gx, gz):
+        was = gc.isenabled()
+        gc.disable()                                     # сборка мусора в чужом потоке может добить Tk-объекты не в том потоке
+        try:
+            g = self._graph()
+            import yassno_route as R
+            dst = None
+            for nm in (name_a, name_b):
+                dst = g.city_px(nm) if nm else None
+                if dst:
+                    break
+            r = g.route_px(R.world_to_px(gx, gz), dst) if dst else None
+            pts = [(R.X1 + px / R.S * R.XW, R.Y1 + py / R.S * R.YH) for px, py in r["pts"]] if r else []
+            self.err = "" if r else ("нет города на карте" if not dst else "путь не найден")
+        except Exception as e:                           # noqa: BLE001
+            pts, self.err = [], str(e)
+        finally:
+            if was:
+                gc.enable()
+        with self.lock:
+            if self.key == key:
+                self.pts, self.i = pts, 0
+            self.busy = False
+
+    def want(self, d):
+        if not (self.app.cfg.get("show_route", True) and d and d.get("on_job")):
+            return None
+        a, b = d.get("city_dst_id", ""), d.get("city_dst", "")
+        return (a, b) if (a or b) else None
+
+    def update(self, d):
+        """Вызывается из окна карты каждый кадр; возвращает точки маршрута от текущей позиции (или [])."""
+        w = self.want(d)
+        if w is None:
+            if self.key is not None:
+                self.reset()
+            return []
+        with self.lock:
+            pts, i = self.pts, self.i
+        now = time.monotonic()
+        if pts:                                          # где мы на линии: ищем ближайший отрезок вперёд от прошлого индекса
+            gx, gz = d["x"], d["z"]
+            best, bi = 1e18, i
+            for k in range(max(0, i - 3), min(len(pts) - 1, i + 60)):
+                (ax, az), (bx, bz) = pts[k], pts[k + 1]
+                vx, vz = bx - ax, bz - az
+                L = vx * vx + vz * vz
+                t = 0.0 if L <= 0 else max(0.0, min(1.0, ((gx - ax) * vx + (gz - az) * vz) / L))
+                dd = (gx - ax - t * vx) ** 2 + (gz - az - t * vz) ** 2
+                if dd < best:
+                    best, bi = dd, k
+            if best > self.OFF ** 2:
+                if not self.off_since:
+                    self.off_since = now
+            else:
+                self.off_since = 0.0
+                with self.lock:
+                    self.i = bi
+        recalc = (self.key != w) or (pts and self.off_since and now - self.off_since > 2.5)
+        if recalc and not self.busy:
+            with self.lock:
+                self.key = w
+                self.busy = True
+                if self.off_since:
+                    self.off_since = 0.0
+            threading.Thread(target=self._job, args=(w, w[0], w[1], d["x"], d["z"]), daemon=True).start()
+        with self.lock:
+            return self.pts[self.i:] if self.key == w else []
+
+
 class MapWin(Win):
     KEY, TITLE = "map", "КАРТА"
     PERIOD = 0.0
@@ -2031,10 +2152,15 @@ class MapWin(Win):
         m.add_command(label="Приблизить", command=lambda: self.zoom(-1))
         m.add_command(label="Отдалить", command=lambda: self.zoom(1))
         m.add_command(label=("Север вверху" if self.app.cfg["map_heading_up"] else "Направление вверху"), command=self.toggle_mode)
+        m.add_command(label="Маршрут на карте: " + ("выкл" if self.app.cfg.get("show_route", True) else "вкл"), command=self.toggle_route)
         m.add_command(label="Авто-масштаб по скорости: " + ("выкл" if self.app.cfg["map_auto_zoom"] else "вкл"), command=self.toggle_auto)
 
     def toggle_mode(self):
         self.app.cfg["map_heading_up"] = not self.app.cfg["map_heading_up"]
+        save_cfg(self.app.cfg)
+
+    def toggle_route(self):
+        self.app.cfg["show_route"] = not self.app.cfg.get("show_route", True)
         save_cfg(self.app.cfg)
 
     def toggle_auto(self):
@@ -2100,6 +2226,7 @@ class MapWin(Win):
         self.smooth_span += (tgt - self.smooth_span) * 0.15
         span = self.smooth_span
         up = bool(self.app.cfg["map_heading_up"])
+        rpts = self.app.route.update(d) if self.app.cfg.get("show_route", True) else []
         self._req = (d["x"], d["z"], span, pw, ph, d["heading"] if up else None, up, d["heading"])
         self._ev.set()
         res = self._res
@@ -2112,6 +2239,8 @@ class MapWin(Win):
             return
         dr = ImageDraw.Draw(img)
         cx, cy = pw // 2, ph // 2
+        if rpts:
+            draw_route(dr, rpts, d["x"], d["z"], rpw / float(rspan), cx, cy, math.radians(rhead) if rup else 0.0, kk)
         ang = 0.0 if rup else math.radians(rhead)                              # направление стрелки на экране (CCW от «вверх»)
         pts = []
         for px, py in ((0, -13), (9, 10), (0, 5), (-9, 10)):          # поворот на ang против часовой (экранные оси, y вниз)
@@ -2241,6 +2370,7 @@ class App:
         self.demo = demo
         self.reader = DemoReader() if demo else Ets2Reader()
         self.tiles = TileMap() if HAVE_PIL else None
+        self.route = RouteMgr(self)
         self.d = None
         self.wins = []
         self.convoy = DemoConvoy() if demo else ConvoyFeed(self.cfg["convoy_ids"])
