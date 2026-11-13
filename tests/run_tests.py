@@ -467,6 +467,22 @@ class SelfTest(unittest.TestCase):
             self.assertIn("SELFTEST OK", out, f"{g}: {out[-600:]}")
 
 
+class FuelStretchVE(unittest.TestCase):
+    def test_stretch_keeps_ve_height(self):
+        import tkinter as tk
+        root = tk.Tk()
+        try:
+            cv = tk.Canvas(root, width=100, height=100)
+            fake = type("F", (), {})()
+            fake.canvas, fake.ON, fake.width, fake.height, fake._cur_h = cv, "fuel", 100, 100, 150
+            fake.main = type("M", (), {})()
+            fake.main._m = type("C", (), {"cfg": {"sx_fuel": 1.0, "sy_fuel": 1.1}})()
+            O.FuelWindow.stretch_size(fake)
+            self.assertEqual(int(float(cv.cget("height"))), 165)        # высота блока с энергией × растяжка, а не обычная 100 × 1.1
+        finally:
+            root.destroy()
+
+
 class LeaderLapsAndVE(unittest.TestCase):
     def _cars(self):
         mk = lambda k, laps, lg: {"key": k, "laps": laps, "laps_leader": 0, "gap_leader": lg, "best": 100.0}

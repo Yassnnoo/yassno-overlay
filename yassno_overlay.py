@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "2.8.1"
+APP_VERSION = "2.8.2"
 import argparse
 import bisect
 import collections
@@ -3170,17 +3170,24 @@ class FuelWindow(RelativeWindow):
         self.canvas.config(width=self.width, height=self.height)
         self._sig = None
 
+    def stretch_size(self):
+        stretch_apply(self.canvas, self.main._m.cfg, self.ON, self.width, getattr(self, "_cur_h", self.height), False)
+
+    def stretch_items(self):
+        stretch_apply(self.canvas, self.main._m.cfg, self.ON, self.width, getattr(self, "_cur_h", self.height), True)
+
     def fit_screen(self, H):
         """Окно с блоком энергии выше обычного и растёт вниз: если у нижнего края экрана, поднимаем его, чтобы блок не уезжал за экран."""
         if not self.main.locked:
             return
         try:
             x, y = int(self.main.cfg[self.POS[0]]), int(self.main.cfg[self.POS[1]])
-            sh = self.top.winfo_screenheight()
-            ny = min(y, sh - H - 6) if 0 <= y < sh else y
+            bx, by, bw, bh = screen_bounds(self.top)
+            H = round(H * stretch_get(self.main._m.cfg, self.ON)[1])
+            ny = max(by, min(y, by + bh - H - 6)) if by <= y < by + bh else y
             if ny != self.top.winfo_y():
-                self.top.geometry(f"+{x}+{max(0, ny)}")
-        except (tk.TclError, KeyError, ValueError):
+                self.top.geometry(f"+{x}+{ny}")
+        except (tk.TclError, KeyError, ValueError, TypeError):
             pass
 
     def tick(self, frame, ver):
@@ -3199,6 +3206,7 @@ class FuelWindow(RelativeWindow):
         H = self.height_ve if (d and d.get("ve")) else self.height
         if int(c.cget("height")) != H:
             c.config(height=H)
+        self._cur_h = H
         self.fit_screen(H)
         c.delete("all")
         if self.R:
