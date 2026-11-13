@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "2.8.2"
+APP_VERSION = "2.8.3"
 import argparse
 import bisect
 import collections
@@ -1027,7 +1027,7 @@ COLS = [("pos", "ПОЗ", 3.6, "e"), ("delta", "", 2.8, "w"), ("logo", "", 2.8, 
         ("num", "№", 3.8, "e"), ("tyre", "ШИНЫ", 3.8, "w"), ("name", "ПИЛОТ", 17, "w"), ("irat", "ЛИЦЕНЗИЯ / iR / ПРОГНОЗ", 17.5, "e"),
         ("ahead", "ВПЕРЕДИ", 7.5, "e"), ("lead", "ЛИДЕР", 7.5, "e"),
         ("best", "ЛУЧШИЙ", 8.6, "e"), ("last", "ПОСЛЕД.", 8.6, "e"),
-        ("fuel", "ТОПЛ.", 5.6, "e"), ("ve", "ЭНЕРГИЯ", 12.5, "w"), ("status", "СТАТУС", 7.8, "e")]
+        ("fuel", "ТОПЛ.", 5.6, "e"), ("ve", "ЭНЕРГИЯ", 14.0, "w"), ("status", "СТАТУС", 7.8, "e")]
 TOGGLE_COLS = [("logo", "Логотип марки"), ("tyre", "Шины"), ("ahead", "Отставание от передней"),
                ("lead", "Отставание от лидера"), ("best", "Лучший круг"), ("last", "Последний круг"),
                ("fuel", "Топливо"), ("ve", "Энергия"), ("delta", "Позиции ▲▼"), ("status", "Статус"), ("irat", "iRating и лицензия")]
@@ -6825,7 +6825,7 @@ class Overlay:
                     x = self.x_of["ve"]
                     c.create_rectangle(x, cy - bh // 2, x + bw, cy + bh // 2, fill=TRACK, outline="")
                     c.create_rectangle(x, cy - bh // 2, x + max(2, int(bw * min(ve, 1.0))), cy + bh // 2, fill=col, outline="")
-                    c.create_text(x + bw + 8, cy, text=f"{ve * 100:.0f}%", fill=col, anchor="w", font=self.bold)
+                    c.create_text(x + bw + 8, cy, text=f"{ve * 100:.1f}%", fill=col, anchor="w", font=self.bold)
                 elif key == "status":
                     if status:
                         col = {"out": RED, "pit": ACCENT, "pen": RED}.get(skind, DIM)
