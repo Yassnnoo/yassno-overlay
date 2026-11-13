@@ -467,6 +467,15 @@ class SelfTest(unittest.TestCase):
             self.assertIn("SELFTEST OK", out, f"{g}: {out[-600:]}")
 
 
+class NewBrandLogos(unittest.TestCase):
+    def test_oreca_isotta(self):
+        for model, slug in (("Oreca 07 Gibson", "oreca"), ("Isotta Fraschini Tipo 6-C", "isottafraschini")):
+            _, _, sl = O.brand_of({"model": model, "vehicle": ""})
+            self.assertEqual(sl, slug)
+            for sub in ("", "c"):
+                self.assertTrue(os.path.exists(os.path.join(O.HERE, "logos", sub, slug + ".png")), (sub, slug))
+
+
 class FuelStretchVE(unittest.TestCase):
     def test_stretch_keeps_ve_height(self):
         import tkinter as tk

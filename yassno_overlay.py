@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "2.8.3"
+APP_VERSION = "2.8.4"
 import argparse
 import bisect
 import collections
@@ -1020,7 +1020,7 @@ BRANDS = [(("ferrari",), "F", "#cd101a", "ferrari"), (("porsche",), "P", "#c41e3
           (("toyota",), "T", "#d71428", "toyota"), (("peugeot",), "P", "#0055a5", "peugeot"),
           (("cadillac",), "C", "#af9155", "cadillac"), (("alpine",), "A", "#005ac8", "alpine"),
           (("ligier",), "L", "#2d6cdf", "ligier"), (("genesis",), "G", "#b08d57", "genesis"),
-          (("ginetta",), "G", "#f59c0d", "ginetta"), (("oreca",), "O", "#6e7887", "")]
+          (("ginetta",), "G", "#f59c0d", "ginetta"), (("oreca",), "O", "#2f6fc4", "oreca"), (("isotta",), "IF", "#5c0409", "isottafraschini")]
 
 # ключ, заголовок, ширина (в «нулях» шрифта), выравнивание
 COLS = [("pos", "ПОЗ", 3.6, "e"), ("delta", "", 2.8, "w"), ("logo", "", 2.8, "w"),

@@ -63,7 +63,7 @@ def main():
     vp = os.path.join(SRC, "version.json")
     v = json.load(open(vp, encoding="utf-8"))
     v["version"], v["notes"] = ver, notes
-    for need in ("yassno_readers.py", "yassno_wheels.py", "yassno_setups.py", "yassno_svgmap.py", "yassno_ets2.py", "yassno_route.py", "ets2_roads.txt", "ets2_cities.txt", "logos/tile_ets2_on.png", "logos/tile_ets2_off.png", "logos/tile_ac_on.png", "logos/tile_ac_off.png", "logos/peugeot.png", "logos/genesis.png", "logos/ginetta.png", "logos/ligier.png") + tuple("logos/c/%s.png" % n for n in ("ferrari","porsche","bmw","mclaren","astonmartin","chevrolet","lamborghini","ford","lexus","mercedes","toyota","peugeot","cadillac","alpine","genesis","ginetta","ligier")):
+    for need in ("yassno_readers.py", "yassno_wheels.py", "yassno_setups.py", "yassno_svgmap.py", "yassno_ets2.py", "yassno_route.py", "ets2_roads.txt", "ets2_cities.txt", "logos/tile_ets2_on.png", "logos/tile_ets2_off.png", "logos/tile_ac_on.png", "logos/tile_ac_off.png", "logos/peugeot.png", "logos/genesis.png", "logos/ginetta.png", "logos/ligier.png") + tuple("logos/c/%s.png" % n for n in ("ferrari","porsche","bmw","mclaren","astonmartin","chevrolet","lamborghini","ford","lexus","mercedes","toyota","peugeot","cadillac","alpine","genesis","ginetta","ligier","oreca","isottafraschini")):
         if need not in v["files"]:
             v["files"].append(need)
     v["files"] = sorted(set(v["files"]))
