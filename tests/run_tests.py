@@ -476,7 +476,7 @@ class LeaderLapsAndVE(unittest.TestCase):
         g = O.group_gaps(self._cars(), False)
         self.assertEqual(g["a"][2], "12 кр.")
         self.assertEqual(g["b"][2], "+3.20")
-        self.assertEqual(O.group_gaps(self._cars(), True)["a"][2], "ЛИДЕР")
+        self.assertEqual(O.group_gaps(self._cars(), True)["a"][2], "12 кр.")
 
     def test_ve_reserve(self):
         fc = O.FuelCalc()

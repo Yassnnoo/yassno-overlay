@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "2.8.0"
+APP_VERSION = "2.8.1"
 import argparse
 import bisect
 import collections
@@ -188,7 +188,7 @@ def group_gaps(group, timed):
     for i, c in enumerate(group):
         if i == 0:
             ll = c.get("laps", 0)
-            out[c["key"]] = ("", None, (f"{ll} кр." if ll > 0 else "ЛИДЕР") if not timed else "ЛИДЕР")
+            out[c["key"]] = ("", None, f"{ll} кр.")
         elif timed:
             lead = group[0]["best"]
             lead_txt = fmt_gap(c["best"] - lead, 0) if c["best"] > 0 and lead > 0 else "-"
@@ -3170,6 +3170,19 @@ class FuelWindow(RelativeWindow):
         self.canvas.config(width=self.width, height=self.height)
         self._sig = None
 
+    def fit_screen(self, H):
+        """Окно с блоком энергии выше обычного и растёт вниз: если у нижнего края экрана, поднимаем его, чтобы блок не уезжал за экран."""
+        if not self.main.locked:
+            return
+        try:
+            x, y = int(self.main.cfg[self.POS[0]]), int(self.main.cfg[self.POS[1]])
+            sh = self.top.winfo_screenheight()
+            ny = min(y, sh - H - 6) if 0 <= y < sh else y
+            if ny != self.top.winfo_y():
+                self.top.geometry(f"+{x}+{max(0, ny)}")
+        except (tk.TclError, KeyError, ValueError):
+            pass
+
     def tick(self, frame, ver):
         sig = (ver // 2, self.main.cfg["font"], self.main.cfg.get("fuel_reserve", 0.0), self.main.cfg.get("ve_reserve", 0.0), self.main.cfg.get("fuel_scale", 0.8), int(time.time() * 2))
         if sig != self._sig:
@@ -3186,6 +3199,7 @@ class FuelWindow(RelativeWindow):
         H = self.height_ve if (d and d.get("ve")) else self.height
         if int(c.cget("height")) != H:
             c.config(height=H)
+        self.fit_screen(H)
         c.delete("all")
         if self.R:
             draw_rrect(c, 0, 0, W - 1, H - 1, self.R, fill=HDR_BG, outline=BORDER)
@@ -6860,7 +6874,7 @@ class Overlay:
         fnt, fb = self.font, self.bold
         items = []
         for i, car in enumerate(group):
-            ahead_txt = gaps[car["key"]][0] if i > 0 else ("ЛИДЕР" if not timed else fmt_lap(car["best"]) if car["best"] else "")
+            ahead_txt = gaps[car["key"]][0] if i > 0 else f"{car.get('laps', 0)} кр."
             seg = [("bar", 5, class_color(car["cls"]), None), ("t", fb.measure(f"{i + 1}") + 8, ACCENT if i == 0 else FG, (f"{i + 1}", fb)),
                    ("t", fnt.measure("#" + (car["number"] or "-")) + 10, DIM, ("#" + (car["number"] or "-"), fnt)),
                    ("t", fb.measure(car["driver"].upper()[:14]) + 12, FG, (car["driver"].upper()[:14], fb if car["player"] else fnt)),
