@@ -66,7 +66,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "2.8.5"
+APP_VERSION = "2.8.6"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -945,6 +945,9 @@ def setup_style(root):
     st.configure("Horizontal.TScale", background=UI_ACCENT, troughcolor=UI_OFF, bordercolor=UI_BG,
                  lightcolor=UI_ACCENT, darkcolor=UI_ACCENT)
     st.map("Horizontal.TScale", background=[("active", UI_ACCENT_HI)])
+    st.configure("Mini.TButton", padding=(8, 3), font=("Segoe UI", 9))                 # ряд маленьких кнопок под предпросмотром
+    st.configure("MiniSel.TButton", padding=(8, 3), font=("Segoe UI Semibold", 9), background=UI_ACCENT, foreground=UI_ACCENT_FG)
+    st.map("MiniSel.TButton", background=[("active", UI_ACCENT_HI)])
     st.configure("Active.TButton", background=UI_GREEN_DK, foreground="#ffffff", font=("Segoe UI Semibold", 10))
     st.map("Active.TButton", background=[("active", UI_GREEN)])
     st.configure("Treeview", background=UI_FIELD, fieldbackground=UI_FIELD, foreground=UI_FG, rowheight=26, borderwidth=0)
@@ -2247,8 +2250,12 @@ class Ets2Page(ttk.Frame):
         kb.bind("<<ComboboxSelected>>", lambda e: self.save())
         ttk.Button(row, text="Назначить…", command=self.bind_dialog).pack(side="left")
         self.hint(f, "Экраны: 1 обзор, 2 груз, 3 урон, 4 топливо, 5 двигатель, 6 рейс, 7 карта (колесо мыши — масштаб). Клавиши работают поверх игры; свои кнопки можно назначить и на руль.")
-        for i, n in enumerate(ETS2.MfdWin.SCREENS):
-            ttk.Button(self.ctrl, text=f"{i + 1}. {n.capitalize()}", command=lambda i=i: self.set_screen(i)).grid(row=i // 4, column=i % 4, sticky="ew", padx=(0, 4), pady=(0, 4))
+        self.scr_btns = []
+        for i, n in enumerate(ETS2.MfdWin.TABS):
+            b = ttk.Button(self.ctrl, text=f"{i + 1} {n.capitalize()}", style="Mini.TButton", width=0, command=lambda i=i: self.set_screen(i))
+            b.pack(side="left", padx=(0, 3))
+            self.scr_btns.append(b)
+        self.mark_screen()
 
     def page_dash(self):
         f = self.card("Приборы")
@@ -2263,7 +2270,7 @@ class Ets2Page(ttk.Frame):
         self.tgl(f, "mph", "Мили и мили в час вместо километров")
         self.hint(f, "В игре вид приборов переключается горячей клавишей (по умолчанию Ctrl+Shift+T).")
         for n, label, _ in ETS2.DashWin.STYLES:
-            ttk.Button(self.ctrl, text=label.split(":")[0], command=lambda n=n: self.pick_dash(n)).pack(side="left", padx=(0, 4))
+            ttk.Button(self.ctrl, text=label.split(":")[0], style="Mini.TButton", width=0, command=lambda n=n: self.pick_dash(n)).pack(side="left", padx=(0, 3))
 
     def page_trip(self):
         f = self.card("Рейс и топливо")
@@ -2323,8 +2330,16 @@ class Ets2Page(ttk.Frame):
         self.save(keep_look=True)
         self.redraw_preview()
 
+    def mark_screen(self):
+        for i, b in enumerate(getattr(self, "scr_btns", [])):
+            try:
+                b.configure(style="MiniSel.TButton" if i == getattr(self, "mfd_screen", 0) else "Mini.TButton")
+            except tk.TclError:
+                pass
+
     def set_screen(self, i):
         self.mfd_screen = i
+        self.mark_screen()
         self.redraw_preview()
 
     def mark_theme(self):
