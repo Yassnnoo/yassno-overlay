@@ -449,3 +449,11 @@ class LauncherEts2Bar(unittest.TestCase):
         for n in ("toggle_move", "set_move_btn", "move_on", "save_click"):
             self.assertTrue(callable(getattr(P, n)), n)
         self.assertIn("s6", [k for k, _ in P.LABELS])
+
+
+class UpdaterRef(unittest.TestCase):
+    def test_raw_url_pins_commit(self):
+        L = yassno_launcher
+        self.assertIn("/main/version.json", L.raw_url("version.json"))
+        self.assertIn("/abc123/version.json", L.raw_url("version.json", "abc123"))
+        self.assertTrue(callable(L.head_sha))

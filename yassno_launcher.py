@@ -66,7 +66,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "2.8.6"
+APP_VERSION = "2.8.7"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -220,8 +220,21 @@ def ver_tuple(v):
     return tuple(int(x) for x in re.findall(r"\d+", str(v))[:4])
 
 
-def raw_url(path):
-    return f"https://raw.githubusercontent.com/{UPDATE_REPO}/{UPDATE_BRANCH}/{path}"
+def raw_url(path, ref=None):
+    return f"https://raw.githubusercontent.com/{UPDATE_REPO}/{ref or UPDATE_BRANCH}/{path}"
+
+
+def head_sha():
+    """Хеш последнего коммита ветки (через API GitHub). По нему файлы берутся без задержки кэша raw.githubusercontent
+    (по имени ветки свежий релиз виден только минут через пять). Не вышло — пустая строка, тогда качаем по ветке."""
+    try:
+        req = urllib.request.Request(f"https://api.github.com/repos/{UPDATE_REPO}/commits/{UPDATE_BRANCH}",
+                                     headers={"User-Agent": "yassno-overlay-updater", "Accept": "application/vnd.github.sha"})
+        with urllib.request.urlopen(req, timeout=8) as r:
+            sha = r.read(100).decode("ascii", "ignore").strip()
+        return sha if re.fullmatch(r"[0-9a-f]{40}", sha) else ""
+    except Exception:                                    # noqa: BLE001
+        return ""
 
 
 def http_get(url, timeout=20):
@@ -406,14 +419,15 @@ def safe_rel(p):
 def check_online_update():
     """Возвращает (сведения, ошибка). Берёт version.json из репозитория."""
     try:
-        data = json.loads(http_get(raw_url("version.json") + "?t=%d" % time.time(), 15).decode("utf-8"))
+        ref = head_sha()
+        data = json.loads(http_get(raw_url("version.json", ref) + "?t=%d" % time.time(), 15).decode("utf-8"))
         ver = str(data["version"])
         files = [f for f in (safe_rel(x) for x in data.get("files", [])) if f]
         if not ver_tuple(ver) or "yassno_overlay.py" not in files or "yassno_launcher.py" not in files:
             return None, "в version.json нет нужных файлов"
     except Exception as e:
         return None, str(e)
-    return {"version": ver, "notes": str(data.get("notes", ""))[:700], "files": files,
+    return {"version": ver, "notes": str(data.get("notes", ""))[:700], "files": files, "ref": ref,
             "newer": ver_tuple(ver) > ver_tuple(APP_VERSION) and not ETS2_TEST_BUILD}, None
 
 
@@ -422,7 +436,7 @@ def apply_online_update(info):
     got = {}
     try:
         for rel in info["files"]:
-            body = http_get(raw_url(rel) + "?t=%d" % time.time())
+            body = http_get(raw_url(rel, info.get("ref")) + "?t=%d" % time.time())
             if not body:
                 return f"пустой файл {rel}"
             if rel.endswith(".py"):
