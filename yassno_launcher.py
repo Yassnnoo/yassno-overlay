@@ -66,7 +66,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "2.8.7"
+APP_VERSION = "2.9.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -471,7 +471,7 @@ HK_KEYS = [chr(c) for c in range(65, 91)] + [str(i) for i in range(10)] + [f"F{i
 # колонки таблицы: ключ, название, ширина в предпросмотре
 STAND_COLS = [("delta", "Позиции ▲▼ (изменение места)", 14), ("logo", "Логотип марки", 18), ("tyre", "Шины", 22),
               ("ahead", "Отставание от передней", 50), ("lead", "Отставание от лидера", 50), ("best", "Лучший круг", 64),
-              ("last", "Последний круг", 64), ("fuel", "Топливо", 36), ("ve", "Энергия", 76), ("status", "Статус", 36),
+              ("last", "Последний круг", 64), ("fuel", "Топливо", 36), ("ve", "Энергия", 76), ("status", "Статус", 44),
               ("irat", "iRating и лицензия (iRacing)", 124)]
 PED_PARTS = [("gear", "Передача"), ("speed", "Скорость"), ("wheel", "Руль"),
              ("graph", "График газа и тормоза"), ("bars", "Столбики педалей")]
@@ -631,7 +631,7 @@ def default_launcher():
     return {"autostart": True, "close_with_game": True, "theme": "dark", "lang": "ru", "win_start": False,
             "start_min": False, "min_tray": False, "close_tray": False, "stop_on_exit": False, "poll_sec": 2.5,
             "apps_close": True, "launch_with_game": True, "telemetry": True, "i2_path": "", "tel_strips": [],
-            "auto_update": True, "shortcut_asked": False, "last_view": "", "intro_anim": True}
+            "auto_update": True, "shortcut_asked": False, "last_view": "", "intro_anim": True, "ui_anim": True, "accent_by_game": True, "pv_bg": "dark"}
 
 
 def load_launcher():
@@ -716,6 +716,12 @@ def read_locked(game):
     """True — окна закреплены, False — режим перемещения, None — оверлей ещё не сообщил."""
     d = read_json(os.path.splitext(profile_path(game))[0] + ".state")
     return d.get("locked") if isinstance(d.get("locked"), bool) else None
+
+
+def read_connected(game):
+    """True — оверлей получает телеметрию, False — ждёт игру, None — оверлей не сообщил (старая версия)."""
+    d = read_json(os.path.splitext(profile_path(game))[0] + ".state")
+    return d.get("connected") if isinstance(d.get("connected"), bool) else None
 
 
 def pid_alive(pid):
@@ -947,8 +953,6 @@ def setup_style(root):
     st.map("TButton", background=[("active", UI_ACTIVE)])
     st.configure("TMenubutton", background=UI_PANEL, foreground=UI_FG, padding=(13, 7), borderwidth=1, arrowcolor=UI_FG)
     st.map("TMenubutton", background=[("active", UI_ACTIVE)])
-    st.configure("Accent.TButton", background=UI_ACCENT, foreground=UI_ACCENT_FG, font=("Segoe UI Semibold", 10))
-    st.map("Accent.TButton", background=[("active", UI_ACCENT_HI)])
     st.configure("TNotebook", background=UI_BG, borderwidth=0)
     st.configure("TNotebook.Tab", background=UI_PANEL, foreground=UI_DIM, padding=(18, 8), font=("Segoe UI Semibold", 10))
     st.map("TNotebook.Tab", background=[("selected", UI_FIELD)], foreground=[("selected", UI_FG)])
@@ -956,21 +960,32 @@ def setup_style(root):
     st.map("TCombobox", fieldbackground=[("readonly", UI_FIELD)], foreground=[("readonly", UI_FG)])
     st.configure("TSpinbox", fieldbackground=UI_FIELD, background=UI_PANEL, foreground=UI_FG, arrowcolor=UI_FG)
     st.configure("TEntry", fieldbackground=UI_FIELD, foreground=UI_FG)
-    st.configure("Horizontal.TScale", background=UI_ACCENT, troughcolor=UI_OFF, bordercolor=UI_BG,
-                 lightcolor=UI_ACCENT, darkcolor=UI_ACCENT)
-    st.map("Horizontal.TScale", background=[("active", UI_ACCENT_HI)])
     st.configure("Mini.TButton", padding=(8, 3), font=("Segoe UI", 9))                 # ряд маленьких кнопок под предпросмотром
-    st.configure("MiniSel.TButton", padding=(8, 3), font=("Segoe UI Semibold", 9), background=UI_ACCENT, foreground=UI_ACCENT_FG)
-    st.map("MiniSel.TButton", background=[("active", UI_ACCENT_HI)])
+    st.configure("Saved.TButton", background=UI_GREEN_DK, foreground="#ffffff")        # «Сохранено ✓» на секунду после сохранения
+    st.map("Saved.TButton", background=[("active", UI_GREEN_DK)])
     st.configure("Active.TButton", background=UI_GREEN_DK, foreground="#ffffff", font=("Segoe UI Semibold", 10))
     st.map("Active.TButton", background=[("active", UI_GREEN)])
     st.configure("Treeview", background=UI_FIELD, fieldbackground=UI_FIELD, foreground=UI_FG, rowheight=26, borderwidth=0)
     st.configure("Treeview.Heading", background=UI_PANEL, foreground=UI_FG, font=("Segoe UI Semibold", 9), relief="flat")
-    st.map("Treeview", background=[("selected", UI_ACCENT)], foreground=[("selected", UI_ACCENT_FG)])
     st.map("Treeview.Heading", background=[("active", UI_ACTIVE)])
     for opt, val in (("background", UI_FIELD), ("foreground", UI_FG), ("selectBackground", UI_ACCENT),
                      ("selectForeground", UI_ACCENT_FG)):
         root.option_add("*TCombobox*Listbox." + opt, val)
+    style_accent(st)
+
+
+def style_accent(st):
+    """Часть стилей ttk, которая зависит от акцентного цвета: вызывается и при плавной смене акцента под игру."""
+    st.configure("TLabelframe.Label", foreground=UI_ACCENT)
+    st.configure("Accent.TButton", background=UI_ACCENT, foreground=UI_ACCENT_FG, font=("Segoe UI Semibold", 10))
+    st.map("Accent.TButton", background=[("active", UI_ACCENT_HI)])
+    st.configure("Horizontal.TScale", background=UI_ACCENT, troughcolor=UI_OFF, bordercolor=UI_BG,
+                 lightcolor=UI_ACCENT, darkcolor=UI_ACCENT)
+    st.map("Horizontal.TScale", background=[("active", UI_ACCENT_HI)])
+    st.configure("MiniSel.TButton", padding=(8, 3), font=("Segoe UI Semibold", 9), background=UI_ACCENT, foreground=UI_ACCENT_FG)
+    st.map("MiniSel.TButton", background=[("active", UI_ACCENT_HI)])
+    st.configure("Dirty.TButton", foreground=UI_ACCENT, bordercolor=UI_ACCENT)         # есть несохранённые изменения
+    st.map("Treeview", background=[("selected", UI_ACCENT)], foreground=[("selected", UI_ACCENT_FG)])
 
 
 def glow_image(master, W, H, bg, blobs, step=2):
@@ -1046,6 +1061,237 @@ def mix(c1, c2, t):
     a = [int(c1[i:i + 2], 16) for i in (1, 3, 5)]
     b = [int(c2[i:i + 2], 16) for i in (1, 3, 5)]
     return "#%02x%02x%02x" % tuple(int(a[k] + (b[k] - a[k]) * max(0.0, min(1.0, t))) for k in range(3))
+
+
+# ---------------------------------------------------------------------------
+# акцент под игру и анимации интерфейса
+# ---------------------------------------------------------------------------
+# игра: {тема: (акцент, акцент при наведении, текст на акценте)}
+GAME_ACCENTS = {
+    "lmu": {"dark": ("#e8382d", "#ff5a4e", "#ffffff"), "light": ("#cf2a20", "#e8382d", "#ffffff")},
+    "rf2": {"dark": ("#dfe5ee", "#ffffff", "#111111"), "light": ("#3b4658", "#566379", "#ffffff")},
+    "iracing": {"dark": ("#3d8bff", "#6aa8ff", "#ffffff"), "light": ("#1f6fe5", "#3d8bff", "#ffffff")},
+    "ets2": {"dark": ("#ff9a1f", "#ffb857", "#111111"), "light": ("#dd7c00", "#ff9a1f", "#111111")},
+}
+UI_ANIM = True                                          # «Анимации интерфейса» в настройках лаунчера
+ACCENT_BY_GAME = True                                   # «Цвет интерфейса под выбранную игру»
+_ACCENT_HIST = set()                                    # цвета акцента, уже разошедшиеся по виджетам (для перекраски)
+TINT_OPTS = ("background", "foreground", "highlightbackground", "highlightcolor", "activebackground",
+             "selectbackground", "insertbackground")
+
+
+def accent_for(view, by_game=True):
+    """(акцент, при наведении, текст на акценте) для плитки view в текущей теме; без «цвета под игру» — цвет темы."""
+    pal = UI_THEMES.get(UI_THEME_NAME, UI_THEMES["dark"])
+    base = (pal["ACCENT"], pal["ACCENT_HI"], pal["ACCENT_FG"])
+    if not by_game:
+        return base
+    return GAME_ACCENTS.get(view, {}).get(UI_THEME_NAME, base)
+
+
+def ease(t):
+    return 1.0 - (1.0 - max(0.0, min(1.0, t))) ** 3
+
+
+def animate(widget, key, ms, step, done=None):
+    """Плавное изменение: step(p), p от 0 до 1, по таймеру widget.after. Новый запуск с тем же ключом отменяет прежний.
+    При выключенных анимациях сразу step(1)."""
+    reg = widget.__dict__.setdefault("_anims", {})
+    old = reg.pop(key, None)
+    if old is not None:
+        try:
+            widget.after_cancel(old)
+        except (tk.TclError, ValueError):
+            pass
+    if not UI_ANIM or ms <= 0:
+        step(1.0)
+        if done:
+            done()
+        return
+    t0 = time.perf_counter()
+
+    def tick():
+        try:
+            if not widget.winfo_exists():
+                return
+            p = min(1.0, (time.perf_counter() - t0) * 1000.0 / ms)
+            step(ease(p))
+            if p < 1.0:
+                reg[key] = widget.after(15, tick)
+            else:
+                reg.pop(key, None)
+                if done:
+                    done()
+        except tk.TclError:
+            pass
+    tick()
+
+
+SCENE_BASE = {False: "#1d2431", True: "#8793a1"}     # средний цвет сцены под панелями: с ним смешивается прозрачность
+
+
+def draw_scene(c, W, H, kind="track", light=False, tag="scene"):
+    """Фон предпросмотра «как в игре»: небо, горизонт и дорога в перспективе, нарисованные на холсте.
+    kind: track — гоночная трасса с поребриком, road — шоссе с разметкой. light — день, иначе сумерки.
+    Картинка нарочно приглушённая, чтобы панели оверлея на ней читались."""
+    if light:
+        sky0, sky1, far = "#6d9bcb", "#c4d8ea", "#7c95a6"
+        g0, g1, r0, r1 = "#7a9f63", "#55783f", "#9a9ea6", "#62666f"
+        line, ka, kb, post = "#eef1f5", "#c8493f", "#eceef2", "#59626e"
+    else:
+        sky0, sky1, far = "#0c1220", "#283350", "#182033"
+        g0, g1, r0, r1 = "#1b2823", "#101814", "#30353f", "#1b1f27"
+        line, ka, kb, post = "#6a7384", "#6e2b2b", "#555c69", "#0f1420"
+    W, H = float(W), float(H)
+    hz = H * 0.40
+    n = 14
+    for i in range(n):                                  # небо: полосы от зенита к горизонту
+        c.create_rectangle(0, hz * i / n, W, hz * (i + 1) / n + 1, fill=mix(sky0, sky1, i / (n - 1.0)), outline="", tags=tag)
+    pts = [0, hz + 1]
+    for i in range(25):                                 # дальний план: холмы и лес одной линией
+        x = W * i / 24.0
+        pts += [x, hz - (5 + 9 * abs(math.sin(i * 0.9 + 1.3)) + 5 * math.sin(i * 2.3)) * H / 420.0]
+    pts += [W, hz + 1]
+    c.create_polygon(pts, fill=far, outline="", tags=tag)
+    m = 10
+    for i in range(m):                                  # земля
+        c.create_rectangle(0, hz + (H - hz) * i / m, W, hz + (H - hz) * (i + 1) / m + 1, fill=mix(g0, g1, i / (m - 1.0)), outline="", tags=tag)
+    vx, xl, xr = W * 0.56, W * 0.10, W * 0.94                 # точка схода и края дороги у нижней кромки
+    px = lambda edge, t: vx + (edge - vx) * t
+    py = lambda t: hz + (H - hz) * t
+    ts = [1.0 / (1.0 + k * 0.42) for k in range(15)] + [0.0]   # равные отрезки дороги в перспективе
+    for k in range(len(ts) - 1):                        # асфальт: ближе — светлее
+        t0, t1 = ts[k], ts[k + 1]
+        c.create_polygon(px(xl, t0), py(t0), px(xr, t0), py(t0), px(xr, t1), py(t1), px(xl, t1), py(t1),
+                         fill=mix(r1, r0, t0 ** 0.7), outline="", tags=tag)
+    lw = W * 0.012
+    for edge, sgn in ((xl, 1), (xr, -1)):               # белые линии по краям
+        c.create_polygon(px(edge, 1), H, px(edge + sgn * lw * 2, 1), H, px(edge, 0) + sgn * 0.5, hz, px(edge, 0), hz,
+                         fill=line, outline="", tags=tag)
+    if kind == "road":                                  # шоссе: прерывистая осевая и столбики
+        mid = (xl + xr) / 2.0
+        for k in range(0, len(ts) - 1, 2):
+            t0, t1 = ts[k], ts[k + 1]
+            c.create_polygon(px(mid - lw, t0), py(t0), px(mid + lw, t0), py(t0), px(mid + lw, t1), py(t1), px(mid - lw, t1), py(t1),
+                             fill=line, outline="", tags=tag)
+        for k in range(1, 9, 2):
+            t = ts[k]
+            for edge, sgn in ((xl, -1), (xr, 1)):
+                x, y, hh = px(edge + sgn * W * 0.05, t), py(t), (H - hz) * 0.16 * t
+                c.create_line(x, y, x, y - hh, fill=post, width=max(1, int(4 * t)), tags=tag)
+                c.create_rectangle(x - 3 * t, y - hh, x + 3 * t, y - hh + 5 * t, fill=line, outline="", tags=tag)
+    else:                                               # трасса: красно-белый поребрик слева, отбойник справа
+        kw = W * 0.045
+        for k in range(len(ts) - 1):
+            t0, t1 = ts[k], ts[k + 1]
+            c.create_polygon(px(xl - kw, t0), py(t0), px(xl, t0), py(t0), px(xl, t1), py(t1), px(xl - kw, t1), py(t1),
+                             fill=ka if k % 2 == 0 else kb, outline="", tags=tag)
+        bx = xr + W * 0.07
+        c.create_polygon(px(bx, 1), H, px(bx, 1), py(1) - (H - hz) * 0.10, px(bx, 0), hz, fill=post, outline="", tags=tag)
+        c.create_line(px(bx, 1), py(1) - (H - hz) * 0.10, px(bx, 0), hz, fill=line, tags=tag)
+    c.tag_lower(tag)
+
+
+def flash_saved(btn, restore):
+    """Кнопка «Сохранить» на секунду становится зелёной «Сохранено ✓», потом restore() возвращает обычный вид."""
+    try:
+        old = getattr(btn, "_flash", None)
+        if old is not None:
+            btn.after_cancel(old)
+        btn.configure(text=tr("Сохранено") + " ✓", style="Saved.TButton")
+
+        def back():
+            btn._flash = None
+            try:
+                restore()
+            except tk.TclError:
+                pass
+        btn._flash = btn.after(1300, back)
+    except tk.TclError:
+        pass
+
+
+def slide_in(canvas, win, title=None):
+    """Смена страницы: колонка настроек плавно въезжает справа, заголовок проявляется из фона."""
+    def step(p):
+        canvas.coords(win, 28.0 * (1.0 - p), 0)
+        if title is not None:
+            title.configure(foreground=mix(UI_BG, UI_FG, p) if p < 1.0 else "")
+    try:
+        if canvas.winfo_viewable():
+            animate(canvas, "slide", 200, step)
+        else:
+            step(1.0)
+    except tk.TclError:
+        pass
+
+
+def nav_hover(row, parts, lbl, on):
+    """Плавная подсветка пункта левого меню под мышью; выбранную страницу (фон UI_FIELD) не трогаем."""
+    try:
+        cur = str(lbl.cget("bg")).lower()
+        if cur == UI_FIELD.lower():
+            return
+        to = UI_ACTIVE if on else UI_PANEL
+        c0 = cur if valid_hex(cur) else UI_PANEL
+
+        def step(p):
+            if str(lbl.cget("bg")).lower() == UI_FIELD.lower():
+                return                                   # пока шла анимация, страницу выбрали
+            col = mix(c0, to, p)
+            for w_ in parts:
+                w_.config(bg=col)
+        animate(row, "hover", 110, step)
+    except tk.TclError:
+        pass
+
+
+def retint(root, colors, new, fg, visible_only=False):
+    """Перекрашивает обычные (не ttk) виджеты: любой цвет из colors в перечисленных опциях заменяется на new.
+    Поддеревья с _no_tint (предпросмотр оверлея, образцы цветов, плитки игр) не трогаем."""
+    stack = [root]
+    while stack:
+        w = stack.pop()
+        if getattr(w, "_no_tint", False):
+            continue
+        try:
+            if visible_only and w is not root and not w.winfo_ismapped() and not isinstance(w, tk.Menu):
+                continue
+            stack.extend(w.winfo_children())
+            if isinstance(w, ttk.Widget):
+                continue
+            conf = w.configure()
+        except tk.TclError:
+            continue
+        hit = {}
+        for opt in TINT_OPTS:
+            v = conf.get(opt)
+            if v and str(v[-1]).lower() in colors:
+                hit[opt] = new
+        if hit:
+            if "activebackground" in hit and "activeforeground" in conf:
+                hit["activeforeground"] = fg
+            if "selectbackground" in hit and "selectforeground" in conf:
+                hit["selectforeground"] = fg
+            try:
+                w.configure(**hit)
+            except tk.TclError:
+                pass
+
+
+def set_accent(root, a, h, f, final=True):
+    """Ставит акцент интерфейса: глобальные UI_*, стили ttk и уже созданные виджеты.
+    final=False — промежуточный кадр анимации: красим только видимое, остальное догоняет на последнем кадре."""
+    global UI_ACCENT, UI_ACCENT_HI, UI_ACCENT_FG
+    _ACCENT_HIST.add(UI_ACCENT.lower())
+    UI_ACCENT, UI_ACCENT_HI, UI_ACCENT_FG = a, h, f
+    try:
+        style_accent(ttk.Style(root))
+        retint(root, _ACCENT_HIST - {a.lower()}, a, f, visible_only=not final)
+    except tk.TclError:
+        return
+    if final:
+        _ACCENT_HIST.clear()
 
 
 def valid_hex(c):
@@ -1262,6 +1508,16 @@ EN.update({
     "Выберите программу": "Choose a program", "Выберите файл игры": "Choose the game file", "Программы и ярлыки": "Programs and shortcuts",
     "Все файлы": "All files", "запустится": "will start", "не запускается": "not started", "не найдена": "not found",
     " (демо)": " (demo)", " (режим перемещения)": " (move mode)", "Выберите": "Choose",
+})
+EN.update({
+    "Сохранено": "Saved", "Фон: день": "Background: day", "Фон: ночь": "Background: night",
+    "Телеметрия идёт": "Telemetry live", "Жду данные игры…": "Waiting for game data…",
+    "Анимации интерфейса (плавные переходы, подсветка, статус)": "Interface animations (smooth transitions, hover, status)",
+    "Цвет интерфейса под выбранную игру": "Interface colour follows the selected game",
+    "Фон предпросмотра: ночная или дневная трасса — проверить, как оверлей читается на тёмной и светлой картинке.":
+        "Preview background: night or day track — check how the overlay reads on a dark and a light picture.",
+    "Фон предпросмотра: ночное или дневное шоссе — проверить, как окна читаются на тёмной и светлой картинке.":
+        "Preview background: night or day highway — check how the windows read on a dark and a light picture.",
 })
 EN.update({
     "✔ Режим перемещения ВКЛ — нажмите, чтобы закрепить": "✔ Move mode ON — click to lock the windows",
@@ -1850,6 +2106,58 @@ class Intro:
             cv.create_text(cx, ty + 98, text="v" + APP_VERSION, font=self.f3, fill=mix(UI_BG, UI_DIM, q))
 
 
+class StatusChip(tk.Canvas):
+    """Чип статуса в шапке: скруглённая плашка с точкой и текстом. Состояния: on — зелёный, wait — жёлтый
+    (оба с пульсирующей точкой), off — серый."""
+    H = 28
+
+    def __init__(self, parent, bg=None):
+        super().__init__(parent, height=self.H, width=10, bg=bg or UI_BG, highlightthickness=0, borderwidth=0)
+        self._no_tint = True
+        self.font = tkfont.Font(family="Segoe UI Semibold", size=10)
+        self.text, self.state = "", "off"
+
+    def color(self):
+        return {"on": UI_GREEN, "wait": "#f5b921"}.get(self.state, UI_OFF)
+
+    def set(self, text, state):
+        if (text, state) == (self.text, self.state) and self.find_all():
+            return
+        self.text, self.state = text, state
+        self.draw()
+
+    def draw(self):
+        try:
+            self.delete("all")
+            col, H, live = self.color(), self.H, self.state != "off"
+            w = 30 + self.font.measure(self.text) + 14
+            self.config(width=w)
+            self.fillc = mix(UI_BG, col, 0.12) if live else UI_BG
+            r, x0, y0, x1, y1 = H / 2 - 1, 1, 1, w - 2, H - 2
+            pts = [x0 + r, y0, x1 - r, y0, x1, y0, x1, y0 + r, x1, y1 - r, x1, y1, x1 - r, y1, x0 + r, y1,
+                   x0, y1, x0, y1 - r, x0, y0 + r, x0, y0]
+            self.create_polygon(pts, smooth=True, fill=self.fillc, outline=mix(UI_BORDER, col, 0.6) if live else mix(UI_BORDER, UI_DIM, 0.35))
+            cy = H / 2
+            self.create_oval(11, cy - 5, 21, cy + 5, outline=col, width=1, tags="ring", state="hidden")
+            self.create_oval(12, cy - 4, 20, cy + 4, fill=col, outline="", tags="dot")
+            self.create_text(30, cy, text=self.text, anchor="w", font=self.font, fill=mix(UI_FG, col, 0.2) if live else UI_DIM)
+        except tk.TclError:
+            pass
+
+    def pulse(self, ph):
+        """Кадр пульса, ph от 0 до 1: от точки расходится и гаснет кольцо, сама точка чуть «дышит»."""
+        if self.state == "off":
+            return
+        try:
+            col, cy = self.color(), self.H / 2
+            r = 4 + 6.5 * ph
+            self.coords("ring", 16 - r, cy - r, 16 + r, cy + r)
+            self.itemconfigure("ring", state="normal", outline=mix(col, self.fillc, min(1.0, ph * 1.15)))
+            self.itemconfigure("dot", fill=mix(col, "#ffffff", 0.35 * (1.0 - ph) ** 2))
+        except tk.TclError:
+            pass
+
+
 class Toggle(tk.Frame):
     """Переключатель-«пилюля»: зелёный с ползунком справа — включено, серый с ползунком слева — выключено."""
     W, H = 34, 18
@@ -1864,9 +2172,29 @@ class Toggle(tk.Frame):
         self.lbl.pack(side="left", padx=(8, 0))
         for w in (self, self.cv, self.lbl):
             w.bind("<Button-1>", self.flip)
-        self._tid = var.trace_add("write", lambda *a: self.draw())
+        self._tid = var.trace_add("write", lambda *a: self.on_var())
         self.bind("<Destroy>", self.on_destroy)
+        try:
+            self.pos = 1.0 if var.get() else 0.0             # положение ползунка: 0 — выключено, 1 — включено
+        except tk.TclError:
+            self.pos = 0.0
         self.draw()
+
+    def on_var(self):
+        try:
+            to = 1.0 if self.var.get() else 0.0
+        except tk.TclError:
+            return
+        p0 = self.pos
+        if abs(to - p0) < 1e-6 or not self.winfo_viewable():
+            self.pos = to
+            self.draw()
+            return
+
+        def step(p):
+            self.pos = p0 + (to - p0) * p
+            self.draw()
+        animate(self, "knob", 140, step)
 
     def on_destroy(self, e=None):
         if e is not None and e.widget is not self:
@@ -1884,15 +2212,16 @@ class Toggle(tk.Frame):
     def draw(self):
         try:
             on = bool(self.var.get())
+            pos = max(0.0, min(1.0, getattr(self, "pos", 1.0 if on else 0.0)))
             c, W, H = self.cv, self.W, self.H
             c.delete("all")
             r = H / 2
-            col = UI_GREEN_DK if on else UI_OFF
+            col = mix(UI_OFF, UI_GREEN_DK, pos)
             c.create_oval(1, 1, H - 1, H - 1, fill=col, outline=col)
             c.create_oval(W - H + 1, 1, W - 1, H - 1, fill=col, outline=col)
             c.create_rectangle(r, 1, W - r, H - 1, fill=col, outline=col)
-            kx = W - r if on else r
-            c.create_oval(kx - r + 3, 3, kx + r - 3, H - 3, fill="#ffffff" if on else UI_KNOB_OFF, outline="")
+            kx = r + (W - 2 * r) * pos
+            c.create_oval(kx - r + 3, 3, kx + r - 3, H - 3, fill=mix(UI_KNOB_OFF, "#ffffff", pos), outline="")
             self.lbl.config(fg=UI_FG if on else UI_DIM)
         except tk.TclError:
             pass
@@ -2001,14 +2330,21 @@ class Ets2Page(ttk.Frame):
         self.note.grid(row=1, column=0, sticky="w", pady=(2, 10))
         self.pbox = RoundBox(center, radius=16, fill=MOCK_BG, border=mix(UI_BORDER, UI_DIM, 0.3))
         self.pbox.grid(row=2, column=0, sticky="n")
-        self.pwrap = tk.Frame(self.pbox.inner, bg=MOCK_BG)
+        self.pwrap = tk.Canvas(self.pbox.inner, bg=MOCK_BG, highlightthickness=0, borderwidth=0, width=200, height=120)
+        self.pwrap._no_tint = True                          # сцена «как в игре», окно оверлея лежит поверх неё
         self.pwrap.pack(padx=11, pady=11)
+        self._pv_child, self._scene_key = None, None
+        self.btn_bg = ttk.Button(center, style="Mini.TButton", width=0, command=self.app.toggle_pv_bg,
+                                 text=tr("Фон: день") if self.app.cfg.get("pv_bg", "dark") == "light" else tr("Фон: ночь"))
+        self.btn_bg.grid(row=0, column=0, sticky="e")
+        Tip(self.btn_bg, "Фон предпросмотра: ночное или дневное шоссе — проверить, как окна читаются на тёмной и светлой картинке.")
         self.ctrl = ttk.Frame(center)
         self.ctrl.grid(row=3, column=0, sticky="w", pady=(10, 0))
         # --- снизу, как у остальных игр: сохранить слева, запуск/перемещение/«Ещё» справа, статус строкой ниже ---
         bar = ttk.Frame(self)
         bar.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 0))
-        ttk.Button(bar, text="Сохранить", command=self.save_click).pack(side="left", padx=(0, 8))
+        self.btn_save = ttk.Button(bar, text="Сохранить", command=self.save_click)
+        self.btn_save.pack(side="left", padx=(0, 8))
         ttk.Button(bar, text="Сохранить и перезапустить оверлей", style="Accent.TButton", command=lambda: self.start(False)).pack(side="left", padx=(0, 8))
         more = ttk.Menubutton(bar, text=tr("Ещё") + " ▾")
         mm = tk.Menu(more, tearoff=0, bg=UI_PANEL, fg=UI_FG, activebackground=UI_ACCENT, activeforeground=UI_ACCENT_FG, bd=0, font=("Segoe UI", 10))
@@ -2038,9 +2374,10 @@ class Ets2Page(ttk.Frame):
         sb.grid(row=0, column=1, sticky="ns")
         self.settings = ttk.Frame(self.scroll)
         self.settings.columnconfigure(0, weight=1)
-        win = self.scroll.create_window(0, 0, window=self.settings, anchor="nw")
+        win = self._swin = self.scroll.create_window(0, 0, window=self.settings, anchor="nw")
         self.scroll.bind("<Configure>", lambda e: self.scroll.itemconfigure(win, width=e.width))
-        self.settings.bind("<Configure>", lambda e: self.scroll.configure(scrollregion=self.scroll.bbox("all")))
+        # область прокрутки — по размеру самих настроек, а не по bbox: иначе въезд страницы сбоку сдвигал бы вид
+        self.settings.bind("<Configure>", lambda e: self.scroll.configure(scrollregion=(0, 0, e.width, e.height)))
         enable_wheel(self.scroll, holder)
         self.autodetect(quiet=True)
         self._procs = set()
@@ -2076,14 +2413,7 @@ class Ets2Page(ttk.Frame):
                 w.bind("<Button-1>", lambda e: cmd())
 
             def hov(on, row=row, lbl=lbl, d=d):
-                try:
-                    if str(lbl.cget("bg")) == UI_FIELD:
-                        return
-                    bg = UI_ACTIVE if on else UI_PANEL
-                    for w_ in (row, lbl, d, row._icon):
-                        w_.config(bg=bg)
-                except tk.TclError:
-                    pass
+                nav_hover(row, (row, lbl, d, row._icon), lbl, on)
             for w in (row, lbl, d, strip, ic):
                 w.bind("<Enter>", lambda e, h=hov: h(True), add="+")
                 w.bind("<Leave>", lambda e, h=hov: h(False), add="+")
@@ -2130,6 +2460,7 @@ class Ets2Page(ttk.Frame):
         self.scroll.yview_moveto(0)
         self.show_preview({"general": "dash"}.get(key, key))
         translate_tree(self.settings)
+        slide_in(self.scroll, self._swin, self.title)
 
     def card(self, title):
         wrap = RoundBox(self.settings, radius=14, fill=UI_BG, border=mix(UI_BORDER, UI_DIM, 0.35))
@@ -2325,18 +2656,52 @@ class Ets2Page(ttk.Frame):
         self.preview = self.map_cv = None
         if kind == "map":
             self.map_cv = tk.Canvas(self.pwrap, width=360, height=360, bg=MOCK_BG, highlightthickness=0)
-            self.map_cv.pack()
+            self.place_preview(self.map_cv)
             self.map_tm = getattr(self, "map_tm", None) or (ETS2.TileMap() if ETS2.HAVE_PIL else None)
             self.map_t0 = time.monotonic()
             self.redraw_preview()
             return
         try:
             self.preview = ETS2.Preview(self.pwrap, self.cfg, kind, 1.0)
-            self.preview.canvas.pack()
+            self.place_preview(self.preview.canvas)
             if kind == "mfd":
                 self.preview.draw(self.mfd_screen)
         except Exception:                                # noqa: BLE001
             self.preview = None
+
+    SCENE_MX, SCENE_MY = 56, 36                         # поля сцены вокруг окна в предпросмотре
+
+    def place_preview(self, child):
+        self._pv_child, self._scene_key = child, None
+        self.fit_scene()
+
+    def fit_scene(self):
+        """Сцена-шоссе под окном предпросмотра: размер — окно плюс поля; перерисовывается, только если что-то изменилось."""
+        ch = self._pv_child
+        try:
+            if ch is None or not ch.winfo_exists():
+                return
+            w, h = int(float(ch.cget("width"))), int(float(ch.cget("height")))
+            light = self.app.cfg.get("pv_bg", "dark") == "light"
+            key = (w, h, light, str(ch))
+            if key == self._scene_key:
+                return
+            self._scene_key = key
+            W, H = w + 2 * self.SCENE_MX, h + 2 * self.SCENE_MY
+            cv = self.pwrap
+            cv.delete("all")
+            cv.config(width=W, height=H)
+            draw_scene(cv, W, H, "road", light)
+            cv.create_window(self.SCENE_MX, self.SCENE_MY, window=ch, anchor="nw")
+        except tk.TclError:
+            pass
+
+    def on_pv_bg(self):
+        try:
+            self.btn_bg.config(text=tr("Фон: день") if self.app.cfg.get("pv_bg", "dark") == "light" else tr("Фон: ночь"))
+            self.fit_scene()
+        except (tk.TclError, AttributeError):
+            pass
 
     def pick_dash(self, name):
         self.cfg["dash_style"] = name
@@ -2399,6 +2764,7 @@ class Ets2Page(ttk.Frame):
             elif self.preview:
                 self.preview.cfg = self.cfg
                 self.preview.draw(self.mfd_screen if self.key == "mfd" else None)
+            self.fit_scene()
         except Exception:                                # noqa: BLE001
             pass
 
@@ -2416,6 +2782,7 @@ class Ets2Page(ttk.Frame):
     def save_click(self):
         self.save()
         self.app.say("Сохранено. Запущенный оверлей подхватит настройки после перезапуска.")
+        flash_saved(self.btn_save, lambda: self.btn_save.configure(text=tr("Сохранить"), style="TButton"))
 
     def move_on(self):
         """Режим перемещения включён у запущенного оверлея (по его state-файлу)."""
@@ -2759,6 +3126,8 @@ class GameTile(tk.Frame):
                          width=self.W, height=self.H)
         self.pack_propagate(False)
         self.text, self.command, self.blue = text, command, blue
+        self.game, self.static, self.selected = game, static, False
+        self._no_tint = True                                # цвета плитки ведёт сама плитка
         cur = "arrow" if static else "hand2"
         self.config(cursor=cur)
         self.imgs = {}
@@ -2774,12 +3143,38 @@ class GameTile(tk.Frame):
         if not static:
             for w in (self, self.lbl, self.sub):
                 w.bind("<Button-1>", lambda e: self.command())
+                w.bind("<Enter>", lambda e: self.hover(True), add="+")
+                w.bind("<Leave>", lambda e: self.hover(False), add="+")
         self.set_state(False, False)
 
+    def accent(self):
+        return accent_for(self.game, ACCENT_BY_GAME)[0]
+
+    def rest_edge(self):
+        """Цвет рамки в покое: у выбранной плитки — акцент её игры."""
+        if self.selected:
+            return self.accent()
+        return self.BLUE_HI if (self.blue and not self.imgs.get("on")) else UI_BORDER
+
+    def hover(self, on):
+        """Под мышью рамка невыбранной плитки плавно загорается цветом игры."""
+        if self.selected or self.static:
+            return
+        try:
+            c0 = str(self.cget("highlightbackground")).lower()
+            to = mix(UI_BORDER, self.accent(), 0.8) if on else self.rest_edge()
+            if not valid_hex(c0):
+                c0 = UI_BORDER
+            animate(self, "edge", 130, lambda p: self.config(highlightbackground=mix(c0, to, p)))
+        except tk.TclError:
+            pass
+
     def set_state(self, selected, running):
+        self.selected = bool(selected)
+        animate(self, "edge", 0, lambda p: None)            # гасим недоигранную подсветку
         if self.imgs.get("on"):
             img = self.imgs["on" if selected else "off"]
-            edge = "#ffffff" if selected else UI_BORDER
+            edge = self.accent() if selected else UI_BORDER
             self.config(bg="#ffffff", highlightbackground=edge)
             self.lbl.config(image=img, text="", bg="#ffffff")
             self.sub.config(text=tr("● запущена") if running else "", bg="#ffffff", fg="#1a9a4a")
@@ -2789,7 +3184,7 @@ class GameTile(tk.Frame):
                 self.sub.place_forget()
             return
         if selected:
-            bg, edge, fg = UI_PANEL, "#ffffff", "#ffffff"
+            bg, edge, fg = UI_PANEL, self.accent(), "#ffffff"
         elif self.blue:
             bg, edge, fg = self.BLUE, self.BLUE_HI, "#ffffff"
         else:
@@ -3112,14 +3507,7 @@ class ProfilePanel(ttk.Frame):
                 w.bind("<Button-1>", lambda e: cmd())
 
             def hov(on, row=row, lbl=lbl, d=d):
-                try:
-                    if str(lbl.cget("bg")) == UI_FIELD:
-                        return                                # выбранная страница не подсвечивается заново
-                    bg = UI_ACTIVE if on else UI_PANEL
-                    for w_ in (row, lbl, d, row._icon):
-                        w_.config(bg=bg)
-                except tk.TclError:
-                    pass
+                nav_hover(row, (row, lbl, d, row._icon), lbl, on)
             for w in (row, lbl, d, strip, ic):
                 w.bind("<Enter>", lambda e, h=hov: h(True), add="+")
                 w.bind("<Leave>", lambda e, h=hov: h(False), add="+")
@@ -3153,6 +3541,10 @@ class ProfilePanel(ttk.Frame):
         center.rowconfigure(2, weight=1)
         self.title = ttk.Label(center, text="", style="Title.TLabel")
         self.title.grid(row=0, column=0, sticky="w")
+        self.btn_bg = ttk.Button(center, style="Mini.TButton", width=0, command=self.app.toggle_pv_bg,
+                                 text=tr("Фон: день") if self.app.cfg.get("pv_bg", "dark") == "light" else tr("Фон: ночь"))
+        self.btn_bg.grid(row=0, column=0, sticky="e")
+        Tip(self.btn_bg, "Фон предпросмотра: ночная или дневная трасса — проверить, как оверлей читается на тёмной и светлой картинке.")
         self.note = ttk.Label(center, text="", style="Dim.TLabel", wraplength=self.PW)
         self._center = center
         center.bind("<Configure>", lambda e: self.after(80, self.fit_preview))
@@ -3162,6 +3554,7 @@ class ProfilePanel(ttk.Frame):
         self._pbox = pbox
         pbox.grid(row=2, column=0, sticky="n")                      # по центру колонки, предпросмотр в скруглённой рамке
         self.canvas = TrCanvas(pbox.inner, width=self.PW, height=self.PH, bg=MOCK_BG, highlightthickness=0)
+        self.canvas._no_tint = True                         # цвета предпросмотра — цвета оверлея, акцент лаунчера их не трогает
         self.canvas.pack(padx=11, pady=11)
         self.canvas.bind("<Button-1>", self.on_click)
         self.canvas.bind("<Motion>", self.on_hover)
@@ -3209,9 +3602,10 @@ class ProfilePanel(ttk.Frame):
         sb.grid(row=1, column=1, sticky="ns")
         self.settings = ttk.Frame(self.scroll)
         self.settings.columnconfigure(0, weight=1)
-        win = self.scroll.create_window(0, 0, window=self.settings, anchor="nw")
+        win = self._swin = self.scroll.create_window(0, 0, window=self.settings, anchor="nw")
         self.scroll.bind("<Configure>", lambda e: self.scroll.itemconfigure(win, width=e.width))
-        self.settings.bind("<Configure>", lambda e: self.scroll.configure(scrollregion=self.scroll.bbox("all")))
+        # область прокрутки — по размеру самих настроек, а не по bbox: иначе въезд страницы сбоку сдвигал бы вид
+        self.settings.bind("<Configure>", lambda e: self.scroll.configure(scrollregion=(0, 0, e.width, e.height)))
         enable_wheel(self.scroll, holder)
 
         bar = ttk.Frame(self)
@@ -3287,6 +3681,7 @@ class ProfilePanel(ttk.Frame):
         self.settings_filter()
         translate_tree(self.settings)
         self.refresh()
+        slide_in(self.scroll, self._swin, self.title)
 
     # --- помощники: настройки раскладываются по карточкам, подписи и элементы выровнены по сетке
     def pages(self):
@@ -3431,6 +3826,7 @@ class ProfilePanel(ttk.Frame):
             c = (i // per) * 3
             ttk.Label(parent, text=THEME_NAMES[key]).grid(row=r, column=c, sticky="w", padx=(0, 8), pady=2)
             sw = tk.Label(parent, width=4, bg=self.theme[key].get(), relief="solid", bd=1, cursor="hand2")
+            sw._no_tint = True
             sw.grid(row=r, column=c + 1, padx=(0, 6))
             sw.bind("<Button-1>", lambda e, k=key: self.pick(k))
             ttk.Button(parent, text="…", width=3, command=lambda k=key: self.pick(k)).grid(row=r, column=c + 2, padx=(0, 22))
@@ -3871,11 +4267,13 @@ class ProfilePanel(ttk.Frame):
             return False
         if not quiet:
             self.say(f"Сохранено: {profile_path(self.game)}")
+            flash_saved(self.btn_save, self.show_save_btn)
         return True
 
     def save_apply(self):
         if not self.save(quiet=True):
             return
+        flash_saved(self.btn_save, self.show_save_btn)
         r = self.app.runner
         if r.running() and r.game == self.game and r.mode != "demo":
             r.start(self.game, r.mode, r.auto)
@@ -4133,8 +4531,19 @@ class ProfilePanel(ttk.Frame):
         if getattr(self, "_dirty", False) == on:
             return
         self._dirty = on
+        self.show_save_btn()
+
+    def show_save_btn(self):
+        """Обычный вид кнопки «Сохранить»: с точкой и цветной рамкой, пока есть несохранённые изменения."""
         try:
-            self.btn_save.config(text=tr("Сохранить") + (" ●" if on else ""))
+            b = self.btn_save
+            if getattr(b, "_flash", None) is not None:
+                if not getattr(self, "_dirty", False):
+                    return                                 # ещё показывается «Сохранено ✓»
+                b.after_cancel(b._flash)
+                b._flash = None
+            on = getattr(self, "_dirty", False)
+            b.config(text=("● " if on else "") + tr("Сохранить"), style="Dirty.TButton" if on else "TButton")
         except (tk.TclError, AttributeError):
             pass
 
@@ -4370,8 +4779,23 @@ class ProfilePanel(ttk.Frame):
         for k, v in self.theme.items():
             c = v.get()
             c = c if valid_hex(c) else THEME_DEFAULT[k]
-            th[k] = mix(MOCK_BG, c, op) if k in ("panel", "background", "border") else c
+            th[k] = mix(SCENE_BASE[self.pv_light()], c, op) if k in ("panel", "background", "border") else c
         self.th = th
+
+    def ph_col(self, i):
+        """Цвет пунктира (0) и подписи (1) у выключенной панели: на дневном фоне темнее, чтобы было видно."""
+        return (("#2b3440", "#232b36") if self.pv_light() else ("#4a5260", "#7b8594"))[i]
+
+    def pv_light(self):
+        return self.app.cfg.get("pv_bg", "dark") == "light"
+
+    def on_pv_bg(self):
+        """Фон предпросмотра переключили (здесь или на странице другой игры)."""
+        try:
+            self.btn_bg.config(text=tr("Фон: день") if self.pv_light() else tr("Фон: ночь"))
+            self.draw_preview()
+        except (tk.TclError, AttributeError):
+            pass
 
     def draw_preview(self):
         self._draw_preview_raw()
@@ -4382,8 +4806,8 @@ class ProfilePanel(ttk.Frame):
         c.delete("all")
         self.hits = []
         ph = int(float(c.cget("height")))
-        for i in range(0, self.PW, 40):                 # «трасса» на заднем плане
-            c.create_line(i, 0, i + 120, ph, fill="#222a39")
+        draw_scene(c, self.PW, ph, "track", self.pv_light())     # «экран игры» на заднем плане
+        scene = set(c.find_withtag("scene"))
         if self.page == "general":
             kk = max(0.3, min(self.PW / 680.0, ph / self.OV_H, 1.7))
             self.base_k = kk
@@ -4392,6 +4816,8 @@ class ProfilePanel(ttk.Frame):
             self.draw_overview()
             if abs(kk - 1.0) > 1e-3:
                 for item in c.find_all():
+                    if item in scene:
+                        continue
                     c.scale(item, 0, 0, kk, kk)
                     c.move(item, (self.PW - 680 * kk) / 2, 0)
                 ox = (self.PW - 680 * kk) / 2
@@ -4451,8 +4877,8 @@ class ProfilePanel(ttk.Frame):
             if self.v[key].get():
                 fn(x, y, w, h)
             else:
-                c.create_rectangle(x, y, x + w, y + h, outline="#4a5260", dash=(4, 4))
-                c.create_text(x + w / 2, y + h / 2, text=f"{label}\nвыключено", fill="#5d6675", font=self.f_t, justify="center")
+                c.create_rectangle(x, y, x + w, y + h, outline=self.ph_col(0), dash=(4, 4))
+                c.create_text(x + w / 2, y + h / 2, text=f"{label}\nвыключено", fill=self.ph_col(1), font=self.f_t, justify="center")
             self.hits.append((key, x, y, x + w, y + h))
         # нижние ряды: остальные панели рисуются в натуральную величину и уменьшаются целиком
         yb = max(t[3] + t[5] for t in layout) + 12
@@ -4477,8 +4903,8 @@ class ProfilePanel(ttk.Frame):
                 if self.v[key].get():
                     fns[key](0, 0, dw, dh)
                 else:
-                    c.create_rectangle(0, 0, dw, dh, outline="#4a5260", dash=(4, 4))
-                    c.create_text(dw / 2, dh / 2, text="выключено", fill="#5d6675", font=self.f_t)
+                    c.create_rectangle(0, 0, dw, dh, outline=self.ph_col(0), dash=(4, 4))
+                    c.create_text(dw / 2, dh / 2, text="выключено", fill=self.ph_col(1), font=self.f_t)
                 for item in [i for i in c.find_all() if i not in before]:
                     c.scale(item, 0, 0, k, k)
                     c.move(item, x, yb)
@@ -4487,7 +4913,7 @@ class ProfilePanel(ttk.Frame):
                 rh_ = max(rh_, dh * k)
             yb += rh_ + 10
         self.make_fonts(1.0)
-        c.create_text(self.PW - 8, ph - 8, text="клик по панели — включить / выключить", fill="#5d6675", anchor="se", font=self.f_t)
+        c.create_text(self.PW - 8, ph - 8, text="клик по панели — включить / выключить", fill=self.ph_col(1), anchor="se", font=self.f_t)
 
     def draw_single(self, key):
         c = self.canvas
@@ -4530,8 +4956,8 @@ class ProfilePanel(ttk.Frame):
         if key == "apps" or self.v[key].get():
             fn(0, 0, dw, dh)
         else:
-            c.create_rectangle(0, 0, dw, dh, outline="#4a5260", dash=(4, 4))
-            c.create_text(dw / 2, dh / 2, text="выключено", fill="#5d6675", font=self.f_t)
+            c.create_rectangle(0, 0, dw, dh, outline=self.ph_col(0), dash=(4, 4))
+            c.create_text(dw / 2, dh / 2, text="выключено", fill=self.ph_col(1), font=self.f_t)
         for item in [i for i in c.find_all() if i not in before]:
             c.scale(item, 0, 0, k, k)
             c.move(item, (self.PW - dw * k) / 2, (ph - dh * k) / 2)
@@ -7095,6 +7521,8 @@ class SettingsPage(ttk.Frame):
             "telemetry": tk.BooleanVar(value=bool(cfg.get("telemetry", True))),
             "auto_update": tk.BooleanVar(value=bool(cfg.get("auto_update", True))),
             "intro_anim": tk.BooleanVar(value=bool(cfg.get("intro_anim", True))),
+            "ui_anim": tk.BooleanVar(value=bool(cfg.get("ui_anim", True))),
+            "accent_by_game": tk.BooleanVar(value=bool(cfg.get("accent_by_game", True))),
         }
         self.i2_var = tk.StringVar(value=str(cfg.get("i2_path", "")))
         self.columnconfigure(0, weight=1)
@@ -7147,8 +7575,10 @@ class SettingsPage(ttk.Frame):
         self.tray_lbl = ttk.Label(box, text="", style="Dim.TLabel", wraplength=380, justify="left")
         self.tray_lbl.grid(row=2, column=0, sticky="w", pady=(4, 0))
         self.tg(box, 3, "Анимация заставки при запуске лаунчера", "intro_anim")
+        self.tg(box, 4, "Анимации интерфейса (плавные переходы, подсветка, статус)", "ui_anim")
+        self.tg(box, 5, "Цвет интерфейса под выбранную игру", "accent_by_game")
         self.tray_btn = ttk.Button(box, text="Установить поддержку трея", command=self.install_tray)
-        self.tray_btn.grid(row=3, column=0, sticky="w", pady=(6, 0))
+        self.tray_btn.grid(row=6, column=0, sticky="w", pady=(6, 0))
 
         box = section(col3, "Горячие клавиши оверлея")
         box.pack(fill="x", pady=(0, 10))
@@ -7243,7 +7673,7 @@ class SettingsPage(ttk.Frame):
         ttk.Button(box, text="Сбросить настройки лаунчера", command=self.reset).pack(anchor="w")
         ttk.Label(box, text="Профили оверлея (LMU и rFactor 2) не затрагиваются.", style="Dim.TLabel").pack(anchor="w", pady=(4, 0))
 
-        for key in ("win_start", "start_min", "min_tray", "close_tray", "stop_on_exit", "telemetry", "auto_update", "intro_anim"):
+        for key in ("win_start", "start_min", "min_tray", "close_tray", "stop_on_exit", "telemetry", "auto_update", "intro_anim", "ui_anim", "accent_by_game"):
             self.v[key].trace_add("write", lambda *a: self.apply())
         self.refresh_tray()
 
@@ -7288,8 +7718,14 @@ class SettingsPage(ttk.Frame):
 
     def apply(self):
         cfg = self.app.cfg
-        for k in ("win_start", "start_min", "min_tray", "close_tray", "stop_on_exit", "telemetry", "auto_update", "intro_anim"):
+        for k in ("win_start", "start_min", "min_tray", "close_tray", "stop_on_exit", "telemetry", "auto_update", "intro_anim", "ui_anim", "accent_by_game"):
             cfg[k] = bool(self.v[k].get())
+        global UI_ANIM, ACCENT_BY_GAME
+        UI_ANIM = cfg["ui_anim"]
+        if ACCENT_BY_GAME != cfg["accent_by_game"]:
+            ACCENT_BY_GAME = cfg["accent_by_game"]
+            self.app._tiles_key = None
+            self.app.update_tiles()
         cfg["i2_path"] = self.i2_var.get().strip()
         try:
             cfg["poll_sec"] = max(1.0, min(10.0, float(self.v["poll_sec"].get())))
@@ -7605,8 +8041,45 @@ class App:
         (mb_info if ok else mb_error)("Ярлык на рабочем столе", msg)
 
     # ---------- построение интерфейса ----------
+    def toggle_pv_bg(self):
+        """Фон предпросмотра «ночь / день» — общий для всех игр."""
+        self.cfg["pv_bg"] = "dark" if self.cfg.get("pv_bg", "dark") == "light" else "light"
+        self.save_cfg()
+        for p in list(self.panels.values()) + [getattr(self, "ets2_page", None)]:
+            if p is not None:
+                p.on_pv_bg()
+
+    def accent_key(self):
+        """Чей акцент показывать: открытая плитка, а на «Статистике» и «Настройках» — выбранная игра."""
+        return self.view if self.view in ("ac", "ets2") else self.selected
+
+    def apply_accent(self, instant=False):
+        """Плавно перекрашивает интерфейс в цвет открытой игры."""
+        tgt = accent_for(self.accent_key(), ACCENT_BY_GAME)
+        if tgt == getattr(self, "_accent_target", None):
+            return
+        self._accent_target = tgt
+        a0, h0, f0 = UI_ACCENT, UI_ACCENT_HI, UI_ACCENT_FG
+        a1, h1, f1 = tgt
+
+        def step(p):
+            set_accent(self.root, mix(a0, a1, p), mix(h0, h1, p), f1 if p >= 0.5 else f0, final=p >= 1.0)
+        animate(self.root, "accent", 0 if instant else 260, step, done=self.after_accent)
+
+    def after_accent(self):
+        self._status_key = None                            # чипы статуса рисуются акцентом — обновить
+        try:
+            self.refresh_status()
+        except Exception:                                # noqa: BLE001
+            pass
+
     def build(self):
+        global UI_ANIM, ACCENT_BY_GAME, UI_ACCENT, UI_ACCENT_HI, UI_ACCENT_FG
         set_ui_theme(self.cfg["theme"])
+        UI_ANIM, ACCENT_BY_GAME = bool(self.cfg.get("ui_anim", True)), bool(self.cfg.get("accent_by_game", True))
+        self._accent_target = accent_for(self.accent_key(), ACCENT_BY_GAME)     # интерфейс сразу строится в цвете игры
+        UI_ACCENT, UI_ACCENT_HI, UI_ACCENT_FG = self._accent_target
+        _ACCENT_HIST.clear()
         set_lang(self.cfg["lang"])
         for g, p in self.panels.items():                   # не теряем несохранённые правки при пересборке
             try:
@@ -7650,14 +8123,15 @@ class App:
 
         head = ttk.Frame(self.root, padding=(14, 8, 14, 2))
         head.pack(fill="x")
-        chip = RoundBox(head, radius=14, fill=UI_BG, border=mix(UI_BORDER, UI_DIM, 0.35), autow=True)
-        chip.pack(side="left")
-        self.dot = tk.Canvas(chip.inner, width=16, height=16, bg=UI_BG, highlightthickness=0)
-        self.dot.pack(side="left", padx=(8, 8), pady=4)
-        self.lbl_game = ttk.Label(chip.inner, text="", style="Head.TLabel")
-        self.lbl_game.pack(side="left")
-        self.lbl_overlay = ttk.Label(chip.inner, text="", style="Dim.TLabel")
-        self.lbl_overlay.pack(side="left", padx=(16, 12))
+        chips = tk.Frame(head, bg=UI_BG)                    # живой статус: игра, оверлей, телеметрия
+        chips.pack(side="left")
+        self.chip_game, self.chip_ov, self.chip_tel = StatusChip(chips), StatusChip(chips), StatusChip(chips)
+        self.chip_game.pack(side="left", padx=(0, 8))
+        self.chip_ov.pack(side="left", padx=(0, 8))
+        self._status_key = None
+        if not getattr(self, "_pulse_on", False):
+            self._pulse_on = True
+            self.root.after(400, self.pulse_tick)
 
         ttk.Button(head, text="Процессы игр…", command=self.edit_procs).pack(side="right")
         Toggle(head, "Закрывать оверлей вместе с игрой", self.close_var, command=self.save_cfg).pack(side="right", padx=(0, 22))
@@ -7741,7 +8215,11 @@ class App:
             translate_tree(self.panels[game])
         for g, p in self.panels.items():
             if g == game:
+                fresh = not p.winfo_ismapped()
                 p.pack(fill="both", expand=True)
+                if fresh:
+                    p.update_idletasks()
+                    slide_in(p.scroll, p._swin, p.title)
             else:
                 p.pack_forget()
         self.update_tiles()
@@ -7765,8 +8243,12 @@ class App:
         self.settings_page.pack_forget()
         self.stats_page.pack_forget()
         self.ac_page.pack_forget()
+        fresh = not self.ets2_page.winfo_ismapped()
         self.ets2_page.pack(fill="both", expand=True)
         self.ets2_page.refresh_plugin()
+        if fresh:
+            self.ets2_page.update_idletasks()
+            slide_in(self.ets2_page.scroll, self.ets2_page._swin, self.ets2_page.title)
         self.update_tiles()
 
     def show_settings(self):
@@ -7809,6 +8291,7 @@ class App:
                 en.pack(fill="both", expand=True)
             else:
                 en.pack_forget()
+        self.apply_accent()
 
     # ---------- настройки лаунчера ----------
     def on_paths_changed(self):
@@ -8007,20 +8490,57 @@ class App:
         g = self.detected
         r = self.runner
         run = r.running()
-        gtxt = f"{tr('Игра')}: {GAMES[g]}  ({self.found_proc})" if g else tr("Игра не запущена")
+        gtxt = f"{tr('Игра')}: {GAMES[g]}" if g else tr("Игра не запущена")
         if run:
             extra = {"demo": tr(" (демо)"), "unlock": tr(" (режим перемещения)")}.get(r.mode, "")
             otxt = f"{tr('Оверлей: работает для')} {GAMES[r.game]}{extra}"
         else:
             otxt = tr("Оверлей: остановлен")
-        key = (bool(g), gtxt, otxt, UI_GREEN, UI_OFF)
+        # ETS2 живёт отдельным процессом со своим state-файлом
+        ep = getattr(self, "ets2_page", None)
+        ets = False
+        try:
+            ets = bool(ep is not None and ep.running())
+        except Exception:                                # noqa: BLE001
+            ets = False
+        tel = None                                         # True — данные идут, False — ждём игру, None — неизвестно
+        if run:
+            tel = True if r.mode == "demo" else read_connected(r.game)
+        elif ets:
+            otxt = tr("Оверлей: работает для") + " Euro Truck Simulator 2" + (tr(" (демо)") if getattr(ep, "demo", False) else "")
+            tel = True if getattr(ep, "demo", False) else bool(read_json(os.path.join(HERE, "yassno_ets2.state")).get("connected"))
+            if not g and tel and not getattr(ep, "demo", False):
+                gtxt = f"{tr('Игра')}: Euro Truck Simulator 2"
+        game_on = bool(g) or (ets and tel is True and not getattr(ep, "demo", False))
+        key = (game_on, gtxt, otxt, run or ets, tel, UI_GREEN, UI_OFF, UI_BG)
         if getattr(self, "_status_key", None) == key:          # ничего не изменилось — не перерисовываем (вызывается каждые 1.5 с)
             return
         self._status_key = key
-        self.dot.delete("all")
-        self.dot.create_oval(2, 2, 14, 14, fill=UI_GREEN if g else UI_OFF, outline="")
-        self.lbl_game.config(text=gtxt)
-        self.lbl_overlay.config(text=otxt)
+        self.chip_game.set(gtxt, "on" if game_on else "off")
+        self.chip_ov.set(otxt, "on" if (run or ets) else "off")
+        if (run or ets) and tel is not None:
+            self.chip_tel.set(tr("Телеметрия идёт") if tel else tr("Жду данные игры…"), "on" if tel else "wait")
+            if not self.chip_tel.winfo_manager():
+                self.chip_tel.pack(side="left")
+        elif self.chip_tel.winfo_manager():
+            self.chip_tel.pack_forget()
+
+    def pulse_tick(self):
+        """Пульс точек в чипах статуса; при свёрнутом окне и выключенных анимациях не тратим время."""
+        delay = 50
+        try:
+            if not UI_ANIM or self.root.state() != "normal":
+                delay = 600
+                if not UI_ANIM:
+                    for ch in (self.chip_game, self.chip_ov, self.chip_tel):
+                        ch.itemconfigure("ring", state="hidden")
+            else:
+                ph = (time.monotonic() % 1.6) / 1.6
+                for i, ch in enumerate((self.chip_game, self.chip_ov, self.chip_tel)):
+                    ch.pulse((ph + i * 0.18) % 1.0)
+        except (tk.TclError, AttributeError):
+            pass
+        self.root.after(delay, self.pulse_tick)
 
     def stop_overlay(self):
         self.runner.stop()

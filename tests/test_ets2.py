@@ -457,3 +457,72 @@ class UpdaterRef(unittest.TestCase):
         self.assertIn("/main/version.json", L.raw_url("version.json"))
         self.assertIn("/abc123/version.json", L.raw_url("version.json", "abc123"))
         self.assertTrue(callable(L.head_sha))
+
+
+class LauncherLook(unittest.TestCase):
+    """Цвет под игру, сцена предпросмотра, чипы статуса и анимации лаунчера."""
+
+    def test_accent_per_game(self):
+        L = yassno_launcher
+        old = L.UI_THEME_NAME
+        try:
+            for theme in ("dark", "light"):
+                L.UI_THEME_NAME = theme
+                base = L.accent_for("ac")
+                self.assertEqual(base[0], L.UI_THEMES[theme]["ACCENT"])         # у плитки без своей палитры — цвет темы
+                seen = set()
+                for g in ("lmu", "rf2", "iracing", "ets2"):
+                    a, h, f = L.accent_for(g)
+                    self.assertTrue(all(L.valid_hex(c) for c in (a, h, f)), (g, theme))
+                    self.assertNotEqual(a, base[0])
+                    seen.add(a)
+                    self.assertEqual(L.accent_for(g, by_game=False), base)
+                self.assertEqual(len(seen), 4)
+        finally:
+            L.UI_THEME_NAME = old
+
+    def test_retint_and_scene(self):
+        import tkinter as tk
+        L = yassno_launcher
+        root = tk.Tk()
+        try:
+            a = tk.Label(root, text="x", fg="#123456", bg="#000000")
+            keep = tk.Label(root, text="y", fg="#123456")
+            keep._no_tint = True
+            m = tk.Menu(root, activebackground="#123456", activeforeground="#000000")
+            a.pack(); keep.pack()
+            L.retint(root, {"#123456"}, "#abcdef", "#ffffff")
+            self.assertEqual(str(a.cget("fg")), "#abcdef")
+            self.assertEqual(str(keep.cget("fg")), "#123456")                    # помеченное не перекрашивается
+            self.assertEqual((str(m.cget("activebackground")), str(m.cget("activeforeground"))), ("#abcdef", "#ffffff"))
+            cv = tk.Canvas(root, width=400, height=300)
+            for kind in ("track", "road"):
+                for light in (False, True):
+                    cv.delete("all")
+                    L.draw_scene(cv, 400, 300, kind, light)
+                    self.assertGreater(len(cv.find_withtag("scene")), 40)
+            chip = L.StatusChip(root)
+            chip.set("Оверлей: работает", "on")
+            chip.pulse(0.5)
+            self.assertEqual(chip.itemcget("ring", "state"), "normal")
+            chip.set("Оверлей: остановлен", "off")
+            chip.pulse(0.5)
+            self.assertEqual(chip.itemcget("ring", "state"), "hidden")
+        finally:
+            root.destroy()
+
+    def test_animate_off_is_instant(self):
+        import tkinter as tk
+        L = yassno_launcher
+        root = tk.Tk()
+        old = L.UI_ANIM
+        try:
+            L.UI_ANIM = False
+            got, done = [], []
+            L.animate(root, "t", 200, got.append, lambda: done.append(1))
+            self.assertEqual((got, done), ([1.0], [1]))
+            self.assertAlmostEqual(L.ease(0.0), 0.0)
+            self.assertAlmostEqual(L.ease(1.0), 1.0)
+        finally:
+            L.UI_ANIM = old
+            root.destroy()

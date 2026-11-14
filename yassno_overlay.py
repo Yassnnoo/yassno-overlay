@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "2.8.7"
+APP_VERSION = "2.9.0"
 import argparse
 import bisect
 import collections
@@ -6007,7 +6007,8 @@ class Overlay:
         """Сообщаем лаунчеру, включён ли режим перемещения (файл рядом с профилем)."""
         try:
             with open(os.path.splitext(CFG_PATH)[0] + ".state", "w", encoding="utf-8") as f:
-                json.dump({"locked": bool(self.locked), "pid": os.getpid(), "ts": time.time()}, f)
+                self._state_conn = bool(state["ok"])
+                json.dump({"locked": bool(self.locked), "pid": os.getpid(), "ts": time.time(), "connected": self._state_conn}, f)
         except OSError:
             pass
 
@@ -6017,8 +6018,8 @@ class Overlay:
         if now - getattr(self, "_cmd_t", 0.0) < 0.5:
             return
         self._cmd_t = now
-        if not getattr(self, "_state_written", False):
-            self._state_written = True
+        if not getattr(self, "_state_written", False) or getattr(self, "_state_conn", None) != bool(state["ok"]):
+            self._state_written = True                     # лаунчер показывает «телеметрия идёт / жду игру» по этому файлу
             self.write_state()
         path = os.path.splitext(CFG_PATH)[0] + ".cmd"
         if not os.path.exists(path):
