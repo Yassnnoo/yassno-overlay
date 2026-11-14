@@ -1,6 +1,6 @@
 {
- "version": "2.8.4",
- "notes": "Логотипы Oreca и Isotta Fraschini",
+ "version": "2.8.5",
+ "notes": "Бейдж пит-стопа, карта в МФД ETS2, нижняя панель ETS2",
  "files": [
   "README.txt",
   "diagnose.cmd",

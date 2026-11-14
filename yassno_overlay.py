@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "2.8.4"
+APP_VERSION = "2.8.5"
 import argparse
 import bisect
 import collections
@@ -254,6 +254,15 @@ def tyre_text(car):
     if f and r and f != r:
         return f"{f}/{r}"
     return f or r
+
+
+# бейдж пит-стопа у фамилии: (фон круга, фон времени, текст круга, текст времени); [True] — стоит в боксах сейчас
+PIT_CHIP = {False: ("#b9952b", "#4d4520", "#15130a", "#f0d060"), True: ("#f2c230", "#8c7a26", "#15130a", "#ffffff")}
+
+
+def pit_chip_text(lap, sec):
+    """('L8', '7.4s'): круг заезда и время в боксах; от 10 секунд — без десятых."""
+    return f"L{int(lap)}", (f"{sec:.1f}s" if sec < 9.95 else f"{sec:.0f}s")
 
 
 def status_of(car, out_lap=False):
@@ -6782,17 +6791,21 @@ class Overlay:
                     pi = pit_log.info(car["key"]) if (show_pit and frame.get("kind") == "RACE") else None
                     nm = car["driver"].upper()
                     if pi:
-                        t1, t2 = f"К{pi[0]}", f"{pi[1]:.0f}с"
-                        w1, w2 = self.chipf.measure(t1), self.chipf.measure(t2)
-                        pw_ = w1 + w2 + 13
+                        t1, t2 = pit_chip_text(pi[0], pi[1])
+                        cl, cr, fl, fr = PIT_CHIP[bool(pi[2])]
+                        w1, w2 = self.chipf.measure(t1) + 10, self.chipf.measure(t2) + 12
+                        pw_ = w1 + w2
                         room = max(40, self.w_of["name"] - pw_ - 4)
                         while len(nm) > 4 and (self.bold if is_me else self.font).measure(nm) > room:
                             nm = nm[:-1]
                         rx2 = self.x_of["name"] + self.w_of["name"]
                         hh_ = max(int(rh * 0.30), min(rh // 2 - 1, self.chipf.metrics("linespace") // 2 + 1))
-                        self.rrect(rx2 - pw_, cy - hh_, rx2, cy + hh_, 5, fill="#ffd23f" if pi[2] else "#e8bd35")
-                        c.create_text(rx2 - pw_ + 4, cy, text=t1, anchor="w", font=self.chipf, fill="#10141a")
-                        c.create_text(rx2 - 4, cy, text=t2, anchor="e", font=self.chipf, fill="#b3170f" if pi[2] else "#1b3f9a")
+                        x0_ = rx2 - pw_
+                        self.rrect(x0_, cy - hh_, rx2, cy + hh_, 5, fill=cr)                 # правая половина: время стоянки
+                        self.rrect(x0_, cy - hh_, x0_ + w1, cy + hh_, 5, fill=cl)           # левая: круг заезда
+                        c.create_rectangle(x0_ + w1 - 5, cy - hh_, x0_ + w1, cy + hh_ + 1, fill=cl, outline="")
+                        c.create_text(x0_ + w1 // 2, cy, text=t1, font=self.chipf, fill=fl)
+                        c.create_text(x0_ + w1 + w2 // 2, cy, text=t2, font=self.chipf, fill=fr)
                     self.text("name", cy, nm[:22], FG, self.bold if is_me else self.font)
                     if car.get("radio") and self.cfg.get("st_radio", True):
                         rx = self.x_of["name"] + (self.bold if is_me else self.font).measure(nm[:22]) + 9

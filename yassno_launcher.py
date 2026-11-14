@@ -66,7 +66,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "2.8.4"
+APP_VERSION = "2.8.5"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -457,7 +457,7 @@ HK_KEYS = [chr(c) for c in range(65, 91)] + [str(i) for i in range(10)] + [f"F{i
 # колонки таблицы: ключ, название, ширина в предпросмотре
 STAND_COLS = [("delta", "Позиции ▲▼ (изменение места)", 14), ("logo", "Логотип марки", 18), ("tyre", "Шины", 22),
               ("ahead", "Отставание от передней", 50), ("lead", "Отставание от лидера", 50), ("best", "Лучший круг", 64),
-              ("last", "Последний круг", 64), ("fuel", "Топливо", 36), ("ve", "Энергия", 46), ("status", "Статус", 36),
+              ("last", "Последний круг", 64), ("fuel", "Топливо", 36), ("ve", "Энергия", 76), ("status", "Статус", 36),
               ("irat", "iRating и лицензия (iRacing)", 124)]
 PED_PARTS = [("gear", "Передача"), ("speed", "Скорость"), ("wheel", "Руль"),
              ("graph", "График газа и тормоза"), ("bars", "Столбики педалей")]
@@ -1931,13 +1931,13 @@ class AcSoonPage(ttk.Frame):
 class Ets2Page(ttk.Frame):
     """Euro Truck Simulator 2: как у остальных игр — слева список панелей оверлея, по центру предпросмотр, справа настройки."""
     SIZES = [("300", 300), ("360", 360), ("450", 450), ("560", 560)]
-    KEYSETS = {"numpad": "Num1–Num6, Num+ / Num−", "ctrlf": "Ctrl+F5 … Ctrl+F10", "custom": "Свои (кнопка «Назначить»)"}
+    KEYSETS = {"numpad": "Num1–Num7, Num+ / Num−", "ctrlf": "Ctrl+F5 … Ctrl+F11", "custom": "Свои (кнопка «Назначить»)"}
     PAGES = [("general", "Игра и оформление"), ("mfd", "МФД"), ("dash", "Приборы"), ("trip", "Рейс и топливо"), ("map", "Карта"), ("convoy", "Конвой")]
     GROUPS = [("", ("general",)), ("Окна оверлея", ("mfd", "dash", "trip", "map", "convoy"))]
     ICONS = {"general": "⚙", "mfd": "▦", "dash": "◎", "trip": "◍", "map": "⌖", "convoy": "⇅"}
     WIN = {"mfd": "win_mfd", "dash": "win_dash", "trip": "win_trip", "map": "win_map", "convoy": "win_convoy"}
     NOTES = {"general": "Игра, плагин телеметрии, запуск оверлея и общий вид. Тема, прозрачность и единицы действуют на все окна.",
-             "mfd": "Многофункциональный дисплей на 6 экранов: обзор, груз, урон, топливо, двигатель, рейс. Экраны листаются клавишами прямо в игре.",
+             "mfd": "Многофункциональный дисплей на 7 экранов: обзор, груз, урон, топливо, двигатель, рейс, карта. Экраны листаются клавишами прямо в игре.",
              "dash": "Приборы: пять видов. Выберите вид кнопками под предпросмотром — окно в игре поменяется сразу.",
              "trip": "Топливо, расстояние и время до цели, груз и повреждения одним окном.",
              "map": "Карта Европы с положением грузовика. Тайлы докачиваются из интернета по мере поездки и кэшируются в папке ets2_tiles.",
@@ -1988,23 +1988,26 @@ class Ets2Page(ttk.Frame):
         self.pwrap.pack(padx=11, pady=11)
         self.ctrl = ttk.Frame(center)
         self.ctrl.grid(row=3, column=0, sticky="w", pady=(10, 0))
-        # --- снизу, как у остальных игр: запуск оверлея ---
+        # --- снизу, как у остальных игр: сохранить слева, запуск/перемещение/«Ещё» справа, статус строкой ниже ---
         bar = ttk.Frame(self)
         bar.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 0))
-        self.btn_start = ttk.Button(bar, text="Запустить оверлей", style="Accent.TButton", command=lambda: self.start(False))
-        self.btn_start.pack(side="left", padx=(0, 8))
-        ttk.Button(bar, text="Остановить оверлей", command=self.stop).pack(side="left", padx=(0, 8))
+        ttk.Button(bar, text="Сохранить", command=self.save_click).pack(side="left", padx=(0, 8))
+        ttk.Button(bar, text="Сохранить и перезапустить оверлей", style="Accent.TButton", command=lambda: self.start(False)).pack(side="left", padx=(0, 8))
         more = ttk.Menubutton(bar, text=tr("Ещё") + " ▾")
         mm = tk.Menu(more, tearoff=0, bg=UI_PANEL, fg=UI_FG, activebackground=UI_ACCENT, activeforeground=UI_ACCENT_FG, bd=0, font=("Segoe UI", 10))
-        mm.add_command(label=tr("Двигать окна"), command=lambda: self.cmd("unlock"))
-        mm.add_command(label=tr("Закрепить окна"), command=lambda: self.cmd("lock"))
         mm.add_command(label=tr("Демо без игры"), command=lambda: self.start(True))
+        mm.add_command(label=tr("Остановить оверлей"), command=self.stop)
         mm.add_separator()
         mm.add_command(label=tr("Сбросить положение окон"), command=self.reset_pos)
         more.configure(menu=mm)
-        more.pack(side="left")
-        self.run_lbl = ttk.Label(bar, text="", style="Dim.TLabel")
-        self.run_lbl.pack(side="left", padx=(14, 0))
+        more.pack(side="right")
+        self.btn_move = ttk.Button(bar, text="Режим перемещения окон", command=self.toggle_move)
+        self.btn_move.pack(side="right", padx=(0, 8))
+        self.btn_start = ttk.Button(bar, text="Запустить оверлей (ETS2)", command=lambda: self.start(False))
+        self.btn_start.pack(side="right", padx=(0, 8))
+        Tip(self.btn_move, "Окна можно двигать мышью и растягивать за край или угол; красный крестик убирает окно.")
+        self.run_lbl = ttk.Label(self, text="", style="Dim.TLabel")
+        self.run_lbl.grid(row=2, column=0, columnspan=2, sticky="w", pady=(6, 0))
         # --- справа: настройки страницы ---
         holder = ttk.Frame(self, width=self.RW)
         holder.grid(row=0, column=1, sticky="nsew")
@@ -2243,9 +2246,9 @@ class Ets2Page(ttk.Frame):
         kb.pack(side="left", padx=(8, 6))
         kb.bind("<<ComboboxSelected>>", lambda e: self.save())
         ttk.Button(row, text="Назначить…", command=self.bind_dialog).pack(side="left")
-        self.hint(f, "Экраны: 1 обзор, 2 груз, 3 урон, 4 топливо, 5 двигатель, 6 рейс. Клавиши работают поверх игры; свои кнопки можно назначить и на руль.")
+        self.hint(f, "Экраны: 1 обзор, 2 груз, 3 урон, 4 топливо, 5 двигатель, 6 рейс, 7 карта (колесо мыши — масштаб). Клавиши работают поверх игры; свои кнопки можно назначить и на руль.")
         for i, n in enumerate(ETS2.MfdWin.SCREENS):
-            ttk.Button(self.ctrl, text=f"{i + 1}. {n.capitalize()}", command=lambda i=i: self.set_screen(i)).pack(side="left", padx=(0, 4))
+            ttk.Button(self.ctrl, text=f"{i + 1}. {n.capitalize()}", command=lambda i=i: self.set_screen(i)).grid(row=i // 4, column=i % 4, sticky="ew", padx=(0, 4), pady=(0, 4))
 
     def page_dash(self):
         f = self.card("Приборы")
@@ -2381,6 +2384,35 @@ class Ets2Page(ttk.Frame):
     def save_quiet(self):
         self.save()
 
+    def save_click(self):
+        self.save()
+        self.app.say("Сохранено. Запущенный оверлей подхватит настройки после перезапуска.")
+
+    def move_on(self):
+        """Режим перемещения включён у запущенного оверлея (по его state-файлу)."""
+        if not self.running():
+            return False
+        return read_json(os.path.join(HERE, "yassno_ets2.state")).get("locked") is False
+
+    def toggle_move(self):
+        """Как у остальных игр: первое нажатие включает режим перемещения (при необходимости запускает оверлей), второе — закрепляет окна."""
+        if self.running():
+            on = self.move_on()
+            self.cmd("lock" if on else "unlock")
+            self.set_move_btn(not on)
+        else:
+            self.start(False)
+            self.cmd("unlock")
+            self.set_move_btn(True)
+        self._move_t = time.time()
+
+    def set_move_btn(self, on):
+        try:
+            self.btn_move.config(style="Active.TButton" if on else "TButton",
+                                 text=tr("✔ Режим перемещения ВКЛ — нажмите, чтобы закрепить") if on else tr("Режим перемещения окон"))
+        except tk.TclError:
+            pass
+
     def reset_pos(self):
         """Вернуть окна оверлея на экран: стираем сохранённые позиции и просим запущенный оверлей переставить окна."""
         try:
@@ -2441,7 +2473,7 @@ class Ets2Page(ttk.Frame):
 
     # ---- свои кнопки МФД ----
     LABELS = [("s0", "Экран 1: Обзор"), ("s1", "Экран 2: Груз"), ("s2", "Экран 3: Урон"), ("s3", "Экран 4: Топливо"),
-              ("s4", "Экран 5: Двигатель"), ("s5", "Экран 6: Рейс"), ("next", "Следующий экран"), ("prev", "Предыдущий экран")]
+              ("s4", "Экран 5: Двигатель"), ("s5", "Экран 6: Рейс"), ("s6", "Экран 7: Карта"), ("next", "Следующий экран"), ("prev", "Предыдущий экран")]
 
     def bind_dialog(self):
         """Окно назначения: жмёшь «Назначить» у строки, затем клавишу клавиатуры или кнопку руля."""
@@ -2659,6 +2691,8 @@ class Ets2Page(ttk.Frame):
                 self.run_lbl.config(text=t, foreground=UI_GREEN if "идёт" in t else UI_DIM)
             else:
                 self.run_lbl.config(text=tr("Оверлей не запущен."), foreground=UI_DIM)
+            if time.time() - getattr(self, "_move_t", 0.0) > 3.0:      # сразу после нажатия state-файл ещё старый
+                self.set_move_btn(self.move_on())
             bi = getattr(self, "btn_install", None)
             if bi is not None and bi.winfo_exists():
                 bi.state(["disabled"] if self.busy else ["!disabled"])
@@ -4348,7 +4382,7 @@ class ProfilePanel(ttk.Frame):
         out.append(("num", 20))
         if self.cols["tyre"].get():
             out.append(("tyre", w["tyre"]))
-        out.append(("name", 84 + (62 if self.v["st_pitinfo"].get() else 0)))
+        out.append(("name", 84 + (72 if self.v["st_pitinfo"].get() else 0)))
         if self.game == "iracing" and self.cols["irat"].get():
             out.append(("irat", w["irat"]))
         for k in ("ahead", "lead", "best", "last", "fuel", "ve", "status"):
@@ -4568,25 +4602,31 @@ class ProfilePanel(ttk.Frame):
                         c.create_line(rx - 3, mid + 8, rx + 3, mid + 8, fill=th["accent"])
                         c.create_arc(rx + 5, mid - 6, rx + 11, mid + 2, start=-50, extent=100, style="arc", outline=th["accent"])
                     if self.v["st_pitinfo"].get() and i in (1, 4, 8, 10):
-                        t1, t2 = "К%d" % (18 + i), ("%dс" % (28 + i)) if i != 4 else "14с"
+                        t1, t2 = "L%d" % (18 + i), ("%ds" % (28 + i)) if i != 4 else "7.4s"
                         if i == 4:
-                            t1 = "К22"
-                        w1, w2 = self.f_t.measure(t1), self.f_t.measure(t2)
+                            t1 = "L22"
+                        cl, cr, fl, fr = (("#f2c230", "#8c7a26", "#15130a", "#ffffff") if i == 4 else ("#b9952b", "#4d4520", "#15130a", "#f0d060"))
+                        w1, w2 = self.f_t.measure(t1) + 10, self.f_t.measure(t2) + 12
                         right = min(kx + cw - 2, x + w - 8)
-                        pw_ = w1 + w2 + 13
-                        if right - pw_ <= kx + 2 + self.f_t.measure(name) + 4:
-                            t2, pw_ = "", w1 + 9                           # не влезает целиком — только номер круга
+                        if right - w1 - w2 <= kx + 2 + self.f_t.measure(name) + 4:
+                            t2, w2 = "", 0                                 # не влезает целиком — только номер круга
+                        pw_ = w1 + w2
                         if right - pw_ > kx + 2 + self.f_t.measure(name) + 4:
                             hh_ = max(rh * 0.30, min(rh / 2 - 0.5, self.f_t.metrics("linespace") / 2 + 1))
-                            self.rr(c, right - pw_, mid - hh_, right, mid + hh_, 4, "#ffd23f" if i == 4 else "#e8bd35")
-                            c.create_text(right - pw_ + 4, mid, text=t1, anchor="w", fill="#10141a", font=self.f_t)
+                            x0_ = right - pw_
                             if t2:
-                                c.create_text(right - 4, mid, text=t2, anchor="e", fill="#b3170f" if i == 4 else "#1b3f9a", font=self.f_t)
+                                self.rr(c, x0_, mid - hh_, right, mid + hh_, 4, cr)
+                            self.rr(c, x0_, mid - hh_, x0_ + w1, mid + hh_, 4, cl)
+                            if t2:
+                                c.create_rectangle(x0_ + w1 - 4, mid - hh_, x0_ + w1, mid + hh_ + 1, fill=cl, outline="")
+                                c.create_text(x0_ + w1 + w2 / 2, mid, text=t2, fill=fr, font=self.f_t)
+                            c.create_text(x0_ + w1 / 2, mid, text=t1, fill=fl, font=self.f_t)
                 elif k == "irat":
                     self.irat_chips(kx + cw - 2, mid, i, rh, forecast=True)
                 elif k in ("ahead", "lead"):
                     fight = k == "ahead" and i == 6 and self.v["st_battle"].get()
-                    c.create_text(kx + cw - 2, mid, text="+0.1" if fight else "+%.1f" % (i * (3.7 if k == "lead" else 1.1)),
+                    lead_row = i == 0                    # как в оверлее: у лидера вместо отставания — пройденные круги
+                    c.create_text(kx + cw - 2, mid, text=("12 кр." if k == "lead" else "") if lead_row else "+0.1" if fight else "+%.1f" % (i * (3.7 if k == "lead" else 1.1)),
                                   fill="#ffd23f" if fight else th["dim"], anchor="e", font=self.f_b if fight else self.f_t)
                 elif k in ("best", "last"):
                     c.create_text(kx + cw - 2, mid, text="1:41.%03d" % (230 + i * 17 + (40 if k == "last" else 0)), fill=th["dim"], anchor="e", font=self.f_t)
@@ -4596,8 +4636,10 @@ class ProfilePanel(ttk.Frame):
                     if i in (2, 5):
                         c.create_text(kx + cw - 2, mid, text="1 PIT" if i == 2 else "PIT", fill=th["dim"], anchor="e", font=self.f_t)
                 elif k == "ve":
-                    c.create_rectangle(kx + 2, mid - 2, kx + cw - 4, mid + 2, fill="#262d38", outline="")
-                    c.create_rectangle(kx + 2, mid - 2, kx + 2 + (cw - 6) * (0.9 - i * 0.05), mid + 2, fill="#4a90ff", outline="")
+                    ve, bw = 0.874 - i * 0.047, cw * 0.40
+                    c.create_rectangle(kx + 2, mid - 2, kx + 2 + bw, mid + 2, fill="#262d38", outline="")
+                    c.create_rectangle(kx + 2, mid - 2, kx + 2 + bw * ve, mid + 2, fill="#4a90ff", outline="")
+                    c.create_text(kx + cw - 2, mid, text="%.1f%%" % (ve * 100), fill="#4a90ff", anchor="e", font=self.f_t)
 
     LIC = (("A 4.12", "#0153db", "#ffffff"), ("B 3.40", "#00c702", "#ffffff"), ("C 2.75", "#feec04", "#10151c"),
            ("D 2.10", "#fc8a27", "#ffffff"), ("R 0.95", "#fc0706", "#ffffff"))

@@ -239,7 +239,7 @@ def load_hotkeys(folder=PROFILES_DIR):
 # ---------------------------------------------------------------------------
 # свои кнопки: клавиатура и кнопки руля (winmm joystick API)
 # ---------------------------------------------------------------------------
-BIND_NAMES = ("s0", "s1", "s2", "s3", "s4", "s5", "next", "prev")
+BIND_NAMES = ("s0", "s1", "s2", "s3", "s4", "s5", "s6", "next", "prev")
 
 
 class _JoyInfoEx(ctypes.Structure):
@@ -1687,9 +1687,10 @@ class MfdWin(Win):
     """Многофункциональный дисплей в духе Route Advisor: статус-бар, заголовок, экран и вкладки. Экраны листаются клавишами."""
     KEY, TITLE, W, H = "mfd", "МФД", 480, 372
     PERIOD = 0.1
-    SCREENS = ("ОБЗОР", "ГРУЗ", "УРОН", "ТОПЛИВО", "ДВИГАТЕЛЬ", "РЕЙС")
-    NUMPAD = (0x61, 0x62, 0x63, 0x64, 0x65, 0x66)               # Num1..Num6
-    CTRLF = (0x74, 0x75, 0x76, 0x77, 0x78, 0x79)                # Ctrl+F5..F10
+    SCREENS = ("ОБЗОР", "ГРУЗ", "УРОН", "ТОПЛИВО", "ДВИГАТЕЛЬ", "РЕЙС", "КАРТА")
+    TABS = ("ОБЗОР", "ГРУЗ", "УРОН", "ТОПЛИВО", "МОТОР", "РЕЙС", "КАРТА")       # короткие подписи вкладок
+    NUMPAD = (0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67)         # Num1..Num7
+    CTRLF = (0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7A)          # Ctrl+F5..F11
     ORANGE, DARK = "#ff9f1a", "#1a1200"
     DAYS = ("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс")
     BODY_Y0, BODY_Y1, TAB_Y = 68, 312, 318
@@ -1704,7 +1705,42 @@ class MfdWin(Win):
         self.f_n = tkfont.Font(family="Segoe UI", size=11)
         self.f_b = tkfont.Font(family="Segoe UI Semibold", size=11)
         self.f_s = tkfont.Font(family="Segoe UI", size=9)
-        self._keys_down = [False] * 8
+        self._keys_down = [False] * 9
+        self.alive, self._mreq, self._mres, self._mdone, self._mdrawn, self._mphoto, self._mthread = True, None, None, None, None, None, None
+        self._mev = threading.Event()
+        self.m_span = float(self.app.cfg.get("map_span", 1600.0))
+        if self.top is not None:                         # колесо на вкладке «Карта» — масштаб
+            self.canvas.bind("<MouseWheel>", lambda e: self.map_zoom(-1 if e.delta > 0 else 1))
+            self.canvas.bind("<Button-4>", lambda e: self.map_zoom(-1))
+            self.canvas.bind("<Button-5>", lambda e: self.map_zoom(1))
+
+    def map_zoom(self, direction):
+        if self.screen != 6:
+            return
+        spans, cur = MapWin.SPANS, float(self.app.cfg["map_span"])
+        i = min(range(len(spans)), key=lambda k: abs(math.log(spans[k] / cur)))
+        self.app.cfg["map_span"] = spans[max(0, min(len(spans) - 1, i + direction))]
+        save_cfg(self.app.cfg)
+
+    def _map_worker(self):
+        """Кадр карты для вкладки рисуется в фоне, как у окна карты."""
+        while self.alive:
+            self._mev.wait(0.5)
+            self._mev.clear()
+            req, tm = self._mreq, self.app.tiles
+            if req is None or tm is None or (req == self._mdone and not tm.dirty):
+                continue
+            tm.dirty = False
+            try:
+                img = tm.render(*req[:5], heading=req[5])
+            except Exception:                            # noqa: BLE001
+                continue
+            self._mdone = req
+            self._mres = (req, img)
+
+    def destroy(self):
+        self.alive = False
+        super().destroy()
 
     def set_screen(self, i):
         i %= len(self.SCREENS)
@@ -1718,7 +1754,7 @@ class MfdWin(Win):
         if mode == "custom":
             b = self.app.cfg.get("mfd_binds", {})
             return "свои (" + ", ".join(bind_name(b.get(n, "")) for n in ("next", "prev") if b.get(n)) + ")" if (b.get("next") or b.get("prev")) else "свои"
-        return "Num1-6, Num+/-" if mode == "numpad" else "Ctrl+F5-F10"
+        return "Num1-7, Num+/-" if mode == "numpad" else "Ctrl+F5-F11"
 
     def poll_keys(self):
         """Глобальные клавиши (работают поверх игры). Вызывается из основного цикла."""
@@ -1741,9 +1777,9 @@ class MfdWin(Win):
             return
         for i, v in enumerate(cur):
             if v and not self._keys_down[i]:
-                if i < 6:
+                if i < 7:
                     self.set_screen(i)
-                elif i == 6:
+                elif i == 7:
                     self.set_screen(self.screen + 1)
                 else:
                     self.set_screen(self.screen - 1)
@@ -1811,7 +1847,7 @@ class MfdWin(Win):
         n = len(self.SCREENS)
         tw = (W - 20) / n
         c.create_line(10, self.TAB_Y - 4, W - 10, self.TAB_Y - 4, fill=BORDER)
-        for i, name in enumerate(self.SCREENS):
+        for i, name in enumerate(self.TABS):
             x0 = 10 + i * tw
             sel = i == self.screen
             if sel:
@@ -1840,6 +1876,8 @@ class MfdWin(Win):
             right = f"{d['fuel']:.0f} л"
         elif self.screen == 0:
             right = (d["brand"] + " " + d["truck"]).strip()
+        elif self.screen == 6 and d["on_job"] and d.get("city_dst"):
+            right = "→ " + d["city_dst"][:18] + (f"  •  {d['route_km'] * k:.0f} {unit}" if d["route_km"] > 0 else "")
         self.chrome(d, name, right)
         getattr(self, "scr_%d" % self.screen)(d, k, unit)
 
@@ -1946,6 +1984,65 @@ class MfdWin(Win):
                 ("Номер", d["plate"] or "—", FG)]
         for i, (a, b, col) in enumerate(rows):
             self.kv(96 + i * 30, a, b, col)
+
+
+    def scr_6(self, d, k, unit):
+        """Карта: те же тайлы и маршрут, что в отдельном окне карты, но внутри МФД."""
+        c, W, kk = self.canvas, self.w, self.k
+        x0, y0, x1, y1 = 10, self.BODY_Y0 - 4, W - 10, self.BODY_Y1 - 4
+        cxl, cyl = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+        if not HAVE_PIL:
+            c.create_text(cxl, cyl, text="Для карты нужен Pillow:\npip install pillow", fill=YELLOW, font=self.f_n, justify="center")
+            return
+        preview = self.top is None
+        if self.app.tiles is None and preview:
+            self.app.tiles = TileMap()
+        tm = self.app.tiles
+        if tm is None:
+            return
+        pw, ph = int((x1 - x0) * kk), int((y1 - y0) * kk)
+        tgt = float(self.app.cfg.get("map_span", 1600.0))
+        if self.app.cfg.get("map_auto_zoom") and not preview:
+            tgt *= 1.0 + min(1.0, abs(d["speed"]) / 90.0) * 0.9
+        self.m_span = tgt if preview else self.m_span + (tgt - self.m_span) * 0.3
+        up = bool(self.app.cfg.get("map_heading_up", True))
+        req = (d["x"], d["z"], self.m_span, pw, ph, d["heading"] if up else None, up, d["heading"])
+        if preview:
+            self._mres = (req, tm.render(*req[:5], heading=req[5]))
+        else:
+            self._mreq = req
+            if self._mthread is None:
+                self._mthread = threading.Thread(target=self._map_worker, daemon=True)
+                self._mthread.start()
+            self._mev.set()
+        res = self._mres
+        if res is not None and res is not self._mdrawn and res[0][3] == pw and res[0][4] == ph:
+            self._mdrawn = res
+            rq, img = res
+            dr = ImageDraw.Draw(img)
+            cx, cy = pw // 2, ph // 2
+            route = getattr(self.app, "route", None)
+            rpts = route.update(d) if (route is not None and self.app.cfg.get("show_route", True)) else []
+            if rpts:
+                draw_route(dr, rpts, rq[0], rq[1], pw / float(rq[2]), cx, cy, math.radians(rq[7]) if rq[6] else 0.0, kk)
+            ang = 0.0 if rq[6] else math.radians(rq[7])
+            pts = [(cx + (px * math.cos(ang) + py * math.sin(ang)) * kk, cy + (-px * math.sin(ang) + py * math.cos(ang)) * kk)
+                   for px, py in ((0, -13), (9, 10), (0, 5), (-9, 10))]
+            dr.polygon(pts, fill=(255, 159, 26), outline=(16, 20, 26))
+            self._mphoto = ImageTk.PhotoImage(img)
+            self._minfo = (rq[2], rq[6], rq[7])
+        if self._mphoto is None:
+            c.create_text(cxl, cyl, text="загрузка карты…", fill=DIM, font=self.f_n)
+            return
+        c.create_image(x0, y0, image=self._mphoto, anchor="nw")
+        c.create_rectangle(x0, y0, x1, y1, outline=BORDER)
+        span, rup, rhead = self._minfo
+        c.create_text(x1 - 6, y1 - 9, text=f"{span:.0f} м", fill=FG, anchor="e", font=self.f_s)
+        if rup:
+            a, rr = math.radians(rhead), (y1 - y0) / 2.0 - 12
+            c.create_text(cxl + rr * math.sin(a), cyl - rr * math.cos(a), text="N", fill=ACCENT, font=self.f_b)
+        if tm.pending:
+            c.create_text(x0 + 6, y1 - 9, text="подгрузка карты…", fill=DIM, anchor="w", font=self.f_s)
 
 
 class ConvoyWin(Win):

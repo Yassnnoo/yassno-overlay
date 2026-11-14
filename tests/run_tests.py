@@ -467,6 +467,14 @@ class SelfTest(unittest.TestCase):
             self.assertIn("SELFTEST OK", out, f"{g}: {out[-600:]}")
 
 
+class PitChip(unittest.TestCase):
+    def test_text(self):
+        self.assertEqual(O.pit_chip_text(8, 7.44), ("L8", "7.4s"))
+        self.assertEqual(O.pit_chip_text(5, 54.2), ("L5", "54s"))
+        self.assertEqual(O.pit_chip_text(12, 9.97), ("L12", "10s"))
+        self.assertEqual(len(O.PIT_CHIP[True]), 4)
+
+
 class NewBrandLogos(unittest.TestCase):
     def test_oreca_isotta(self):
         for model, slug in (("Oreca 07 Gibson", "oreca"), ("Isotta Fraschini Tipo 6-C", "isottafraschini")):

@@ -418,3 +418,34 @@ class RouteTests(unittest.TestCase):
         d2 = dict(d, on_job=False)
         self.assertEqual(m.update(d2), [])                   # без груза маршрута нет
         self.assertIsNone(m.key)
+
+
+class MfdMapTab(unittest.TestCase):
+    def test_seven_screens(self):
+        M = E.MfdWin
+        self.assertEqual(M.SCREENS[6], "КАРТА")
+        self.assertEqual(len(M.TABS), len(M.SCREENS))
+        self.assertEqual(len(M.NUMPAD), 7)
+        self.assertEqual(len(M.CTRLF), 7)
+        self.assertEqual(E.BIND_NAMES[6:], ("s6", "next", "prev"))
+        self.assertTrue(callable(M.scr_6))
+
+    def test_preview_draws_map_tab(self):
+        import tkinter as tk
+        root = tk.Tk()
+        try:
+            cfg = dict(E.DEFAULTS)
+            pv = E.Preview(root, cfg, "mfd", 1.0)
+            pv.draw(6)                                   # не должно падать; при наличии Pillow на холсте есть картинка карты
+            if E.HAVE_PIL:
+                self.assertTrue(any(pv.canvas.type(i) == "image" for i in pv.canvas.find_all()))
+        finally:
+            root.destroy()
+
+
+class LauncherEts2Bar(unittest.TestCase):
+    def test_bar_like_other_games(self):
+        P = yassno_launcher.Ets2Page
+        for n in ("toggle_move", "set_move_btn", "move_on", "save_click"):
+            self.assertTrue(callable(getattr(P, n)), n)
+        self.assertIn("s6", [k for k, _ in P.LABELS])
