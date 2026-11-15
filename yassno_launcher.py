@@ -66,7 +66,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "2.9.4"
+APP_VERSION = "2.9.5"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -1526,7 +1526,7 @@ EN.update({
     "Режим перемещения: двигайте окна мышью, затем нажмите эту кнопку ещё раз.": "Move mode: drag the windows with the mouse, then click this button again.",
     "Не удалось": "Failed", "Не получилось передать команду оверлею.": "Could not send the command to the overlay.",
     "Статистика": "Statistics", "Статистика сессий": "Session statistics", "Сессии": "Sessions", "Обновить": "Refresh",
-    "Экспорт в CSV…": "Export to CSV…", "Удалить сессию": "Delete session", "Открыть папку статистики": "Open the statistics folder",
+    "Экспорт в CSV…": "Export to CSV…", "Очистить папку статистики": "Clear the statistics folder", "Папка статистики уже пуста.": "The statistics folder is already empty.", "Очистить статистику": "Clear statistics", "Удалить сессию": "Delete session", "Открыть папку статистики": "Open the statistics folder",
     "Пока пусто. Статистика пишется, пока работает оверлей: каждый круг сохраняется в папку stats.":
         "Nothing yet. Statistics are recorded while the overlay runs: every lap is saved to the stats folder.",
     "начало": "started", "лучшее": "best", "Круги": "Laps", "Лучший круг": "Best lap", "Средний (без пит)": "Average (no pit laps)",
@@ -1626,6 +1626,36 @@ def enable_wheel(canvas, area):
 
 def mb_error(title, msg):
     return messagebox.showerror(tr(title), tr(msg))
+
+
+def stats_dir_usage(folder):
+    """(число файлов, их размер в байтах) в папке статистики: сессии *.json и всё в подпапках (телеметрия кругов)."""
+    n = size = 0
+    for root, _, files in os.walk(folder):
+        for f in files:
+            try:
+                size += os.path.getsize(os.path.join(root, f))
+                n += 1
+            except OSError:
+                pass
+    return n, size
+
+
+def clear_stats_dir(folder):
+    """Удаляет содержимое папки статистики, саму папку оставляет. Возвращает, сколько файлов удалить не удалось."""
+    bad = 0
+    for root, dirs, files in os.walk(folder, topdown=False):
+        for f in files:
+            try:
+                os.remove(os.path.join(root, f))
+            except OSError:
+                bad += 1
+        if root != folder:
+            try:
+                os.rmdir(root)
+            except OSError:
+                pass
+    return bad
 
 
 def mb_yesno(title, msg):
@@ -7114,6 +7144,7 @@ class StatsPage(ttk.Frame):
         ttk.Button(left, text="Все сессии в один CSV…", command=self.export_all).pack(fill="x", pady=2)
         ttk.Button(left, text="Удалить сессию", command=self.delete).pack(fill="x", pady=2)
         ttk.Button(left, text="Открыть папку статистики", command=self.open_dir).pack(fill="x", pady=2)
+        ttk.Button(left, text="Очистить папку статистики", command=self.clear_all).pack(fill="x", pady=2)
 
         right = ttk.Frame(self)
         right.grid(row=0, column=1, sticky="nsew")
@@ -7501,6 +7532,21 @@ class StatsPage(ttk.Frame):
             mb_error("Не удалось удалить", str(e))
         self.current = None
         self.reload(keep=False)
+
+    def clear_all(self):
+        """Удаляет все сохранённые сессии и телеметрию из папки stats (сама папка остаётся)."""
+        n, size = stats_dir_usage(STATS_DIR)
+        if not n:
+            mb_info("Статистика", "Папка статистики уже пуста.")
+            return
+        if not mb_yesno("Очистить статистику", f"Удалить все сохранённые сессии и телеметрию: {n} файлов, {size / 1048576:.1f} МБ?\n"
+                                              "Это нельзя отменить."):
+            return
+        left = clear_stats_dir(STATS_DIR)
+        self.current = None
+        self.reload(keep=False)
+        if left:
+            mb_error("Очистка", f"Не удалось удалить файлов: {left}. Возможно, они открыты в другой программе.")
 
     def open_dir(self):
         try:

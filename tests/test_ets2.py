@@ -1,3 +1,4 @@
+import os
 import ctypes, os, sys, tempfile, time, unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import yassno_ets2 as E
@@ -457,6 +458,22 @@ class UpdaterRef(unittest.TestCase):
         self.assertIn("/main/version.json", L.raw_url("version.json"))
         self.assertIn("/abc123/version.json", L.raw_url("version.json", "abc123"))
         self.assertTrue(callable(L.head_sha))
+
+
+class StatsClear(unittest.TestCase):
+    def test_clear_stats_dir(self):
+        import tempfile
+        L = yassno_launcher
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, "tel", "x"))
+            for rel in ("a.json", "b.json", os.path.join("tel", "l1.json"), os.path.join("tel", "x", "l2.bin")):
+                with open(os.path.join(d, rel), "wb") as f:
+                    f.write(b"12345")
+            self.assertEqual(L.stats_dir_usage(d), (4, 20))
+            self.assertEqual(L.clear_stats_dir(d), 0)
+            self.assertEqual(L.stats_dir_usage(d), (0, 0))
+            self.assertTrue(os.path.isdir(d))                  # сама папка остаётся
+            self.assertEqual(os.listdir(d), [])
 
 
 class LauncherLook(unittest.TestCase):
