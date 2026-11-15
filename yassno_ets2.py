@@ -1095,6 +1095,33 @@ class ScaledCanvas(tk.Canvas):
     """Canvas, который сам умножает координаты, толщину линий и размер шрифтов на k: окна рисуются в «базовых» координатах."""
     k = 1.0
     _fc = None
+    _old = None                                       # элементы прошлого кадра, пока идёт перерисовка (см. frame_begin)
+
+    def frame_begin(self):
+        """Перерисовка без пустого кадра: delete("all") внутри кадра ничего не стирает, а запоминает старые элементы;
+        они удаляются в frame_end уже после того, как новые нарисованы. Раньше цифры на миг исчезали (стёрто -> нарисовано)."""
+        self._old = []
+        self._old_mark = False
+
+    def frame_end(self):
+        old, self._old = self._old, None
+        if old:
+            try:
+                self.delete(*old)
+            except tk.TclError:
+                pass
+
+    def delete(self, *tags):
+        if self._old is not None and tags == ("all",):
+            if not self._old_mark:                    # первый «delete all» кадра: прошлые элементы уйдут в конце
+                self._old_mark = True
+                self._old = [i for i in self.find_all() if "mv" not in self.gettags(i)]   # рамка режима перемещения живёт дольше кадра
+            else:                                     # повторный: стираем то, что нарисовано в этом кадре
+                for i in self.find_all():
+                    if i not in self._old and "mv" not in self.gettags(i):
+                        super().delete(i)
+            return
+        super().delete(*tags)
 
     def _sc(self, args):
         k = self.k
@@ -2773,8 +2800,13 @@ class App:
                 for w in self.wins:
                     if now - getattr(w, "_t_upd", 0.0) >= w.PERIOD:
                         w._t_upd = now
-                        w.update(d)
-                        w.draw_grip()
+                        cv = w.canvas
+                        cv.frame_begin() if hasattr(cv, "frame_begin") else None
+                        try:
+                            w.update(d)
+                            w.draw_grip()
+                        finally:
+                            cv.frame_end() if hasattr(cv, "frame_end") else None
             self.check_hotkey()
             self.check_cmd()
             if self.move_panel is not None and time.monotonic() - getattr(self, "_mp_lift", 0.0) > 1.0:

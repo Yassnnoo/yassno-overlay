@@ -460,6 +460,32 @@ class UpdaterRef(unittest.TestCase):
         self.assertTrue(callable(L.head_sha))
 
 
+class NoBlankFrame(unittest.TestCase):
+    """Перерисовка окна ETS2 не оставляет пустого холста: старые элементы стираются только после рисования новых."""
+
+    def test_deferred_delete(self):
+        import tkinter as tk
+        root = tk.Tk()
+        try:
+            c = E.ScaledCanvas(root, width=100, height=50)
+            c.create_text(5, 5, text="47")
+            c.create_rectangle(0, 0, 3, 3, tags="mv")
+            old_text = c.find_withtag("all")[0]
+            c.frame_begin()
+            c.delete("all")
+            self.assertEqual(len(c.find_all()), 2)              # внутри кадра старое ещё на месте
+            c.create_text(5, 5, text="48")
+            self.assertEqual(len(c.find_all()), 3)
+            c.frame_end()
+            ids = c.find_all()
+            self.assertNotIn(old_text, ids)                     # старый текст ушёл
+            self.assertEqual(len(ids), 2)                       # новый текст и рамка перемещения остались
+            c.delete("all")                                     # вне кадра — обычное поведение
+            self.assertEqual(len(c.find_all()), 0)
+        finally:
+            root.destroy()
+
+
 class RunButtons(unittest.TestCase):
     def test_run_stop_toggle_and_stable_mfd(self):
         import time
