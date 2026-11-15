@@ -66,7 +66,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "2.9.5"
+APP_VERSION = "2.9.6"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -2387,7 +2387,7 @@ class Ets2Page(ttk.Frame):
         more.pack(side="right")
         self.btn_move = ttk.Button(bar, text="Режим перемещения окон", command=self.toggle_move)
         self.btn_move.pack(side="right", padx=(0, 8))
-        self.btn_start = ttk.Button(bar, text="Запустить оверлей (ETS2)", command=lambda: self.start(False))
+        self.btn_start = ttk.Button(bar, text="Запустить оверлей (ETS2)", command=self.run_or_stop)
         self.btn_start.pack(side="right", padx=(0, 8))
         Tip(self.btn_move, "Окна можно двигать мышью и растягивать за край или угол; красный крестик убирает окно.")
         self.run_lbl = ttk.Label(self, text="", style="Dim.TLabel")
@@ -2685,6 +2685,7 @@ class Ets2Page(ttk.Frame):
         for w in self.pwrap.winfo_children():
             w.destroy()
         self.preview = self.map_cv = None
+        self._pv_min = (0, 0)
         if kind == "map":
             self.map_cv = tk.Canvas(self.pwrap, width=360, height=360, bg=MOCK_BG, highlightthickness=0)
             self.place_preview(self.map_cv)
@@ -2694,9 +2695,16 @@ class Ets2Page(ttk.Frame):
             return
         try:
             self.preview = ETS2.Preview(self.pwrap, self.cfg, kind, 1.0)
-            self.place_preview(self.preview.canvas)
-            if kind == "mfd":
+            self._pv_min = (0, 0)
+            if kind == "mfd":                            # экраны МФД разной высоты: резервируем по самому большому, чтобы кнопки под ним не прыгали
+                mw = mh = 0
+                for i in range(len(ETS2.MfdWin.TABS)):
+                    self.preview.draw(i)
+                    mw = max(mw, int(float(self.preview.canvas.cget("width"))))
+                    mh = max(mh, int(float(self.preview.canvas.cget("height"))))
+                self._pv_min = (mw, mh)
                 self.preview.draw(self.mfd_screen)
+            self.place_preview(self.preview.canvas)
         except Exception:                                # noqa: BLE001
             self.preview = None
 
@@ -2714,16 +2722,17 @@ class Ets2Page(ttk.Frame):
                 return
             w, h = int(float(ch.cget("width"))), int(float(ch.cget("height")))
             light = self.app.cfg.get("pv_bg", "dark") == "light"
-            key = (w, h, light, str(ch))
+            mw, mh = getattr(self, "_pv_min", (0, 0))
+            key = (w, h, light, str(ch), mw, mh)
             if key == self._scene_key:
                 return
             self._scene_key = key
-            W, H = w + 2 * self.SCENE_MX, h + 2 * self.SCENE_MY
+            W, H = max(w, mw) + 2 * self.SCENE_MX, max(h, mh) + 2 * self.SCENE_MY
             cv = self.pwrap
             cv.delete("all")
             cv.config(width=W, height=H)
             draw_scene(cv, W, H, "road", light)
-            cv.create_window(self.SCENE_MX, self.SCENE_MY, window=ch, anchor="nw")
+            cv.create_window((W - w) // 2, (H - h) // 2, window=ch, anchor="nw")
         except tk.TclError:
             pass
 
@@ -3074,6 +3083,21 @@ class Ets2Page(ttk.Frame):
         self.demo = demo
         self.app.say("Запускаю оверлей ETS2…")
 
+    def run_or_stop(self):
+        if self.running():
+            self.stop()
+        else:
+            self.start(False)
+        self.sync_run_btn()
+
+    def sync_run_btn(self):
+        try:
+            txt = tr("Остановить оверлей") if self.running() else tr("Запустить оверлей (ETS2)")
+            if str(self.btn_start.cget("text")) != txt:
+                self.btn_start.config(text=txt)
+        except (tk.TclError, AttributeError):
+            pass
+
     def stop(self):
         self._manual_stop = True
         pid = self.state_pid()
@@ -3118,6 +3142,7 @@ class Ets2Page(ttk.Frame):
                 self.run_lbl.config(text=t, foreground=UI_GREEN if "идёт" in t else UI_DIM)
             else:
                 self.run_lbl.config(text=tr("Оверлей не запущен."), foreground=UI_DIM)
+            self.sync_run_btn()
             if time.time() - getattr(self, "_move_t", 0.0) > 3.0:      # сразу после нажатия state-файл ещё старый
                 self.set_move_btn(self.move_on())
             bi = getattr(self, "btn_install", None)
@@ -3658,7 +3683,8 @@ class ProfilePanel(ttk.Frame):
         more.pack(side="right")
         self.btn_move = ttk.Button(bar, text="Режим перемещения окон", command=self.toggle_move)
         self.btn_move.pack(side="right", padx=(0, 8))
-        ttk.Button(bar, text=f"Запустить оверлей ({GAMES[self.game]})", command=lambda: self.launch("")).pack(side="right", padx=(0, 8))
+        self.btn_run = ttk.Button(bar, text=f"Запустить оверлей ({GAMES[self.game]})", command=self.run_or_stop)
+        self.btn_run.pack(side="right", padx=(0, 8))
         Tip(self.btn_move, "Окна можно двигать мышью и растягивать за угол. Края экрана и соседние окна притягивают (Shift — без магнита).")
         self.msg = ttk.Label(self, text="", style="Dim.TLabel")
         self.msg.grid(row=2, column=0, columnspan=2, sticky="w", pady=(6, 0))
@@ -4351,6 +4377,28 @@ class ProfilePanel(ttk.Frame):
             return
         mb_info("rFactor 2", res + "\n\nЗапустите rFactor 2 — оверлей увидит данные.")
 
+    def overlay_here(self):
+        """Оверлей запущен именно для этой игры (для другой игры кнопка остаётся «Запустить»)."""
+        r = self.app.runner
+        return bool(r.running() and r.game == self.game)
+
+    def sync_run_btn(self):
+        """Нижняя кнопка: «Запустить оверлей (игра)» или, пока он работает, «Остановить оверлей»."""
+        try:
+            on = self.overlay_here()
+            txt = tr("Остановить оверлей") if on else tr(f"Запустить оверлей ({GAMES[self.game]})")
+            if str(self.btn_run.cget("text")) != txt:
+                self.btn_run.config(text=txt)
+        except (tk.TclError, AttributeError):
+            pass
+
+    def run_or_stop(self):
+        if self.overlay_here():
+            self.app.stop_overlay()
+        else:
+            self.launch("")
+        self.sync_run_btn()
+
     def launch(self, mode):
         if not self.save(quiet=True):
             return
@@ -4361,6 +4409,7 @@ class ProfilePanel(ttk.Frame):
         self.say({"": "Оверлей запущен.", "unlock": "Режим перемещения: двигайте окна мышью, затем Ctrl+Shift+L — закрепить.",
                   "demo": "Демо без игры (закрыть: Ctrl+Shift+Q или «Остановить оверлей»)."}[mode])
         self.app.refresh_status()
+        self.sync_run_btn()
 
     def selftest(self):
         """Прогоняет демо со всеми панелями в фоне и показывает, нашлись ли ошибки."""
@@ -8177,7 +8226,6 @@ class App:
             t = GameTile(tiles, "Euro Truck Simulator 2", self.show_ets2, game="ets2")
             t.pack(side="left", padx=(0, 8), anchor="s")
             self.tiles["ets2"] = t
-        ttk.Button(tiles, text="Остановить оверлей", command=self.stop_overlay).pack(side="right", anchor="s", pady=(0, 2))
         ttk.Button(tiles, text="▶ Запустить игру", style="Accent.TButton", command=lambda: self.launch_game()).pack(side="right", anchor="s", padx=(0, 10), pady=(0, 2))
 
         head = ttk.Frame(self.root, padding=(14, 8, 14, 2))
@@ -8546,6 +8594,8 @@ class App:
 
     def refresh_status(self):
         self.update_tiles()
+        for p_ in getattr(self, "panels", {}).values():
+            p_.sync_run_btn()
         g = self.detected
         r = self.runner
         run = r.running()

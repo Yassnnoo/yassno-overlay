@@ -460,6 +460,41 @@ class UpdaterRef(unittest.TestCase):
         self.assertTrue(callable(L.head_sha))
 
 
+class RunButtons(unittest.TestCase):
+    def test_run_stop_toggle_and_stable_mfd(self):
+        import time
+        L = yassno_launcher
+        L._PV_LOGOS.clear()                                     # картинки прошлых окон Tk недействительны
+        app = L.App()
+        try:
+            root = app.root
+            root.update()
+            app.select_game("lmu")
+            root.update()
+            p = app.panels["lmu"]
+            self.assertIn("Le Mans", str(p.btn_run.cget("text")))
+            app.runner.running = lambda: True
+            app.runner.game = "lmu"
+            app.refresh_status()
+            self.assertEqual(p.btn_run.cget("text"), "Остановить оверлей")
+            app.runner.game = "rf2"                             # оверлей идёт для другой игры — здесь кнопка «Запустить»
+            app.refresh_status()
+            self.assertIn("Le Mans", str(p.btn_run.cget("text")))
+            del app.runner.running
+            app.show_ets2()
+            ep = app.ets2_page
+            ep.open_page("mfd")
+            root.update()
+            ys = set()
+            for i in range(len(L.ETS2.MfdWin.TABS)):
+                ep.set_screen(i)
+                root.update()
+                ys.add((ep.scr_btns[0].winfo_rooty(), ep.pwrap.winfo_height()))
+            self.assertEqual(len(ys), 1, ys)                     # кнопки экранов МФД не прыгают
+        finally:
+            app.root.destroy()
+
+
 class StatsClear(unittest.TestCase):
     def test_clear_stats_dir(self):
         import tempfile
