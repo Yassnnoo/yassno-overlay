@@ -511,6 +511,18 @@ class LeaderLapsAndVE(unittest.TestCase):
         self.assertEqual(g["b"][2], "+3.20")
         self.assertEqual(O.group_gaps(self._cars(), True)["a"][2], "12 кр.")
 
+    def test_practice_laps_for_all(self):
+        cars = self._cars()
+        cars[1]["laps"] = 9
+        g = O.group_gaps(cars, True, True)
+        self.assertEqual((g["a"][2], g["b"][2]), ("12 кр.", "9 кр."))
+        self.assertEqual(g["a"][0], "")
+        self.assertNotEqual(g["b"][0], "")                       # разница до передней машины осталась
+        self.assertEqual(O.group_gaps(cars, True)["b"][2], "-")   # квалификация: как раньше, у остальных отставание
+        self.assertIn("TEST", O.PRACTICE_KINDS)
+        self.assertNotIn("QUALIFYING", O.PRACTICE_KINDS)
+        self.assertNotIn("RACE", O.PRACTICE_KINDS)
+
     def test_ve_reserve(self):
         fc = O.FuelCalc()
         fc.ve_laps.extend([0.05] * 5)

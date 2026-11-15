@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "2.9.2"
+APP_VERSION = "2.9.3"
 import argparse
 import bisect
 import collections
@@ -182,11 +182,17 @@ def fmt_gap(sec, laps):
     return f"+{sec:.1f}" if sec >= 10 else f"+{sec:.2f}"
 
 
-def group_gaps(group, timed):
-    """key -> (до передней: текст, секунды; до лидера: текст)."""
+PRACTICE_KINDS = ("TEST", "PRACTICE", "WARMUP")          # сессии, где в колонке «Лидер» у всех — пройденные круги
+
+
+def group_gaps(group, timed, laps_all=False):
+    """key -> (до передней: текст, секунды; до лидера: текст). laps_all — практика: в «до лидера» у каждого его круги."""
     out, prev = {}, None
     for i, c in enumerate(group):
-        if i == 0:
+        if laps_all:
+            ahead = c["best"] - prev["best"] if i and c["best"] > 0 and prev["best"] > 0 else None
+            out[c["key"]] = (fmt_gap(ahead, 0) if i else "", ahead, f"{c.get('laps', 0)} кр.")
+        elif i == 0:
             ll = c.get("laps", 0)
             out[c["key"]] = ("", None, f"{ll} кр.")
         elif timed:
@@ -6641,7 +6647,7 @@ class Overlay:
         else:
             group, group_name, scope = ordered, "ВСЕ МАШИНЫ", "ALL"
         vis = self.visible_cars(group)
-        gaps = group_gaps(group, timed)
+        gaps = group_gaps(group, timed, bool(frame and frame["kind"] in PRACTICE_KINDS))
         cpos = {x["key"]: i + 1 for i, x in enumerate(group)}
         deltas = self.track_positions(frame, scope, group) if frame and not timed else {}
         stuck = self.fuel_stuck(frame) if frame else set()
@@ -6886,7 +6892,7 @@ class Overlay:
             group = [x for x in ordered if x["cls"] == me["cls"]]
         else:
             group = ordered
-        gaps = group_gaps(group, timed) if group else {}
+        gaps = group_gaps(group, timed, bool(frame and frame["kind"] in PRACTICE_KINDS)) if group else {}
         if self.R:
             self.rrect(0, 0, W - 1, H - 1, self.R, fill=HDR_BG)
         else:
