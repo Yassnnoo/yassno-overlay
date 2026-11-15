@@ -66,7 +66,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "2.9.0"
+APP_VERSION = "2.9.1"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -1211,17 +1211,18 @@ def flash_saved(btn, restore):
         pass
 
 
-def slide_in(canvas, win, title=None):
-    """Смена страницы: колонка настроек плавно въезжает справа, заголовок проявляется из фона."""
+def slide_in(canvas, win, title=None, still=False):
+    """Смена страницы: колонка настроек плавно въезжает справа, заголовок проявляется из фона.
+    still=True — без анимации («Общие и цвета»: страница тяжёлая, на ней въезд только тормозит)."""
     def step(p):
         canvas.coords(win, 28.0 * (1.0 - p), 0)
         if title is not None:
             title.configure(foreground=mix(UI_BG, UI_FG, p) if p < 1.0 else "")
     try:
-        if canvas.winfo_viewable():
+        if canvas.winfo_viewable() and not still:
             animate(canvas, "slide", 200, step)
         else:
-            step(1.0)
+            animate(canvas, "slide", 0, step)               # отменяет начатый въезд и ставит конечное положение
     except tk.TclError:
         pass
 
@@ -3547,7 +3548,7 @@ class ProfilePanel(ttk.Frame):
         Tip(self.btn_bg, "Фон предпросмотра: ночная или дневная трасса — проверить, как оверлей читается на тёмной и светлой картинке.")
         self.note = ttk.Label(center, text="", style="Dim.TLabel", wraplength=self.PW)
         self._center = center
-        center.bind("<Configure>", lambda e: self.after(80, self.fit_preview))
+        center.bind("<Configure>", lambda e: self.fit_later())
         self.note.grid(row=1, column=0, sticky="w", pady=(2, 10))
         pbox = RoundBox(center, radius=16, fill=MOCK_BG, border=mix(UI_BORDER, UI_DIM, 0.3))
         pbox.configure(width=self.PW + 22 + 2 * pbox.off)
@@ -3681,7 +3682,7 @@ class ProfilePanel(ttk.Frame):
         self.settings_filter()
         translate_tree(self.settings)
         self.refresh()
-        slide_in(self.scroll, self._swin, self.title)
+        slide_in(self.scroll, self._swin, self.title, still=key == "general")
 
     # --- помощники: настройки раскладываются по карточкам, подписи и элементы выровнены по сетке
     def pages(self):
@@ -4588,8 +4589,19 @@ class ProfilePanel(ttk.Frame):
                 self.v[key].set(not self.v[key].get())
                 return
 
+    def fit_later(self):
+        """Дебаунс: при растягивании окна и смене страницы Configure идёт пачкой — перерисовываем один раз."""
+        old = getattr(self, "_fit_job", None)
+        if old is not None:
+            try:
+                self.after_cancel(old)
+            except (tk.TclError, ValueError):
+                pass
+        self._fit_job = self.after(80, self.fit_preview)
+
     def fit_preview(self):
         """Предпросмотр подстраивается под свободное место: окно больше — картинка крупнее (но не мельче базового размера)."""
+        self._fit_job = None
         try:
             cw, chh = self._center.winfo_width(), self._center.winfo_height()
             if cw < 100 or chh < 100:
@@ -8219,7 +8231,7 @@ class App:
                 p.pack(fill="both", expand=True)
                 if fresh:
                     p.update_idletasks()
-                    slide_in(p.scroll, p._swin, p.title)
+                    slide_in(p.scroll, p._swin, p.title, still=p.page == "general")
             else:
                 p.pack_forget()
         self.update_tiles()
@@ -8527,7 +8539,7 @@ class App:
 
     def pulse_tick(self):
         """Пульс точек в чипах статуса; при свёрнутом окне и выключенных анимациях не тратим время."""
-        delay = 50
+        delay = 80
         try:
             if not UI_ANIM or self.root.state() != "normal":
                 delay = 600

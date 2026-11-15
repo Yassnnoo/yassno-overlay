@@ -481,6 +481,25 @@ class LauncherLook(unittest.TestCase):
         finally:
             L.UI_THEME_NAME = old
 
+    def test_general_page_no_slide(self):
+        """«Общие и цвета» открывается без въезда, остальные страницы — с анимацией; перерисовка при смене размера с дебаунсом."""
+        import tkinter as tk
+        L = yassno_launcher
+        app = L.App()
+        try:
+            app.root.update()
+            p = app.panels["lmu"]
+            p.show_page("fuel")
+            self.assertIn("slide", getattr(p.scroll, "_anims", {}))
+            p.show_page("general")
+            self.assertEqual(list(map(float, p.scroll.coords(p._swin))), [0.0, 0.0])
+            self.assertNotIn("slide", getattr(p.scroll, "_anims", {}))
+            p.fit_later()
+            p.fit_later()                                       # дебаунс: два вызова подряд — одна отложенная перерисовка
+            self.assertIsNotNone(p._fit_job)
+        finally:
+            app.root.destroy()
+
     def test_retint_and_scene(self):
         import tkinter as tk
         L = yassno_launcher
