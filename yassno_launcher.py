@@ -66,7 +66,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "2.9.1"
+APP_VERSION = "2.9.2"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -4456,10 +4456,11 @@ class ProfilePanel(ttk.Frame):
         self._anim_tick()
 
     def _anim_tick(self):
+        """Живой предпросмотр: перерисовка раз в ~120 мс. На «Общие и цвета» картинка стоит (все панели сразу — тяжело и отвлекает)."""
         try:
             if not self.winfo_exists():
                 return
-            if self.winfo_ismapped() and self.page != "apps" and getattr(self, "anim_on", True) and not self._pending:
+            if self.winfo_ismapped() and self.page not in ("apps", "general") and getattr(self, "anim_on", True) and not self._pending:
                 self.draw_preview()
             try:
                 focused = self.focus_displayof() is not None

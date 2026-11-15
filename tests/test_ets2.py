@@ -494,6 +494,18 @@ class LauncherLook(unittest.TestCase):
             p.show_page("general")
             self.assertEqual(list(map(float, p.scroll.coords(p._swin))), [0.0, 0.0])
             self.assertNotIn("slide", getattr(p.scroll, "_anims", {}))
+            n = [0]
+            raw = p._draw_preview_raw
+            p._draw_preview_raw = lambda: (n.__setitem__(0, n[0] + 1), raw())
+            p.anim_on = True
+            p._pending = False
+            p._anim_tick()                                      # на «Общие и цвета» живой предпросмотр не перерисовывается
+            self.assertEqual(n[0], 0)
+            p.show_page("fuel")
+            n[0] = 0
+            p._anim_tick()                                      # на странице конкретного оверлея — анимируется
+            self.assertEqual(n[0], 1)
+            p.show_page("general")
             p.fit_later()
             p.fit_later()                                       # дебаунс: два вызова подряд — одна отложенная перерисовка
             self.assertIsNotNone(p._fit_job)
