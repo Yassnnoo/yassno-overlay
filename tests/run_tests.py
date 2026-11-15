@@ -509,19 +509,20 @@ class LeaderLapsAndVE(unittest.TestCase):
         g = O.group_gaps(self._cars(), False)
         self.assertEqual(g["a"][2], "12 кр.")
         self.assertEqual(g["b"][2], "+3.20")
-        self.assertEqual(O.group_gaps(self._cars(), True)["a"][2], "12 кр.")
+        self.assertEqual(O.group_gaps(self._cars(), True)["a"][2], "ЛИДЕР")
 
-    def test_practice_laps_for_all(self):
+    def test_leader_word_in_timed_sessions(self):
         cars = self._cars()
         cars[1]["laps"] = 9
-        g = O.group_gaps(cars, True, True)
-        self.assertEqual((g["a"][2], g["b"][2]), ("12 кр.", "9 кр."))
-        self.assertEqual(g["a"][0], "")
-        self.assertNotEqual(g["b"][0], "")                       # разница до передней машины осталась
-        self.assertEqual(O.group_gaps(cars, True)["b"][2], "-")   # квалификация: как раньше, у остальных отставание
-        self.assertIn("TEST", O.PRACTICE_KINDS)
-        self.assertNotIn("QUALIFYING", O.PRACTICE_KINDS)
-        self.assertNotIn("RACE", O.PRACTICE_KINDS)
+        g = O.group_gaps(cars, True)                           # практика / квалификация
+        self.assertEqual(g["a"][2], "ЛИДЕР")
+        self.assertEqual(g["b"][2], "-")                       # у остальных — отставание от лидера
+        self.assertEqual(O.group_gaps(cars, False)["a"][2], "12 кр.")
+
+    def test_fine_timer_and_60fps(self):
+        self.assertFalse(O.fine_timer() if os.name != "nt" else False)
+        src = open(O.__file__, encoding="utf-8").read()
+        self.assertIn("self.root.after(16, self.tick)", src)
 
     def test_ve_reserve(self):
         fc = O.FuelCalc()

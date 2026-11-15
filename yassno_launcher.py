@@ -66,7 +66,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "2.9.3"
+APP_VERSION = "2.9.4"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -161,7 +161,7 @@ PAGE_COLORS = {"general": list(THEME_NAMES), "standings": ["accent", "text", "di
                "gaps": ["panel", "text", "dim"], "engine": ["panel", "text", "dim"], "sesstime": ["panel", "text", "dim"], "clock": ["panel", "text", "dim"], "speedo": ["panel", "text", "dim", "accent"], "laplog": ["panel", "text", "dim", "accent", "background"], "micro": ["panel", "dim"]}
 PAGE_NOTES = {
     "apps": "Программы, которые запускаются вместе с оверлеем этой игры (например, RaceLab, SimHub, Crew Chief). Для каждой игры свой набор.",
-    "standings": "Главная таблица. Колонки включаются и выключаются переключателями ниже, предпросмотр показывает результат. В гонке у лидера в колонке «Лидер» — пройденные круги, в практике круги видны у всех.",
+    "standings": "Главная таблица. Колонки включаются и выключаются переключателями ниже, предпросмотр показывает результат.",
     "relative": "Сколько машин впереди и позади, какие колонки показывать, размер и прозрачность. Всегда без разделения по классам.",
     "pedals": "Передача, скорость, руль, график газа/тормоза, столбики педалей и полоса шифт-лайта по оборотам.",
     "trackmap": "Карта рисуется сама по вашему проезду (пара кругов) и сохраняется. В углу — компас ветра.",
@@ -1371,8 +1371,8 @@ EN.update({
     "Акцент (заголовки, таймер)": "Accent (headers, timer)", "Основной текст": "Main text", "Второстепенный текст": "Secondary text",
     "Панели и шапки": "Panels and headers", "Фон таблицы": "Table background", "Рамки": "Borders", "Моя строка": "My row",
     "Газ": "Throttle", "Газ, тормоз и сцепление": "Throttle, brake and clutch", "Тормоз": "Brake", "Сцепление": "Clutch",
-    "Главная таблица. Колонки включаются и выключаются переключателями ниже, предпросмотр показывает результат. В гонке у лидера в колонке «Лидер» — пройденные круги, в практике круги видны у всех.":
-        "The main standings table. Switch columns on and off below; the preview shows the result. In a race the leader's \"Leader\" cell shows laps completed; in practice everyone's laps are shown.",
+    "Главная таблица. Колонки включаются и выключаются переключателями ниже, предпросмотр показывает результат.":
+        "The main standings table. Switch columns on and off below; the preview shows the result.",
     "Сколько машин впереди и позади, какие колонки показывать, размер и прозрачность. Всегда без разделения по классам.":
         "How many cars ahead and behind, which columns to show, size and opacity. Always all classes together.",
     "Передача, скорость, руль, график газа/тормоза, столбики педалей и полоса шифт-лайта по оборотам.":

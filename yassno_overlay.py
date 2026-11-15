@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "2.9.3"
+APP_VERSION = "2.9.4"
 import argparse
 import bisect
 import collections
@@ -182,19 +182,13 @@ def fmt_gap(sec, laps):
     return f"+{sec:.1f}" if sec >= 10 else f"+{sec:.2f}"
 
 
-PRACTICE_KINDS = ("TEST", "PRACTICE", "WARMUP")          # сессии, где в колонке «Лидер» у всех — пройденные круги
-
-
-def group_gaps(group, timed, laps_all=False):
-    """key -> (до передней: текст, секунды; до лидера: текст). laps_all — практика: в «до лидера» у каждого его круги."""
+def group_gaps(group, timed):
+    """key -> (до передней: текст, секунды; до лидера: текст).
+    У лидера: в гонке — число пройденных им кругов, в практике и квалификации — слово «ЛИДЕР»."""
     out, prev = {}, None
     for i, c in enumerate(group):
-        if laps_all:
-            ahead = c["best"] - prev["best"] if i and c["best"] > 0 and prev["best"] > 0 else None
-            out[c["key"]] = (fmt_gap(ahead, 0) if i else "", ahead, f"{c.get('laps', 0)} кр.")
-        elif i == 0:
-            ll = c.get("laps", 0)
-            out[c["key"]] = ("", None, f"{ll} кр.")
+        if i == 0:
+            out[c["key"]] = ("", None, "ЛИДЕР" if timed else f"{c.get('laps', 0)} кр.")
         elif timed:
             lead = group[0]["best"]
             lead_txt = fmt_gap(c["best"] - lead, 0) if c["best"] > 0 and lead > 0 else "-"
@@ -1871,7 +1865,7 @@ class PedalsWindow(RelativeWindow):
         self._sig = None
 
     def tick(self, frame, ver):
-        sig = (ver, self.main.cfg["font"], self.main.locked, self.led_h, int(time.time() * 40), tuple(sorted(self.hide)), self.style)
+        sig = (ver, self.main.cfg["font"], self.main.locked, self.led_h, int(time.time() * 60), tuple(sorted(self.hide)), self.style)
         if sig != self._sig:
             self._sig = sig
             self.draw(frame)
@@ -2778,7 +2772,7 @@ class RadarWindow(RelativeWindow):
             self._ws_alpha = a
             self.top.attributes("-alpha", a)
         if a > 0.0 or self._sig is None:
-            isig = tuple((it["kind"], int(it["dy"]), int(it["d"])) for it in items) if self._ir else int(time.time() * 30)
+            isig = tuple((it["kind"], int(it["dy"]), int(it["d"])) for it in items) if self._ir else int(time.time() * 60)
             sig = (ver, m.cfg["font"], m.locked, rng, isig, None)
             if sig != self._sig:
                 self._sig = sig
@@ -6647,7 +6641,7 @@ class Overlay:
         else:
             group, group_name, scope = ordered, "ВСЕ МАШИНЫ", "ALL"
         vis = self.visible_cars(group)
-        gaps = group_gaps(group, timed, bool(frame and frame["kind"] in PRACTICE_KINDS))
+        gaps = group_gaps(group, timed)
         cpos = {x["key"]: i + 1 for i, x in enumerate(group)}
         deltas = self.track_positions(frame, scope, group) if frame and not timed else {}
         stuck = self.fuel_stuck(frame) if frame else set()
@@ -6892,7 +6886,7 @@ class Overlay:
             group = [x for x in ordered if x["cls"] == me["cls"]]
         else:
             group = ordered
-        gaps = group_gaps(group, timed, bool(frame and frame["kind"] in PRACTICE_KINDS)) if group else {}
+        gaps = group_gaps(group, timed) if group else {}
         if self.R:
             self.rrect(0, 0, W - 1, H - 1, self.R, fill=HDR_BG)
         else:
@@ -6902,7 +6896,7 @@ class Overlay:
         fnt, fb = self.font, self.bold
         items = []
         for i, car in enumerate(group):
-            ahead_txt = gaps[car["key"]][0] if i > 0 else f"{car.get('laps', 0)} кр."
+            ahead_txt = gaps[car["key"]][0] if i > 0 else ("ЛИДЕР" if timed else f"{car.get('laps', 0)} кр.")
             seg = [("bar", 5, class_color(car["cls"]), None), ("t", fb.measure(f"{i + 1}") + 8, ACCENT if i == 0 else FG, (f"{i + 1}", fb)),
                    ("t", fnt.measure("#" + (car["number"] or "-")) + 10, DIM, ("#" + (car["number"] or "-"), fnt)),
                    ("t", fb.measure(car["driver"].upper()[:14]) + 12, FG, (car["driver"].upper()[:14], fb if car["player"] else fnt)),
@@ -6995,7 +6989,7 @@ class Overlay:
             gn = game_now()
             self.check_layout(frame)
             self.check_screen()
-            fast = 30 if self.stand_mode() == "ticker" else 4
+            fast = 60 if self.stand_mode() == "ticker" else 4
             sig = (ver // 3, int(gn) if gn is not None else 0, int(time.time() * fast), self.locked,
                    self.cfg["rows"], self.cfg["font"], self.cfg.get("class_only", False))
             if sig != self._sig:
@@ -7014,7 +7008,7 @@ class Overlay:
                     SELFTEST.append(_t)
             self.canvas.delete("all")
             self.canvas.create_text(10, 10, text=f"Ошибка отрисовки: {e}", fill=RED, anchor="nw")
-        self.root.after(20, self.tick)
+        self.root.after(16, self.tick)          # ~60 раз в секунду (при точном таймере Windows, см. fine_timer)
 
 
 # =========================================================================
@@ -7152,7 +7146,20 @@ def diagnose(game="auto"):
     return 0
 
 
+def fine_timer():
+    """Windows по умолчанию тикает таймерами раз в ~15.6 мс, и after(16) превращается в ~31 мс, то есть в 30 кадров/с.
+    timeBeginPeriod(1) делает таймеры точными (1 мс) — без него 60 кадров/с не получить."""
+    if os.name != "nt":
+        return False
+    try:
+        ctypes.windll.winmm.timeBeginPeriod(1)
+        return True
+    except Exception:                                    # noqa: BLE001
+        return False
+
+
 def main():
+    fine_timer()
     ap = argparse.ArgumentParser(description="LMU standings overlay")
     ap.add_argument("--config", help="файл профиля настроек (по умолчанию yassno_overlay.json рядом со скриптом)")
     ap.add_argument("--rows", type=int)

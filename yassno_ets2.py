@@ -2820,6 +2820,12 @@ class App:
 
 
 def main():
+    try:
+        if os.name == "nt":
+            import ctypes
+            ctypes.windll.winmm.timeBeginPeriod(1)      # точные таймеры Windows: иначе after(15) даёт ~30 кадров/с
+    except Exception:                                # noqa: BLE001
+        pass
     ap = argparse.ArgumentParser(description="Yassno ETS2 — оверлей для Euro Truck Simulator 2")
     ap.add_argument("--demo", action="store_true", help="тестовая поездка без игры")
     ap.add_argument("--unlock", action="store_true", help="режим перемещения окон")
