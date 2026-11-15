@@ -500,6 +500,24 @@ class FuelStretchVE(unittest.TestCase):
             root.destroy()
 
 
+class PerfProbeTests(unittest.TestCase):
+    def test_probe_report(self):
+        import tempfile
+        pr = O.PerfProbe("lmu")
+        pr.path = os.path.join(tempfile.mkdtemp(), "perf.log")
+        f = pr.wrap("Окно", lambda x: x * 2)
+        self.assertEqual([f(i) for i in range(5)], [0, 2, 4, 6, 8])
+        for _ in range(3):
+            pr.tick(0.002)
+        txt = pr.report(1.0)
+        self.assertIn("Окно", txt)
+        self.assertIn("тиков/с", txt)
+        pr.flush(pr.t0 + 11.0)
+        self.assertTrue(os.path.isfile(pr.path))
+        self.assertEqual(pr.stats, {})                      # после записи счётчики сбрасываются
+        self.assertFalse(O.PROFILE)                         # по умолчанию замер выключен
+
+
 class LeaderLapsAndVE(unittest.TestCase):
     def _cars(self):
         mk = lambda k, laps, lg: {"key": k, "laps": laps, "laps_leader": 0, "gap_leader": lg, "best": 100.0}

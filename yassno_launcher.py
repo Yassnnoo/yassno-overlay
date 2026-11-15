@@ -66,7 +66,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "2.9.6"
+APP_VERSION = "2.9.7"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -631,7 +631,7 @@ def default_launcher():
     return {"autostart": True, "close_with_game": True, "theme": "dark", "lang": "ru", "win_start": False,
             "start_min": False, "min_tray": False, "close_tray": False, "stop_on_exit": False, "poll_sec": 2.5,
             "apps_close": True, "launch_with_game": True, "telemetry": True, "i2_path": "", "tel_strips": [],
-            "auto_update": True, "shortcut_asked": False, "last_view": "", "intro_anim": True, "ui_anim": True, "accent_by_game": True, "pv_bg": "dark"}
+            "auto_update": True, "shortcut_asked": False, "last_view": "", "intro_anim": True, "ui_anim": True, "accent_by_game": True, "pv_bg": "dark", "perf_log": False}
 
 
 def load_launcher():
@@ -778,6 +778,8 @@ class Runner:
             cmd.append("--demo")
         elif mode == "unlock":
             cmd.append("--unlock")
+        if read_json(LAUNCHER_CFG).get("perf_log"):
+            cmd.append("--profile")                      # замер времени кадра по окнам -> logs/perf-<игра>.log
         for ext in (".cmd", ".state"):
             try:
                 os.remove(os.path.splitext(profile_path(game))[0] + ext)
@@ -7630,6 +7632,7 @@ class SettingsPage(ttk.Frame):
             "auto_update": tk.BooleanVar(value=bool(cfg.get("auto_update", True))),
             "intro_anim": tk.BooleanVar(value=bool(cfg.get("intro_anim", True))),
             "ui_anim": tk.BooleanVar(value=bool(cfg.get("ui_anim", True))),
+            "perf_log": tk.BooleanVar(value=bool(cfg.get("perf_log", False))),
             "accent_by_game": tk.BooleanVar(value=bool(cfg.get("accent_by_game", True))),
         }
         self.i2_var = tk.StringVar(value=str(cfg.get("i2_path", "")))
@@ -7687,6 +7690,7 @@ class SettingsPage(ttk.Frame):
         self.tg(box, 5, "Цвет интерфейса под выбранную игру", "accent_by_game")
         self.tray_btn = ttk.Button(box, text="Установить поддержку трея", command=self.install_tray)
         self.tray_btn.grid(row=6, column=0, sticky="w", pady=(6, 0))
+        self.tg(box, 7, "Замер скорости оверлея (после перезапуска пишет logs/perf-*.log)", "perf_log")
 
         box = section(col3, "Горячие клавиши оверлея")
         box.pack(fill="x", pady=(0, 10))
@@ -7781,7 +7785,7 @@ class SettingsPage(ttk.Frame):
         ttk.Button(box, text="Сбросить настройки лаунчера", command=self.reset).pack(anchor="w")
         ttk.Label(box, text="Профили оверлея (LMU и rFactor 2) не затрагиваются.", style="Dim.TLabel").pack(anchor="w", pady=(4, 0))
 
-        for key in ("win_start", "start_min", "min_tray", "close_tray", "stop_on_exit", "telemetry", "auto_update", "intro_anim", "ui_anim", "accent_by_game"):
+        for key in ("win_start", "start_min", "min_tray", "close_tray", "stop_on_exit", "telemetry", "auto_update", "intro_anim", "ui_anim", "accent_by_game", "perf_log"):
             self.v[key].trace_add("write", lambda *a: self.apply())
         self.refresh_tray()
 
@@ -7826,7 +7830,7 @@ class SettingsPage(ttk.Frame):
 
     def apply(self):
         cfg = self.app.cfg
-        for k in ("win_start", "start_min", "min_tray", "close_tray", "stop_on_exit", "telemetry", "auto_update", "intro_anim", "ui_anim", "accent_by_game"):
+        for k in ("win_start", "start_min", "min_tray", "close_tray", "stop_on_exit", "telemetry", "auto_update", "intro_anim", "ui_anim", "accent_by_game", "perf_log"):
             cfg[k] = bool(self.v[k].get())
         global UI_ANIM, ACCENT_BY_GAME
         UI_ANIM = cfg["ui_anim"]

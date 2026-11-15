@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "2.9.6"
+APP_VERSION = "2.9.7"
 import argparse
 import bisect
 import collections
@@ -56,6 +56,8 @@ import tkinter as tk
 import tkinter.font as tkfont
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+PROFILE_GAME = "overlay"
+PROFILE = False                                         # --profile: замер времени кадра по окнам (PerfProbe)
 CFG_PATH = os.path.join(HERE, "yassno_overlay.json")
 CFG_VERSION = 4
 CLOCK_GAIN = 0.05          # насколько мягко часы подстраиваются под игру
@@ -1585,6 +1587,68 @@ class ScaledMain:
         return getattr(self._m, n)
 
 
+class PerfProbe:
+    """Замер времени кадра по окнам (флаг --profile или «Замер скорости» в лаунчере). Раз в 10 с пишет logs/perf-<игра>.log:
+    сколько раз в секунду окно перерисовывается, сколько миллисекунд в среднем/максимум это занимает и какую долю секунды съедает.
+    Основа для оптимизации: видно, какое окно тормозит оверлей на конкретном ПК."""
+    PERIOD = 10.0
+
+    def __init__(self, game):
+        self.stats = {}                                  # имя -> [число, сумма, максимум]
+        self.t0 = time.perf_counter()
+        self.ticks = [0, 0.0, 0.0]                       # главный цикл: число, суммарное время, максимум паузы между тиками
+        self.last_tick = None
+        self.path = os.path.join(HERE, "logs", f"perf-{game}.log")
+
+    def wrap(self, name, fn):
+        def timed(*a, **k):
+            t = time.perf_counter()
+            try:
+                return fn(*a, **k)
+            finally:
+                dt = time.perf_counter() - t
+                st = self.stats.setdefault(name, [0, 0.0, 0.0])
+                st[0] += 1
+                st[1] += dt
+                st[2] = max(st[2], dt)
+        return timed
+
+    def tick(self, busy):
+        now = time.perf_counter()
+        if self.last_tick is not None:
+            self.ticks[2] = max(self.ticks[2], now - self.last_tick)
+        self.last_tick = now
+        self.ticks[0] += 1
+        self.ticks[1] += busy
+        if now - self.t0 >= self.PERIOD:
+            self.flush(now)
+
+    def report(self, span):
+        rows = sorted(self.stats.items(), key=lambda kv: -kv[1][1])
+        n, busy, gap = self.ticks
+        out = [time.strftime("%H:%M:%S"), f"главный цикл: {n / span:5.1f} тиков/с, занят {busy / span * 100:4.1f}% времени, самая длинная пауза {gap * 1000:.0f} мс",
+               f"{'окно':<22}{'кадров/с':>9}{'сред. мс':>10}{'макс. мс':>10}{'доля, %':>9}"]
+        for name, (c, tot, mx) in rows:
+            out.append(f"{name:<22}{c / span:>9.1f}{tot / c * 1000:>10.2f}{mx * 1000:>10.1f}{tot / span * 100:>9.1f}")
+        return "\n".join(out) + "\n"
+
+    def flush(self, now):
+        span = max(0.001, now - self.t0)
+        text = self.report(span)
+        self.stats, self.t0, self.ticks = {}, now, [0, 0.0, 0.0]
+        try:
+            os.makedirs(os.path.dirname(self.path), exist_ok=True)
+            with open(self.path, "a", encoding="utf-8") as f:
+                f.write(text + "\n")
+            if os.path.getsize(self.path) > 400_000:         # лог не раздуваем: оставляем хвост
+                with open(self.path, encoding="utf-8") as f:
+                    tail = f.read()[-150_000:]
+                with open(self.path, "w", encoding="utf-8") as f:
+                    f.write(tail)
+        except OSError:
+            pass
+
+
 class RelativeWindow:
     """Отдельное окно «релатив»: 3 машины впереди по трассе, вы, 3 позади."""
     AHEAD, BEHIND = 3, 3
@@ -1744,7 +1808,7 @@ class RelativeWindow:
         self.canvas.create_text(x, y, text=s, fill=fill, anchor=anchor, font=font or self.main.font)
 
     def tick(self, frame, ver):
-        sig = (ver, self.main.cfg["font"], self.main.locked, int(time.time() * 4))
+        sig = (ver // 3, self.main.cfg["font"], self.main.locked, int(time.time() * 4))
         if sig != self._sig:
             self._sig = sig
             self.draw(frame)
@@ -2930,7 +2994,7 @@ class WeatherWindow(RelativeWindow):
     def tick(self, frame, ver):
         if self.view() != self._v:
             self.build()
-        sig = (ver // 2, self.main.cfg["font"], int(time.time() * 2))
+        sig = (int(time.time() * 4), self.main.cfg["font"])
         if sig != self._sig:
             self._sig = sig
             self.draw(frame)
@@ -3200,7 +3264,7 @@ class FuelWindow(RelativeWindow):
             pass
 
     def tick(self, frame, ver):
-        sig = (ver // 2, self.main.cfg["font"], self.main.cfg.get("fuel_reserve", 0.0), self.main.cfg.get("ve_reserve", 0.0), self.main.cfg.get("fuel_scale", 0.8), int(time.time() * 2))
+        sig = (int(time.time() * 10), self.main.cfg["font"], self.main.cfg.get("fuel_reserve", 0.0), self.main.cfg.get("ve_reserve", 0.0), self.main.cfg.get("fuel_scale", 0.8))
         if sig != self._sig:
             self._sig = sig
             self.draw(frame)
@@ -5488,6 +5552,16 @@ class Overlay:
         self.micro.fit_on_screen()
         self.subs = [self.rel, self.ped, self.map, self.radar, self.weather, self.lights, self.limiter, self.fuel,
                      self.delta, self.alerts, self.tyres, self.pitplan, self.gaps, self.engine, self.sesstime, self.clock, self.speedo, self.laplog, self.micro]
+        self.perf = None
+        if PROFILE:
+            self.perf = PerfProbe(PROFILE_GAME)
+            for w in self.subs:
+                nm = type(w).__name__
+                for meth in ("draw", "draw_ir"):
+                    if hasattr(w, meth):
+                        setattr(w, meth, self.perf.wrap(nm + ("" if meth == "draw" else ".ir"), getattr(w, meth)))
+            self.draw = self.perf.wrap("Стендинг (Overlay.draw)", self.draw)
+            print("Замер скорости включён: отчёт каждые 10 с в logs/perf-*.log")
         r.update_idletasks()
         self.apply_lock()
         self._sig = None
@@ -6954,6 +7028,7 @@ class Overlay:
             c.create_rectangle(0, 0, W - 1, H - 1, outline=BORDER)
 
     def tick(self):
+        t_busy = time.perf_counter()
         try:
             with lock:
                 ver, frame = state["ver"], state["frame"]
@@ -6990,7 +7065,7 @@ class Overlay:
             self.check_layout(frame)
             self.check_screen()
             fast = 60 if self.stand_mode() == "ticker" else 4
-            sig = (ver // 3, int(gn) if gn is not None else 0, int(time.time() * fast), self.locked,
+            sig = (ver // 6, int(gn) if gn is not None else 0, int(time.time() * fast), self.locked,
                    self.cfg["rows"], self.cfg["font"], self.cfg.get("class_only", False))
             if sig != self._sig:
                 self._sig = sig
@@ -7008,6 +7083,8 @@ class Overlay:
                     SELFTEST.append(_t)
             self.canvas.delete("all")
             self.canvas.create_text(10, 10, text=f"Ошибка отрисовки: {e}", fill=RED, anchor="nw")
+        if self.perf is not None:
+            self.perf.tick(time.perf_counter() - t_busy)
         self.root.after(16, self.tick)          # ~60 раз в секунду (при точном таймере Windows, см. fine_timer)
 
 
@@ -7170,6 +7247,7 @@ def main():
     ap.add_argument("--logos", help="папка с логотипами марок (png)")
     ap.add_argument("--unlock", action="store_true", help="запустить в режиме перемещения")
     ap.add_argument("--demo", action="store_true", help="тестовая гонка без игры")
+    ap.add_argument("--profile", action="store_true", help="замер скорости: время кадра по окнам, отчёт в logs/perf-<игра>.log")
     ap.add_argument("--selftest", action="store_true", help="самопроверка: демо со всеми панелями, отчёт в консоль")
     ap.add_argument("--theme", choices=("dark", "light"), help="тема оверлеев (для самопроверки)")
     ap.add_argument("--diagnose", action="store_true", help="напечатать, что видно в памяти игры")
@@ -7226,6 +7304,8 @@ def main():
     if not a.selftest and not single_instance():
         print("Оверлей уже запущен (второй экземпляр рисовал бы окна поверх первого — отсюда «двоение» и мерцание). Закрываюсь.")
         sys.exit(0)
+    global PROFILE, PROFILE_GAME
+    PROFILE, PROFILE_GAME = bool(a.profile), a.game
     ov = Overlay(cfg, logo_dir)
     try:
         sw, sh = ov.root.winfo_screenwidth(), ov.root.winfo_screenheight()
