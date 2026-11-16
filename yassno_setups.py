@@ -16,6 +16,7 @@ RAW_URL = f"https://raw.githubusercontent.com/{REPO}/{BRANCH}/"
 
 # (что встречается в названии трассы у игры, папка в репозитории; она же папка в UserData\player\Settings)
 TRACKS = [
+    (r"fuji[ _]?cl|fuji.*classic", "Fuji_Cl"),
     (r"bahrain|sakhir", "Bahrain"),
     (r"daytona", "Daytonarc"),
     (r"barcelona|catalunya", "Circuit De Barcelona"),
@@ -364,6 +365,137 @@ PACK_RAW_URL = f"https://raw.githubusercontent.com/{PACK_REPO}/main/"
 PACK_KNOWN = ['HYMO 1.4.1 720S SEB CQ.svm', 'HYMO 1.4.1 720S SEB CR.svm', 'HYMO 1.4.1 720S SEB EQ.svm', 'HYMO 1.4.1 720S SEB ER.svm', 'HYMO 1.4.1 720S SEB WQ.svm', 'HYMO 1.4.1 720S SEB WR.svm', 'HYMO 1.4.1 AMR SEB CQ.svm', 'HYMO 1.4.1 AMR SEB CR.svm', 'HYMO 1.4.1 AMR SEB EQ.svm', 'HYMO 1.4.1 AMR SEB ER.svm', 'HYMO 1.4.1 AMR SEB WQ.svm', 'HYMO 1.4.1 AMR SEB WR.svm', 'HYMO 1.4.1 RCF SEB CQ.svm', 'HYMO 1.4.1 RCF SEB CR.svm', 'HYMO 1.4.1 RCF SEB EQ.svm', 'HYMO 1.4.1 RCF SEB ER.svm', 'HYMO 1.4.1 RCF SEB WQ.svm', 'HYMO 1.4.1 RCF SEB WR.svm', 'HYMO2_1.4_296_DAY_CQ.svm', 'HYMO2_1.4_296_DAY_CR.svm', 'HYMO2_1.4_296_DAY_EQ.svm', 'HYMO2_1.4_296_DAY_ER.svm', 'HYMO2_1.4_296_DAY_WQ.svm', 'HYMO2_1.4_296_DAY_WR.svm', 'P1Doks_FerrariGT3_Daytona_E_1.4.svm', 'P1Doks_FerrariGT3_Daytona_Safe_E_1.4.svm', 'P1Doks_FerrariGT3_Daytona_Wet_E_1.4.svm', 'HYMO2_1.4.0_AMR_DAY_CQ.svm', 'HYMO2_1.4.0_AMR_DAY_CR.svm', 'HYMO2_1.4.0_AMR_DAY_ER.svm', 'HYMO2_1.4.0_AMR_DAY_WR.svm', 'P1Doks_AstonGT3_Daytona_1.4.1_E.svm', 'P1Doks_AstonGT3_Daytona_1.4.1_R.svm', 'P1Doks_AstonGT3_Daytona_1.4.1_Safe_E.svm', 'P1Doks_AstonGT3_Daytona_1.4.1_Safe_R.svm', 'P1Doks_AstonGT3_Daytona_1.4.1_Wet_R.svm', 'HYMO2_1.4_RCF_DAY_CQ.svm', 'HYMO2_1.4_RCF_DAY_EQ.svm', 'HYMO2_1.4_RCF_DAY_ER.svm', 'HYMO2_1.4_RCF_DAY_WR.svm', 'P1Doks_RCF_Daytona_E.svm', 'P1Doks_RCF_Daytona_R.svm', 'P1Doks_RCF_Daytona_SafeE.svm', 'P1Doks_RCF_Daytona_SafeR.svm', 'P1Doks_RCF_Daytona_WetR.svm', 'HYMO2_1.4_720S_DAY_CR.svm', 'HYMO2_1.4_720S_DAY_EQ.svm', 'HYMO2_1.4_720S_DAY_ER.svm', 'HYMO2_1.4_720S_DAY_WR.svm', 'P1Doks_MclarenGT3_Daytona_E_1.4.1.svm', 'P1Doks_MclarenGT3_Daytona_R_1.4.1.svm', 'P1Doks_MclarenGT3_Daytona_Safe_E_1.4.1.svm', 'P1Doks_MclarenGT3_Daytona_Safe_R_1.4.1.svm', 'P1Doks_MclarenGT3_Daytona_Wet_E_1.4.1.svm', 'P1Doks_MclarenGT3_Daytona_Wet_R_1.4.1.svm']
 
 
+# Сетапы LMP2 и LMGT3 с ultimatesetuphub.com (версии игры 1.3 и новее): setups/<папка трассы>/<файл>.svm → ключ машины из самого файла
+PACK_INDEX = {
+ 'Bahrain/BSR 992 BAHRAIN V1.3.3 R1.svm':'911',
+ 'Bahrain/BSR 992 BAHRAIN V1.4.3 R3.svm':'911',
+ 'Bahrain/BSR RF-F BAHRAIN R1 V1.4.3.svm':'rcf',
+ 'Bahrain/LMP2_ELMS_Bahrain_1.3.1.svm':'oreca',
+ 'Circuit De Barcelona/BSR 296 Barcelona R1 v1.3.svm':'296',
+ 'Circuit De Barcelona/BSR 992 Barcelona R1 v1.3.0.svm':'911',
+ 'Circuit De Barcelona/BSR 992 Barcelona R2 v1.4.3.svm':'911',
+ 'Circuit De Barcelona/BSR LMP2 ELMS BARC R.svm':'oreca',
+ 'Circuit De Barcelona/BSR RCF Barcelona R1 v1.3.0 (2).svm':'rcf',
+ 'Circuit De Barcelona/BSR RCF Barcelona R1 v1.3.0.svm':'rcf',
+ 'Circuit De Barcelona/LWK_LMP2_ELMS_Barcelona_R3.svm':'oreca',
+ 'Circuit Of The Americas/GT3_720SEvo_Balanced_Cota.svm':'720s',
+ 'Circuit Of The Americas/LWK_LMP2_ELMS_COTA_WR2.svm':'oreca',
+ 'Circuit Of The Americas/SCARWEC - 2024 Career Setup @ COTA 22C.svm':'911',
+ 'Daytonarc/BSR 296 DAYTONA R1 V1.4.0.svm':'296',
+ 'Daytonarc/BSR 992 DAYTONA R1 V1.4.svm':'911',
+ 'Daytonarc/BSR LMP2 WEC DAYTONA R V1.4.0.svm':'oreca',
+ 'Daytonarc/BSR RC-F DAYTONA R1 v1.4.0.svm':'rcf',
+ 'Daytonarc/BSR Z06 DAYTONA R1 V1.4.0.svm':'z06',
+ 'Daytonarc/GoodTopSpeedGoodCorner.svm':'296',
+ 'Daytonarc/Porsche gt3 R.svm':'911',
+ 'Fuji/BSR 296 Fuji R1 v1.3.2.svm':'296',
+ 'Fuji/BSR 992 FUJI R1 v1.4.2.svm':'911',
+ 'Fuji/BSR RC-F FUJI R1 v1.4.2.svm':'rcf',
+ 'Fuji/FordGT3_Fuji_R_V1.3.3.svm':'mustang',
+ 'Fuji/LWK LMP2 ELMS Fuji R.svm':'oreca',
+ 'Fuji_Cl/WM 720S EVO FUJIClassic Race.svm':'720s',
+ 'Fuji_Cl/WM Z06 FUJI Classic Race.svm':'z06',
+ 'Imola/BRN Setups (1.3) - Imola (LMP2 ELMS).svm':'oreca',
+ 'Imola/BSR 992 IMOLA R1 v1.3.2.svm':'911',
+ 'Imola/BSR Z06 IMOLA V1.3.3 R1.svm':'z06',
+ 'Imola/Calegan 1.3.1_RCF_IMO_R.svm':'rcf',
+ 'Imola/LWK_LMP2_ELMS_Imola_R_2.svm':'oreca',
+ 'Imola/better than stock setup_AMG_Imola.svm':'amg',
+ 'Interlagos/1.35.020 ferko gt3 new.svm':'296',
+ 'Interlagos/BNRS (v1.4.3) - Interlagos (GT3 296).svm':'296',
+ 'Interlagos/BSR 992 INTERLAGOS V1.3.3 R1.svm':'911',
+ 'Interlagos/BSR FC-F INTERLAGOS V1.3.3 R1.svm':'rcf',
+ 'Interlagos/BSR LMP2 ELMS INTERLAGOS R V1.3.3.svm':'oreca',
+ 'Lagunaseca/BSR 992 LAGUNA V1.4.0 R2.svm':'911',
+ 'Lagunaseca/BSR LMP2 WEC LAGUNA R V1.4.0.svm':'oreca',
+ 'Lagunaseca/S1232 LMP2 ELMS Laguna R v1.4.svm':'oreca',
+ 'Lemans/2.4 Special Event Race.svm':'911',
+ 'Lemans/BRNS (v1.4.3) - Le Mans (GT3 296).svm':'296',
+ 'Lemans/BSR RCF LEMANS R v1.4.3.svm':'rcf',
+ 'Lemans/PKS LeMans 992 R v1.4.3.svm':'911',
+ 'Lemans/PKS RCF LEMANS R v1.4.3.svm':'rcf',
+ 'Lemans/Porsche.svm':'911',
+ 'Lemans/Safer but Faster Race.svm':'mustang',
+ 'Lemans/Starkey_Mustang_Race_LeMans-adjusted.svm':'mustang',
+ 'Longbeach/BSR 992 LONG BEACH R1 v1.4.2.svm':'911',
+ 'Longbeach/BSR RC-F LONG BEACH R1 V1.4.2.svm':'rcf',
+ 'Longbeach/BSR Z06 LB R01 v1.4.2.svm':'z06',
+ 'Longbeach/LMP2 LongB R V1.4.2.svm':'oreca',
+ 'Longbeach/LWK_LMP2_ELMS_LBeach_R1.svm':'oreca',
+ 'Longbeach/PKS Z06 LB R ESP v03.svm':'z06',
+ 'Monza/GT3_M4_Race_Monza.svm':'m4',
+ 'Monza/WM LAMBO MONZA R.svm':'huracan',
+ 'Monza/WM LMP2 WEC Monza Safe.svm':'oreca',
+ 'Monza/WM Z06 MON Race.svm':'z06',
+ 'Paulricard/BSR 992 PR 1A R1 v1.3.1.svm':'911',
+ 'Paulricard/BSR 992 PR 1A-V2 Q4 v1.3.1.svm':'911',
+ 'Paulricard/BSR LMP2 ELMS R PR 1A-V2.svm':'oreca',
+ 'Paulricard/LWK LMP2 ELMS PR 1A-V2 Q.svm':'oreca',
+ 'Paulricard/LWK LMP2 ELMS PR 1A-V2 R.svm':'oreca',
+ 'Portimao/BRN Setups (1.3) - Portimao (GT3 RCF).svm':'rcf',
+ 'Portimao/BSR 296 Portimao R1 v1.3.2.svm':'296',
+ 'Portimao/BSR 992 Portimao R1 v1.3.2.svm':'911',
+ 'Portimao/BSR 992 Portimao R1 v1.4.3.svm':'911',
+ 'Portimao/GT3_M4_Portimao.svm':'m4',
+ 'Portimao/PKS 296 PORT R v1.4.3.svm':'296',
+ 'Portimao/PKS 720S PORT R v1.4.3.svm':'720s',
+ 'Portimao/PKS 992 PORT R v1.4.3.svm':'911',
+ 'Portimao/PKS AMG PORT R v1.4.3.svm':'amg',
+ 'Portimao/PKS AMV8 PORT R v1.4.3.svm':'vantage',
+ 'Portimao/PKS LAM PORT R v1.4.3.svm':'huracan',
+ 'Portimao/PKS LEX PORT R v1.4.3.svm':'rcf',
+ 'Portimao/PKS LMP2ELMS PORT R v1.4.3.svm':'oreca',
+ 'Portimao/PKS M4 PORT R v1.4.3.svm':'m4',
+ 'Portimao/PKS STNG PORT R v1.4.3.svm':'mustang',
+ 'Portimao/PKS Z06 PORT R v1.4.3.svm':'z06',
+ 'Portimao/WIP Corvette.svm':'z06',
+ 'Portimao/WM LMP2ELMS Portimao Race.svm':'oreca',
+ 'Road Atlanta/BMW_M4_LMGT3_Road_Atlanta_SAFE_FINAL.svm':'m4',
+ 'Road Atlanta/BSR 296 RD ATLANTA R1 v1.4.2.svm':'296',
+ 'Road Atlanta/BSR ASTON GT3 RATL R v1.4.2.svm':'vantage',
+ 'Road Atlanta/BSR LMP2 ELMS ROAD ATLANTA R V1.4.2.svm':'oreca',
+ 'Road Atlanta/BSR LMP2 WEC ROAD ATLANTA R V1.4.2.svm':'oreca',
+ 'Road Atlanta/BSR RD ATLANTA 992 R1 V1.4.2.svm':'911',
+ 'Road Atlanta/LPDW Racing Team RA Macca 1.4.4.svm':'720s',
+ 'Road Atlanta/PKS 296 RATL R v1.4.3.svm':'296',
+ 'Road Atlanta/PKS 720S RATL R v1.4.3.svm':'720s',
+ 'Road Atlanta/PKS 992 RATL R v1.4.3.svm':'911',
+ 'Road Atlanta/PKS AMG RATL R v1.4.3.svm':'amg',
+ 'Road Atlanta/PKS ASTON GT3 RATL R v1.4.2.svm':'vantage',
+ 'Road Atlanta/PKS LAM RATL R v1.4.3.svm':'huracan',
+ 'Road Atlanta/PKS LEX RATL R v1.4.3.svm':'rcf',
+ 'Road Atlanta/Safe120.svm':'296',
+ 'Road Atlanta/WM LMP2 WEC RoadAtlanta Quali.svm':'oreca',
+ 'Road Atlanta/WM LMP2 WEC RoadAtlanta Race.svm':'oreca',
+ 'Sebring/BRN Setups (1.3) - Sebring (LMP2 ELMS).svm':'oreca',
+ 'Sebring/GT3_FM_Balanced_Sebring.svm':'mustang',
+ 'Sebring/NOVID 720S EVO Sebring v1.3.3.1.svm':'720s',
+ 'Sebring/SCARWEC - 2024 Career Setup @ Sebring 29C.svm':'911',
+ 'Silverstone/BSR 992 SILVERSTONE R1 v1.4.1.svm':'911',
+ 'Silverstone/CDA3_LAM_SIL_S01.svm':'huracan',
+ 'Spa/BRN Setups (1.3) - Spa-Francorchamps (GT3 M4).svm':'m4',
+ 'Spa/BRN Setups (1.3) - Spa-Francorchamps (GT3 RCF).svm':'rcf',
+ 'Spa/BSR 992 SPA v1.3.2 R2.svm':'911',
+ 'Spa/BSR LMP2 ELMS SPA R V1.4.svm':'oreca',
+ 'Spa/BSR RC-F SPA R1 v1.4.0.svm':'rcf',
+ 'Spa/GT3_M4_Balanced_Spa.svm':'m4',
+ 'Spa/GT3_RCF_Balanced_Spa2.svm':'rcf',
+ 'Spa/LWK LMP2 ELMS SPA R 1.svm':'oreca',
+ 'Spa/Macca Spa Q v1.4.1.svm':'720s',
+ 'Spa/Macca Spa R v1.4.1.svm':'720s',
+ 'Spa/Spa 6 Hour Race.svm':'rcf',
+}
+
+
+def pack_index_refs(folder, key):
+    """Пути сетапов из PACK_INDEX для трассы (папка Settings) и машины (ключ): ['Spa/файл.svm', ...]."""
+    out = []
+    for ref, k in PACK_INDEX.items():
+        if k == key and track_folder(ref.split("/", 1)[0]) == folder:
+            out.append(ref)
+    return sorted(out)
+
+
 def download_pack(settings_root, track, vehicle, tree_fn=None, get_fn=None):
     """Скачивает подходящие сетапы из папки setups/ репозитория лаунчера. Возвращает {'saved','skipped','folder'}."""
     tree_fn = tree_fn or fetch_json
@@ -380,9 +512,10 @@ def download_pack(settings_root, track, vehicle, tree_fn=None, get_fn=None):
     except Exception:
         names = list(PACK_KNOWN)
     saved, skipped, dest = [], [], None
-    for n in sorted(names):
-        if not n.lower().endswith(".svm") or file_track(n) != folder or car_key(n) != key:
-            continue
+    refs = [n for n in sorted(names) if n.lower().endswith(".svm") and file_track(n) == folder and car_key(n) == key]
+    refs += pack_index_refs(folder, key)
+    for ref in refs:
+        n = ref.rsplit("/", 1)[-1]
         if dest is None:
             dest = settings_track_dir(settings_root, folder)
             os.makedirs(dest, exist_ok=True)
@@ -390,7 +523,7 @@ def download_pack(settings_root, track, vehicle, tree_fn=None, get_fn=None):
         if os.path.exists(target):
             skipped.append(n)
             continue
-        data = get_fn(PACK_RAW_URL + PACK_DIR + "/" + urllib.parse.quote(n))
+        data = get_fn(PACK_RAW_URL + PACK_DIR + "/" + urllib.parse.quote(ref))
         if not looks_like_svm(data):
             continue
         with open(target, "wb") as f:
@@ -400,7 +533,7 @@ def download_pack(settings_root, track, vehicle, tree_fn=None, get_fn=None):
 
 
 # --- Выбор сетапов вручную: сначала список кандидатов, потом установка только отмеченных ---
-SOURCE_LABELS = {"local": "Из ваших папок", "pack": "Набор лаунчера (HYMO)", "net": "Из открытого репозитория"}
+SOURCE_LABELS = {"local": "Из ваших папок", "pack": "Набор лаунчера (HYMO, ultimatesetuphub)", "net": "Из открытого репозитория"}
 
 
 def candidates(settings_root, track, vehicle, local_dirs, tree_fn=None):
@@ -436,6 +569,8 @@ def candidates(settings_root, track, vehicle, local_dirs, tree_fn=None):
             for n in sorted(names):
                 if n.lower().endswith(".svm") and file_track(n) == folder and car_key(n) == key:
                     add("pack", n, n)
+            for ref in pack_index_refs(folder, key):
+                add("pack", ref.rsplit("/", 1)[-1], ref)
         except Exception as e:
             errors.append(f"набор: {e}")
     try:

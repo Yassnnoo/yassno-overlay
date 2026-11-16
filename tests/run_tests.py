@@ -414,9 +414,9 @@ class SetupsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             r = self.S.download_pack(d, "Sebring International Raceway", "McLaren 720S GT3 Evo",
                                 tree_fn=lambda u: (_ for _ in ()).throw(OSError("x")), get_fn=lambda u: body)
-            self.assertEqual(len(r["saved"]), 6)
+            self.assertEqual(len(r["saved"]), 7)
             r2 = self.S.download_pack(d, "Sebring", "McLaren 720S GT3 Evo", tree_fn=lambda u: (_ for _ in ()).throw(OSError("x")), get_fn=lambda u: body)
-            self.assertEqual((len(r2["saved"]), len(r2["skipped"])), (0, 6))
+            self.assertEqual((len(r2["saved"]), len(r2["skipped"])), (0, 7))
 
     def test_local_folder(self):
         import tempfile
@@ -600,6 +600,50 @@ class DaytonaPack(unittest.TestCase):
             self.assertEqual((S.file_track(n), S.car_key(n)), ("Daytonarc", "720s"))
         for n in ("HYMO2_1.4_RCF_DAY_WR.svm", "P1Doks_RCF_Daytona_SafeR.svm"):
             self.assertEqual((S.file_track(n), S.car_key(n)), ("Daytonarc", "rcf"))
+
+
+class SetupHubPack(unittest.TestCase):
+    def test_index_matches_files(self):
+        import yassno_setups as S
+        base = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "setups")
+        self.assertEqual(len(S.PACK_INDEX), 117)
+        for ref, key in S.PACK_INDEX.items():
+            p = os.path.join(base, *ref.split("/"))
+            self.assertTrue(os.path.isfile(p), ref)
+            self.assertEqual(S.file_car(p), key, ref)
+            self.assertTrue(S.track_folder(ref.split("/")[0]), ref)
+
+    def test_candidates_by_track_and_car(self):
+        import tempfile
+        import yassno_setups as S
+        def boom(url):
+            raise OSError("offline")
+        with tempfile.TemporaryDirectory() as d:
+            r = S.candidates(d, "Autodromo Nazionale Monza", "Oreca 07 Gibson #26", [], tree_fn=boom)
+            names = [i["name"] for i in r["items"] if i["source"] == "pack"]
+            self.assertEqual(r["folder"], "Monza")
+            self.assertTrue(names and all(S.PACK_INDEX["Monza/" + n] == "oreca" for n in names))
+            r = S.candidates(d, "Fuji Speedway Classic", "Porsche 911 GT3 R", [], tree_fn=boom)
+            self.assertEqual(r["folder"], "Fuji_Cl")
+
+    def test_install_from_pack(self):
+        import tempfile
+        import yassno_setups as S
+        ref = "Monza/" + sorted(n.split("/")[1] for n in S.PACK_INDEX if n.startswith("Monza/"))[0]
+        base = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "setups", *ref.split("/"))
+        got = []
+        def fake(url):
+            got.append(url)
+            with open(base, "rb") as f:
+                return f.read()
+        with tempfile.TemporaryDirectory() as d:
+            it = {"source": "pack", "name": ref.split("/")[1], "ref": ref}
+            r = S.install_selected(d, "Monza", [it], get_fn=fake)
+            self.assertEqual(len(r["saved"]), 1)
+            self.assertTrue(os.path.isfile(os.path.join(d, "Monza", it["name"])))
+            self.assertIn("/setups/Monza/", got[0])
+            r2 = S.install_selected(d, "Monza", [it], get_fn=fake)
+            self.assertEqual((r2["saved"], len(r2["skipped"])), ([], 1))
 
 
 from test_ets2 import *  # noqa: E402,F401,F403  (проверки ETS2: структура телеметрии, карта, конвой, масштаб)
