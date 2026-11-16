@@ -66,7 +66,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "2.11.0"
+APP_VERSION = "2.11.1"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -2071,6 +2071,12 @@ class Intro:
         self.f1 = tkfont.Font(family="Segoe UI Semibold", size=44)
         self.f2 = tkfont.Font(family="Segoe UI", size=15)
         self.f3 = tkfont.Font(family="Segoe UI", size=10)
+        try:                                             # первый кадр заставки рисуем и показываем, пока окно ещё прозрачное, и только потом открываем окно
+            self.draw(0.0)
+            root.update()
+            root.attributes("-alpha", 1.0)
+        except tk.TclError:
+            pass
         self.after_id = self.root.after(16, self.tick)
 
     @staticmethod
@@ -2097,10 +2103,6 @@ class Intro:
         if t >= self.DUR:
             self.finish()
             return
-        try:
-            self.root.attributes("-alpha", min(1.0, t / 0.35))
-        except tk.TclError:
-            pass
         self.draw(t)
         self.after_id = self.root.after(16, self.tick)
 
