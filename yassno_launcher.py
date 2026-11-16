@@ -66,7 +66,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "2.10.2"
+APP_VERSION = "2.10.3"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -3748,9 +3748,10 @@ class ProfilePanel(ttk.Frame):
         # тяжёлую страницу не анимируем: въезд большой колонки на медленной отрисовке только тормозит (быстрые страницы въезжают как раньше)
         heavy = (t_built - t_build) > 0.11
         slide_in(self.scroll, self._swin, self.title, still=key == "general" or heavy)
-        t_idle = time.perf_counter()
-        self.update_idletasks()                                       # раскладка и отрисовка накопившегося: именно её ждёт глаз
-        self.log_page_time(key, t_built - t_build, t_ref - t_built, heavy, time.perf_counter() - t_idle)
+        if getattr(self, "_armed", False) and read_json(LAUNCHER_CFG).get("perf_log"):     # замер включён: отдельно меряем раскладку и отрисовку (без замера её не форсируем — иначе окно показывается раньше заставки)
+            t_idle = time.perf_counter()
+            self.update_idletasks()
+            self.log_page_time(key, t_built - t_build, t_ref - t_built, heavy, time.perf_counter() - t_idle)
 
     def log_page_time(self, key, build, refresh, heavy, paint=0.0):
         """При включённом замере скорости пишет в logs\\perf-launcher.log, сколько уходит на смену страницы."""
