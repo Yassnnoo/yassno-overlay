@@ -66,7 +66,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "2.10.3"
+APP_VERSION = "2.10.4"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -8116,6 +8116,12 @@ class App:
         self.root.minsize(1240, 640)
         self.win_h = wh
         self.cfg = load_launcher()
+        self._want_intro = bool(self.cfg.get("intro_anim", True) and "--minimized" not in sys.argv and not self.cfg.get("start_min_now"))
+        if self._want_intro:                                # пока собирается интерфейс, окно прозрачное: заставка уже готова поверх, пустого лаунчера не видно
+            try:
+                self.root.attributes("-alpha", 0.0)
+            except tk.TclError:
+                pass
         self.runner = Runner()
         self.detected, self.found_proc = None, ""
         self.last_auto_game = None
@@ -8144,6 +8150,11 @@ class App:
                 self.intro = Intro(self.root, ww, wh)
             except Exception as e:                       # noqa: BLE001
                 log_error("intro: " + repr(e))
+        if self._want_intro and self.intro is None:
+            try:
+                self.root.attributes("-alpha", 1.0)
+            except tk.TclError:
+                pass
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.root.bind("<Unmap>", self.on_unmap)
         self.root.after(500, self.poll)
