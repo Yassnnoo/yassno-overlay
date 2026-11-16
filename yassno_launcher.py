@@ -66,7 +66,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "2.10.0"
+APP_VERSION = "2.10.1"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -1222,7 +1222,7 @@ def slide_in(canvas, win, title=None, still=False):
             title.configure(foreground=mix(UI_BG, UI_FG, p) if p < 1.0 else "")
     try:
         if canvas.winfo_viewable() and not still:
-            animate(canvas, "slide", 200, step)
+            animate(canvas, "slide", 130, step)
         else:
             animate(canvas, "slide", 0, step)               # отменяет начатый въезд и ставит конечное положение
     except tk.TclError:
@@ -3728,6 +3728,8 @@ class ProfilePanel(ttk.Frame):
                              "Жёлтое свечение спереди/сзади — расстояние до машины. Пропадает, когда рядом никого нет."}
         self.note.config(text=tr((IR_NOTES.get(key) if self.game == "iracing" else None) or PAGE_NOTES.get(key, "Все панели оверлея сразу. Клик по панели в предпросмотре включает или выключает её. "
                                                       "Шрифт и цвета общие для всего оверлея.")))
+        t_build = time.perf_counter()
+        self.scroll.itemconfigure(self._swin, state="hidden")        # страница собирается скрытой: без промежуточных перерисовок, показываем готовой
         for w in self.settings.winfo_children():
             w.destroy()
         self.swatches, self.value_lbls, self._cards = [], [], []
@@ -3739,8 +3741,29 @@ class ProfilePanel(ttk.Frame):
             self.canvas.focus_set()
         self.settings_filter()
         translate_tree(self.settings)
+        t_built = time.perf_counter()
+        self.scroll.itemconfigure(self._swin, state="normal")
         self.refresh()
-        slide_in(self.scroll, self._swin, self.title, still=key == "general")
+        t_ref = time.perf_counter()
+        # тяжёлую страницу не анимируем: въезд большой колонки на медленной отрисовке только тормозит (быстрые страницы въезжают как раньше)
+        heavy = (t_built - t_build) > 0.11
+        slide_in(self.scroll, self._swin, self.title, still=key == "general" or heavy)
+        self.log_page_time(key, t_built - t_build, t_ref - t_built, heavy)
+
+    def log_page_time(self, key, build, refresh, heavy):
+        """При включённом замере скорости пишет в logs\\perf-launcher.log, сколько уходит на смену страницы."""
+        try:
+            if not read_json(LAUNCHER_CFG).get("perf_log"):
+                return
+            os.makedirs(LOGS, exist_ok=True)
+            p = os.path.join(LOGS, "perf-launcher.log")
+            if os.path.exists(p) and os.path.getsize(p) > 200000:
+                return
+            with open(p, "a", encoding="utf-8") as f:
+                f.write("%s %s: сборка %.0f мс, предпросмотр %.0f мс%s\n" % (time.strftime("%H:%M:%S"), key, build * 1000, refresh * 1000,
+                                                                       ", без въезда" if heavy else ""))
+        except Exception:
+            pass
 
     # --- помощники: настройки раскладываются по карточкам, подписи и элементы выровнены по сетке
     def pages(self):
