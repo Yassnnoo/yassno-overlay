@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "2.11.2"
+APP_VERSION = "2.11.3"
 import argparse
 import bisect
 import collections
@@ -2253,8 +2253,8 @@ class MapWindow(RelativeWindow):
         self.top.after(max(1, self.FRAME_MS - dt), self._frame_loop)
 
     # ---------- мелочи ----------
-    def font_for(self, r):
-        px = max(7, int(r * 1.12))
+    def font_for(self, r, k=1.12):
+        px = max(7, int(r * k))
         f = self._fonts.get(px)
         if f is None:
             f = self._fonts[px] = tkfont.Font(family=self.main.family, size=-px, weight="bold")
@@ -2419,19 +2419,21 @@ class MapWindow(RelativeWindow):
         pl = car["place"] if car["place"] > 0 else None
         if car["player"]:
             r = self.car_r(True)
-            ring = "#22c55e" if blk else ACCENT
-            c.create_oval(sx - r - 4, sy - r - 4, sx + r + 4, sy + r + 4, outline=ring, width=1)          # лёгкое кольцо вокруг своей машины
-            c.create_oval(sx - r, sy - r, sx + r, sy + r, fill="#ffffff", outline=ring, width=max(2, r // 4))
+            ring = "#15803d" if blk else ACCENT
+            fill = "#22c55e" if blk else "#ffffff"                 # в чёрном стиле своя машина зелёная
+            c.create_oval(sx - r - 4, sy - r - 4, sx + r + 4, sy + r + 4, outline="#22c55e" if blk else ACCENT, width=1)          # лёгкое кольцо вокруг своей машины
+            c.create_oval(sx - r, sy - r, sx + r, sy + r, fill=fill, outline=ring, width=max(2, r // 4))
             if nums and pl:
-                c.create_text(sx, sy, text=str(pl), fill="#000000", font=self.font_for(r))
+                c.create_text(sx, sy, text=str(pl), fill="#000000", font=self.font_for(r, 1.28 if blk else 1.12))
             return
         r = self.car_r(False)
-        col = self.car_col(car)
+        col = "#facc15" if blk else self.car_col(car)             # в чёрном стиле соперники жёлтые, цифры чёрные и крупнее
         if car.get("in_pits"):
             col = _mix(col, "#14171d", 0.45)
         c.create_oval(sx - r, sy - r, sx + r, sy + r, fill=col, outline="#0b0e13", width=2)
         if nums and pl:
-            c.create_text(sx, sy, text=str(pl), fill="#000000" if _lum(col) > 0.55 else "#ffffff", font=self.font_for(r))
+            tc = "#000000" if (blk and not car.get("in_pits")) or _lum(col) > 0.55 else "#ffffff"
+            c.create_text(sx, sy, text=str(pl), fill=tc, font=self.font_for(r, 1.28 if blk else 1.12))
 
     def draw_cars(self, c, items, gx0, gy0, side, clip=None):
         """items: [(машина, x, y)]; игрок рисуется последним."""

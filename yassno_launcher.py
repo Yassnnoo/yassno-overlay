@@ -66,7 +66,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "2.11.2"
+APP_VERSION = "2.11.3"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -5436,18 +5436,33 @@ class ProfilePanel(ttk.Frame):
                 c.create_rectangle(bx, top + 2, bx + 6, y + h - 5, fill="#262d38", outline="")
                 c.create_rectangle(bx, y + h - 5 - (y + h - 7 - top) * lvl, bx + 6, y + h - 5, fill=col, outline="")
 
-    def pv_car(self, px, py, r, col, pl, nums, player=False):
-        """Круг машины как в оверлее: цветной круг с номером; своя машина — белая с жёлтым кольцом."""
+    def pv_car(self, px, py, r, col, pl, nums, player=False, blk=False):
+        """Круг машины как в оверлее: цветной круг с номером; своя машина — белая с жёлтым кольцом.
+        Чёрный стиль карты: своя машина зелёная, соперники жёлтые, цифры чёрные и крупнее."""
         c, th = self.canvas, self.th
+        font = self.f_t
+        if blk:
+            font = self.pv_num_font()
         if player:
-            c.create_oval(px - r - 2.5, py - r - 2.5, px + r + 2.5, py + r + 2.5, outline=th["accent"], width=1)
-            c.create_oval(px - r, py - r, px + r, py + r, fill="#ffffff", outline=th["accent"], width=2)
+            c.create_oval(px - r - 2.5, py - r - 2.5, px + r + 2.5, py + r + 2.5, outline="#22c55e" if blk else th["accent"], width=1)
+            c.create_oval(px - r, py - r, px + r, py + r, fill="#22c55e" if blk else "#ffffff", outline="#15803d" if blk else th["accent"], width=2)
             tc = "#000000"
         else:
+            if blk:
+                col = "#facc15"
             c.create_oval(px - r, py - r, px + r, py + r, fill=col, outline="#0b0e13", width=1.5)
-            tc = "#000000" if col in ("#ffffff", "#e8eaee") else "#ffffff"
+            tc = "#000000" if blk or col in ("#ffffff", "#e8eaee") else "#ffffff"
         if nums and pl:
-            c.create_text(px, py, text=str(pl), fill=tc, font=self.f_t)
+            c.create_text(px, py, text=str(pl), fill=tc, font=font)
+
+    def pv_num_font(self):
+        base = tkfont.Font(font=self.f_t)
+        fam, size = base.actual("family"), base.actual("size")
+        cache = self.__dict__.setdefault("_pv_numf", {})
+        key = (fam, size)
+        if key not in cache:
+            cache[key] = tkfont.Font(family=fam, size=size - 1 if size < 0 else size + 1, weight="bold")
+        return cache[key]
 
     def pv_sizes(self, nums):
         k = 0.62
@@ -5545,8 +5560,8 @@ class ProfilePanel(ttk.Frame):
         for idx, col, pl in ((10, "#ff4d4d", 1), (24, "#2fd27e", 3), (44, "#3a8dff", 5)):
             if one or blk:
                 col = "#ffffff"
-            self.pv_car(pts[idx * 2], pts[idx * 2 + 1], r, col, pl, nums)
-        self.pv_car(pts[60], pts[61], rp, "#ffffff", 2, nums, player=True)
+            self.pv_car(pts[idx * 2], pts[idx * 2 + 1], r, col, pl, nums, blk=blk)
+        self.pv_car(pts[60], pts[61], rp, "#ffffff", 2, nums, player=True, blk=blk)
         if self.v["map_wind"].get():
             self.pv_wind(x, y, w)
 
@@ -5564,16 +5579,17 @@ class ProfilePanel(ttk.Frame):
         for xx in (x0, x1):
             c.create_rectangle(xx - 1, by - 4, xx + 1, by + 9, fill="#ffffff", outline="")
         nums = bool(self.v["map_nums"].get())
+        blk = self.mode_val("map_style") == "black"
         r, rp = self.pv_sizes(nums)
         for ln, items in enumerate((((.40, 1, "#ff4d4d"), (.43, 2, "#ff4d4d")), ((.55, 5, "#3a8dff"), (.30, 6, "#3a8dff")),
                                     ((.50, 4, "#2fd27e"), (.80, 7, "#2fd27e")))):
             yy = by + 24 + ln * 22
             c.create_line(x0, yy, x1, yy, fill="#232a36", dash=(2, 4))
             for f, pl, col in items:
-                self.pv_car(x0 + (x1 - x0) * f, yy, r, "#ffffff" if self.v["map_one_color"].get() else col, pl, nums)
+                self.pv_car(x0 + (x1 - x0) * f, yy, r, "#ffffff" if self.v["map_one_color"].get() else col, pl, nums, blk=blk)
         px = x0 + (x1 - x0) * 0.5
         c.create_line(px, by + 8, px, by + 92, fill=th["accent"])
-        self.pv_car(px, by + 66, rp, "#ffffff", 3, nums, player=True)
+        self.pv_car(px, by + 66, rp, "#ffffff", 3, nums, player=True, blk=blk)
 
     def d_map_local(self, x, y, w, h):
         c, th = self.canvas, self.th
@@ -5594,8 +5610,8 @@ class ProfilePanel(ttk.Frame):
         nums = bool(self.v["map_nums"].get())
         rr, rp = self.pv_sizes(nums)
         for px, py, col, pl in ((cx + r * .55, cy - r * .55, "#ff4d4d", 2), (cx - 3, cy + r * .62, "#2fd27e", 4)):
-            self.pv_car(px, py, rr, "#ffffff" if (blk or self.v["map_one_color"].get()) else col, pl, nums)
-        self.pv_car(cx, cy, rp, "#ffffff", 3, nums, player=True)
+            self.pv_car(px, py, rr, "#ffffff" if (blk or self.v["map_one_color"].get()) else col, pl, nums, blk=blk)
+        self.pv_car(cx, cy, rp, "#ffffff", 3, nums, player=True, blk=blk)
         if self.v["map_headup"].get():
             c.create_polygon(cx, cy - rp - 11, cx - 4, cy - rp - 4, cx + 4, cy - rp - 4, fill=th["accent"], outline="")
         if self.v["map_wind"].get():

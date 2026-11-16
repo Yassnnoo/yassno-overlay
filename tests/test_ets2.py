@@ -587,6 +587,13 @@ class LauncherLook(unittest.TestCase):
             p.fit_later()
             p.fit_later()                                       # дебаунс: два вызова подряд — одна отложенная перерисовка
             self.assertIsNotNone(p._fit_job)
+            p.show_page("trackmap")                             # чёрный стиль карты: своя машина зелёная, соперники жёлтые
+            p.v["map_style"].set(L.tr(dict(L.MODES["map_style"])["black"]))
+            p.v["map_nums"].set(True)
+            p._draw_preview_raw()
+            fills = [p.canvas.itemcget(i, "fill") for i in p.canvas.find_all() if p.canvas.type(i) == "oval"]
+            self.assertIn("#22c55e", fills)
+            self.assertIn("#facc15", fills)
         finally:
             app.root.destroy()
 
