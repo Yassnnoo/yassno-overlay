@@ -66,7 +66,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "2.11.1"
+APP_VERSION = "2.11.2"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -1132,48 +1132,10 @@ def animate(widget, key, ms, step, done=None):
 SCENE_BASE = {False: "#1d2431", True: "#8793a1"}     # средний цвет сцены под панелями: с ним смешивается прозрачность
 
 
-_PV_BG = {}
-
-
-def pv_bg_image(game, light, W, H):
-    """Фон предпросмотра из скриншота игры (logos/bg/<игра>.jpg — день, <игра>n.jpg — ночь), по размеру окна с обрезкой по центру.
-    Нет картинки или Pillow — None, тогда рисуется запасная сцена."""
-    if not game:
-        return None
-    W, H = max(1, int(W)), max(1, int(H))
-    key = (game, bool(light), W, H)
-    if key in _PV_BG:
-        return _PV_BG[key]
-    pic = None
-    try:
-        from PIL import Image, ImageEnhance, ImageTk
-        fp = os.path.join(HERE, "logos", "bg", game + ("" if light else "n") + ".jpg")
-        if os.path.isfile(fp):
-            im = Image.open(fp).convert("RGB")
-            k = max(W / float(im.width), H / float(im.height))
-            nw, nh = max(W, round(im.width * k)), max(H, round(im.height * k))
-            im = im.resize((nw, nh), Image.LANCZOS)
-            x0, y0 = (nw - W) // 2, (nh - H) // 2
-            im = im.crop((x0, y0, x0 + W, y0 + H))
-            im = ImageEnhance.Brightness(im).enhance(0.8 if light else 0.9)
-            pic = ImageTk.PhotoImage(im)
-    except Exception:
-        pic = None
-    if len(_PV_BG) > 10:
-        _PV_BG.clear()
-    _PV_BG[key] = pic
-    return pic
-
-
-def draw_scene(c, W, H, kind="track", light=False, tag="scene", game=None):
+def draw_scene(c, W, H, kind="track", light=False, tag="scene"):
     """Фон предпросмотра «как в игре»: небо, горизонт и дорога в перспективе, нарисованные на холсте.
     kind: track — гоночная трасса с поребриком, road — шоссе с разметкой. light — день, иначе сумерки.
-    Картинка нарочно приглушённая, чтобы панели оверлея на ней читались. game — если для игры есть скриншот, рисуется он."""
-    pic = pv_bg_image(game, light, W, H)
-    if pic is not None:
-        c.create_image(0, 0, image=pic, anchor="nw", tags=tag)
-        c.tag_lower(tag)
-        return
+    Картинка нарочно приглушённая, чтобы панели оверлея на ней читались."""
     if light:
         sky0, sky1, far = "#6d9bcb", "#c4d8ea", "#7c95a6"
         g0, g1, r0, r1 = "#7a9f63", "#55783f", "#9a9ea6", "#62666f"
@@ -2773,7 +2735,7 @@ class Ets2Page(ttk.Frame):
             cv = self.pwrap
             cv.delete("all")
             cv.config(width=W, height=H)
-            draw_scene(cv, W, H, "road", light, game="ets2")
+            draw_scene(cv, W, H, "road", light)
             cv.create_window((W - w) // 2, (H - h) // 2, window=ch, anchor="nw")
         except tk.TclError:
             pass
@@ -4966,7 +4928,7 @@ class ProfilePanel(ttk.Frame):
         c.delete("all")
         self.hits = []
         ph = int(float(c.cget("height")))
-        draw_scene(c, self.PW, ph, "track", self.pv_light(), game=self.game)     # «экран игры» на заднем плане
+        draw_scene(c, self.PW, ph, "track", self.pv_light())     # «экран игры» на заднем плане
         scene = set(c.find_withtag("scene"))
         if self.page == "general":
             kk = max(0.3, min(self.PW / 680.0, ph / self.OV_H, 1.7))

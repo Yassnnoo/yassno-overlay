@@ -1,5 +1,5 @@
 {
-  "version": "2.11.1",
+  "version": "2.11.2",
   "notes": "Лаунчер: окно не мелькает до заставки",
   "files": [
     "README.txt",
@@ -66,14 +66,6 @@
     "yassno_route.py",
     "yassno_setups.py",
     "yassno_svgmap.py",
-    "yassno_wheels.py",
-    "logos/bg/ets2.jpg",
-    "logos/bg/ets2n.jpg",
-    "logos/bg/lmu.jpg",
-    "logos/bg/lmun.jpg",
-    "logos/bg/rf2.jpg",
-    "logos/bg/rf2n.jpg",
-    "logos/bg/iracing.jpg",
-    "logos/bg/iracingn.jpg"
+    "yassno_wheels.py"
   ]
 }

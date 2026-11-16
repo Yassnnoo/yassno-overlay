@@ -646,29 +646,6 @@ class SetupHubPack(unittest.TestCase):
             self.assertEqual((r2["saved"], len(r2["skipped"])), ([], 1))
 
 
-class PreviewBackground(unittest.TestCase):
-    def test_images_exist_and_draw(self):
-        import tkinter as tk
-        import yassno_launcher as L
-        for g in ("ets2", "lmu", "rf2", "iracing"):
-            for n in ("", "n"):
-                self.assertTrue(os.path.isfile(os.path.join(L.HERE, "logos", "bg", g + n + ".jpg")), g + n)
-        root = tk.Tk()
-        try:
-            c = tk.Canvas(root, width=680, height=400)
-            for g in ("ets2", "lmu", "rf2", "iracing"):
-                for light in (True, False):
-                    c.delete("all")
-                    L.draw_scene(c, 680, 400, "track", light, game=g)
-                    self.assertTrue(c.find_withtag("scene"), g)
-                    self.assertIsNotNone(L.pv_bg_image(g, light, 680, 400), g)
-            c.delete("all")
-            L.draw_scene(c, 300, 200, "track", True, game="nope")      # нет картинки — запасная сцена
-            self.assertTrue(c.find_withtag("scene"))
-        finally:
-            root.destroy()
-
-
 from test_ets2 import *  # noqa: E402,F401,F403  (проверки ETS2: структура телеметрии, карта, конвой, масштаб)
 
 
