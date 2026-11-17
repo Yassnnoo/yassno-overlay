@@ -320,11 +320,20 @@ def profile_nick(profile_dir):
         return n
 
 
-def find_saves(docs=None):
+def cloud_bases(steam=None):
+    """Профили Steam Cloud: <Steam>\\userdata\\<аккаунт>\\227300\\remote (227300 — Euro Truck Simulator 2)."""
+    res = []
+    for d in (steam if steam is not None else steam_dirs()):
+        res += glob.glob(os.path.join(d, "userdata", "*", "227300", "remote"))
+    return res
+
+
+def find_saves(docs=None, steam=None):
     """[(mtime, game.sii, profile_dir, stale)] — свежие сначала. stale=True — копии в *.bak."""
     found = []
-    for d in (docs if docs is not None else documents_dirs()):
-        base = os.path.join(d, "Euro Truck Simulator 2")
+    bases = [os.path.join(d, "Euro Truck Simulator 2") for d in (docs if docs is not None else documents_dirs())]
+    bases += cloud_bases(steam)
+    for base in bases:
         for pat in ("profiles*", "steam_profiles*"):
             for root in glob.glob(os.path.join(base, pat)):
                 stale = root.lower().endswith(".bak") or ".bak" in os.path.basename(root).lower()
@@ -341,10 +350,10 @@ _cache = {}
 _lock = threading.Lock()
 
 
-def load_stats(docs=None, tries=1):
+def load_stats(docs=None, tries=1, steam=None):
     """Статистика самого свежего сохранения (по file_time из info.sii; настоящие профили раньше копий .bak) или None.
     Результат кэшируется по файлу."""
-    saves = find_saves(docs)
+    saves = find_saves(docs, steam)
     if not saves:
         return None
     best = None

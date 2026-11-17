@@ -473,7 +473,15 @@ class Ets2SaveTests(unittest.TestCase):
                 f.write("SiiNunit\n{\nsave_container : _nameless.1 {\n file_time: 2000\n}\n}\n")
             with open(os.path.join(sd2, "info.sii"), "w") as f:
                 f.write("SiiNunit\n{\nsave_container : _nameless.1 {\n file_time: 1000\n}\n}\n")
-            st = S.load_stats([d])
+            cl = os.path.join(d, "Steam", "userdata", "123", "227300", "remote", "steam_profiles", "AA", "save", "autosave")
+            os.makedirs(cl)
+            with open(os.path.join(cl, "game.sii"), "w", encoding="utf-8") as f:
+                f.write("SiiNunit\n{\neconomy : _nameless.1 {\n total_distances_by_mode[0]: 5\n}\nbank : _nameless.2 {\n money_account: 9\n}\n}\n")
+            with open(os.path.join(cl, "info.sii"), "w") as f:
+                f.write("SiiNunit\n{\nsave_container : _nameless.1 {\n file_time: 5000\n}\n}\n")
+            self.assertEqual(S.load_stats([d], steam=[os.path.join(d, "Steam")])["money"], 9)          # Steam Cloud новее
+            os.remove(os.path.join(cl, "game.sii"))
+            st = S.load_stats([d], steam=[os.path.join(d, "Steam")])
             self.assertEqual((st["km"], st["money"], st["xp"], st["cancelled"], st["debt"], st["stale"]), (777, 5000, 1234, 2, 100, False))
 
 
