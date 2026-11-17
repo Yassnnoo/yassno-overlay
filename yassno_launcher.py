@@ -67,7 +67,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.0.0"
+APP_VERSION = "3.1.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -3735,8 +3735,6 @@ class ProfilePanel(ttk.Frame):
         self.q.trace_add("write", lambda *a: self.nav_filter(self.q.get()))
 
         # «Программа» закреплена внизу, список панелей над ней прокручивается — на низких экранах ничего не пропадает
-        prog = tk.Frame(nav, bg=UI_PANEL)
-        prog.pack(side="bottom", fill="x", pady=(0, 6))
         mid = tk.Frame(nav, bg=UI_PANEL)
         mid.pack(side="top", fill="both", expand=True)
         ncv = tk.Canvas(mid, bg=UI_PANEL, highlightthickness=0, borderwidth=0)
@@ -3791,12 +3789,7 @@ class ProfilePanel(ttk.Frame):
                     Tip(self.rows_ui[key][1], NAV_TIPS[key])
         self._nav_inner, self._nav_canvas = inner, ncv
         self.nav_filter("")
-        tk.Frame(prog, bg=UI_BORDER, height=1).pack(fill="x", padx=14, pady=(6, 0))
-        tk.Label(prog, text="ПРОГРАММА", bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI Semibold", 9),
-                 anchor="w").pack(fill="x", padx=20, pady=(8, 2))
-        self.rows_ui["apps"] = make_row("Доп. программы", lambda: self.open_page("apps"), parent=prog, icon="⧉")
-        self.extra_ui = {"stats": make_row("Статистика", self.app.show_stats, dot=False, parent=prog, icon="▤"),
-                         "settings": make_row("Настройки лаунчера", self.app.show_settings, dot=False, parent=prog, icon="⚙")}
+        self.extra_ui = {}
 
         center = ttk.Frame(self)
         center.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
@@ -3911,7 +3904,7 @@ class ProfilePanel(ttk.Frame):
 
     def mark_view(self, view):
         """Подсветка в левом списке: страница оверлея или «Статистика» / «Настройки лаунчера»."""
-        in_game = view not in ("stats", "settings", "home")
+        in_game = view not in ("stats", "settings", "home", "setups", "apps")
         for k, (row, lbl, dot, strip) in self.rows_ui.items():
             sel = in_game and k == self.page
             bg = UI_FIELD if sel else UI_PANEL
@@ -4166,17 +4159,6 @@ class ProfilePanel(ttk.Frame):
             if self.game == "lmu":
                 self.tg(f, None, "Скрывать оверлей в меню LMU и на паузе (Esc)", self.v["lmu_menu_hide"])
             self.tg(f, None, "Записывать статистику сессий", self.v["stats"])
-            if self.game == "lmu" and setups is not None:
-                sc = self.card("Сетапы (бесплатные, из открытого репозитория)", R)
-                ttk.Label(sc, text="Зайдите на трассу в игре, потом нажмите кнопку: лаунчер возьмёт трассу и машину у оверлея, найдёт подходящие сетапы в ваших папках и в открытом репозитории, покажет список с галочками и положит выбранные в UserData\\player\\Settings. Уже имеющиеся файлы не перезаписываются.",
-                          style="Dim.TLabel", justify="left", wraplength=440).grid(row=self.nr(sc), column=0, columnspan=3, sticky="w", pady=(0, 6))
-                ttk.Button(sc, text="Подобрать сетапы для этой трассы и машины", style="Accent.TButton", command=self.download_setups).grid(row=self.nr(sc), column=0, columnspan=3, sticky="w")
-                ttk.Button(sc, text="Папка со своими сетапами…", command=self.pick_setups_dir).grid(row=self.nr(sc), column=0, columnspan=3, sticky="w", pady=(6, 0))
-                self.setups_dir_lab = ttk.Label(sc, text="", style="Dim.TLabel", justify="left", wraplength=440)
-                self.setups_dir_lab.grid(row=self.nr(sc), column=0, columnspan=3, sticky="w", pady=(4, 0))
-                self.show_setups_dir()
-                self.setup_info = ttk.Label(sc, text="", style="Dim.TLabel", justify="left", wraplength=440)
-                self.setup_info.grid(row=self.nr(sc), column=0, columnspan=3, sticky="w", pady=(6, 0))
             sty = tk.Frame(f, bg=UI_BG)
             sty.grid(row=self.nr(f), column=0, columnspan=3, sticky="ew", pady=(0, 6))
             ttk.Label(f, text="Стиль оверлеев — один клик меняет цвета и вид окон. Дальше всё можно подправить ниже.",
@@ -4897,9 +4879,6 @@ class ProfilePanel(ttk.Frame):
                 pass
         if self.page == "apps":
             self.update_app_status()
-        row, lbl, dot, strip = self.rows_ui["apps"]
-        anyon = any(self.v["app_" + k].get() for k, _ in companions_for(self.game) if companion_runs(k, self.game)) or any(self.game in c["games"] for c in self.app.cfg["custom_apps"])
-        dot.config(text="●" if anyon else "○", fg=UI_GREEN if anyon else UI_DIM)
         for key, _, elem in self.pages():
             if elem is None:
                 continue
@@ -8451,6 +8430,105 @@ class GameCard(tk.Canvas):
             pass
 
 
+class ScrollPage(ttk.Frame):
+    """3.1: экран на всю ширину с прокруткой, заголовком и подписью — основа для «Сетапы» и «Программы»."""
+    TITLE, SUB = "", ""
+
+    def __init__(self, parent, app):
+        super().__init__(parent, padding=12)
+        self.app = app
+        self.columnconfigure(0, weight=1)
+        self.rowconfigure(0, weight=1)
+        sc = tk.Canvas(self, bg=UI_BG, highlightthickness=0, borderwidth=0)
+        sbar = ttk.Scrollbar(self, orient="vertical", command=sc.yview)
+        sc.configure(yscrollcommand=sbar.set)
+        sc.grid(row=0, column=0, sticky="nsew")
+        sbar.grid(row=0, column=1, sticky="ns")
+        self.holder = ttk.Frame(sc)
+        win = sc.create_window(0, 0, window=self.holder, anchor="nw")
+        sc.bind("<Configure>", lambda e: sc.itemconfigure(win, width=e.width))
+        self.holder.bind("<Configure>", lambda e: sc.configure(scrollregion=sc.bbox("all")))
+        self.sc = sc
+        enable_wheel(sc, self)
+
+    def rebuild(self):
+        for w in self.holder.winfo_children():
+            w.destroy()
+        ttk.Label(self.holder, text=self.TITLE, style="Title.TLabel").pack(anchor="w")
+        ttk.Label(self.holder, text=self.SUB_text(), style="Dim.TLabel", justify="left", wraplength=900).pack(anchor="w", pady=(2, 12))
+        try:
+            self.fill(self.holder)
+        except Exception as e:                           # noqa: BLE001
+            log_error(f"{self.TITLE}: {e}")
+        translate_tree(self.holder)
+        self.sc.yview_moveto(0)
+
+    def SUB_text(self):
+        return tr(self.SUB)
+
+    def fill(self, body):
+        pass
+
+
+class SetupsPage(ScrollPage):
+    """Отдельный экран «Сетапы»: подбор бесплатных сетапов HYMO / P1Doks под текущую трассу и машину (Le Mans Ultimate)."""
+    TITLE = "Сетапы"
+    SUB = "Бесплатные сетапы из открытого репозитория. Зайдите на трассу в игре, потом нажмите кнопку: лаунчер возьмёт трассу и машину у оверлея, найдёт подходящие сетапы и положит выбранные в UserData\\player\\Settings. Уже имеющиеся файлы не перезаписываются."
+
+    def fill(self, body):
+        p = self.app.panels.get("lmu")
+        if self.app.selected != "lmu" or setups is None or p is None:
+            sec = section(body, "Сетапы")
+            sec.pack(fill="x", pady=(0, 10))
+            ttk.Label(sec, text="Сетапы пока есть только для Le Mans Ultimate.", style="Dim.TLabel", wraplength=700).pack(anchor="w", pady=6, padx=6)
+            ttk.Button(sec, text="Открыть Le Mans Ultimate", command=lambda: self.app.pick_game("lmu") or self.app.show_setups()).pack(anchor="w", padx=6, pady=(0, 6))
+            return
+        sess = setups.read_session(LOGS) or {}
+        fresh = sess.get("game") in (None, "lmu") and sess.get("track") and time.time() - float(sess.get("t", 0) or 0) < 6 * 3600
+        cur = section(body, "Сейчас в игре")
+        cur.pack(fill="x", pady=(0, 10))
+        for cap, val in (("Трасса", sess.get("track") if fresh else tr("зайдите на трассу с оверлеем")),
+                         ("Машина", f"{sess.get('model', '')} {sess.get('vehicle', '')}".strip() if fresh else "—"),
+                         ("В наборе лаунчера", str(len(getattr(setups, "PACK_KNOWN", []))))):
+            r = ttk.Frame(cur)
+            r.pack(fill="x", padx=6, pady=3)
+            ttk.Label(r, text=cap, style="Dim.TLabel").pack(side="left")
+            ttk.Label(r, text=val or "—").pack(side="right")
+        sc = section(body, "Подбор и установка")
+        sc.pack(fill="x", pady=(0, 10))
+        ttk.Button(sc, text="Подобрать сетапы для этой трассы и машины", style="Accent.TButton", command=p.download_setups).pack(anchor="w", padx=6, pady=(6, 0))
+        ttk.Button(sc, text="Папка со своими сетапами…", command=p.pick_setups_dir).pack(anchor="w", padx=6, pady=(8, 0))
+        p.setups_dir_lab = ttk.Label(sc, text="", style="Dim.TLabel", justify="left", wraplength=800)
+        p.setups_dir_lab.pack(anchor="w", padx=6, pady=(4, 0))
+        p.setup_info = ttk.Label(sc, text="", style="Dim.TLabel", justify="left", wraplength=800)
+        p.setup_info.pack(anchor="w", padx=6, pady=(6, 6))
+        p.show_setups_dir()
+        ttk.Label(body, text="HYMO и P1Doks — бесплатные сетапы, авторы разрешили их раздавать.", style="Dim.TLabel").pack(anchor="w")
+
+
+class AppsPage(ScrollPage):
+    """Отдельный экран «Программы»: что запускать вместе с оверлеем выбранной игры (RaceLab, SimHub, Crew Chief и свои)."""
+    TITLE = "Программы"
+    SUB = "Программы, которые запускаются вместе с оверлеем выбранной игры (например, RaceLab, SimHub, Crew Chief). Для каждой игры свой набор."
+
+    def fill(self, body):
+        p = self.app.panels.get(self.app.selected)
+        if p is None:
+            return
+        ttk.Label(body, text=tr("Игра: ") + GAMES.get(self.app.selected, self.app.selected), style="Dim.TLabel").pack(anchor="w", pady=(0, 8))
+
+        def card(title, side=None):
+            sec = section(body, title)
+            sec.pack(fill="x", pady=(0, 10))
+            sec._r = 0
+            return sec
+        p.card = card                                   # те же поля, что и на странице игры, но в обычных (не сворачиваемых) разделах
+        try:
+            p.build_apps(body, body)
+        finally:
+            del p.card
+
+
 class TopBar(tk.Frame):
     """3.0: верхняя панель вкладок — всегда на виду на любой странице лаунчера: логотип, Главная / Оверлей / Сетапы /
     Статистика / Программы, версия и настройки. Меняется только то, что под ней."""
@@ -8630,6 +8708,12 @@ class HomePage(tk.Frame):
         self.fill_status()
 
     def open_panel(self, page, card=None):
+        if page == "apps":
+            self.app.show_apps()
+            return
+        if card == "Сетапы":
+            self.app.show_setups()
+            return
         g = self.app.selected
         self.app.select_game(g)
         try:
@@ -8858,7 +8942,7 @@ class HomePage(tk.Frame):
                  font=("Segoe UI", 9), justify="left", anchor="w", wraplength=320).pack(fill="x", pady=(10, 0))
 
     def find_setups(self):
-        self.open_panel("general", "Сетапы")
+        self.app.show_setups()
         try:
             self.app.panels["lmu"].download_setups()
         except Exception as e:                           # noqa: BLE001
@@ -9097,6 +9181,8 @@ class App:
         self.ac_page = AcSoonPage(self.holder, self)
         self.ets2_page = Ets2Page(self.holder, self)
         self.home_page = HomePage(self.holder, self)
+        self.setups_page = SetupsPage(self.holder, self)
+        self.apps_page = AppsPage(self.holder, self)
         if self.view == "home":
             self.show_home()
         elif self.view == "ets2":
@@ -9146,7 +9232,7 @@ class App:
 
     def pick_game(self, game):
         """Клик по игре в шапке: на «Главной» остаёмся на ней, иначе открываем страницы игры."""
-        if self.view == "home":
+        if self.view in ("home", "setups", "apps"):
             self.selected = game
             if self.cfg.get("last_game") != game:
                 self.cfg["last_game"] = game
@@ -9160,7 +9246,12 @@ class App:
                 self.panels[game].pack_forget()
             self._tiles_key = None
             self.update_tiles()
-            self.home_page.refresh()
+            if self.view == "home":
+                self.home_page.refresh()
+            elif self.view == "setups":
+                self.setups_page.rebuild()
+            else:
+                self.apps_page.rebuild()
             return
         self.select_game(game)
 
@@ -9178,6 +9269,8 @@ class App:
         self.ac_page.pack_forget()
         self.ets2_page.pack_forget()
         self.home_page.pack_forget()
+        self.setups_page.pack_forget()
+        self.apps_page.pack_forget()
         if game not in self.panels:
             self.make_panel(game)
             translate_tree(self.panels[game])
@@ -9201,6 +9294,8 @@ class App:
         self.stats_page.pack_forget()
         self.ets2_page.pack_forget()
         self.home_page.pack_forget()
+        self.setups_page.pack_forget()
+        self.apps_page.pack_forget()
         self.ac_page.pack(fill="both", expand=True)
         self.update_tiles()
 
@@ -9208,6 +9303,8 @@ class App:
         self.view = "ets2"
         self.remember_view("ets2")
         self.home_page.pack_forget()
+        self.setups_page.pack_forget()
+        self.apps_page.pack_forget()
         for p in self.panels.values():
             p.pack_forget()
         self.settings_page.pack_forget()
@@ -9231,9 +9328,35 @@ class App:
         self.stats_page.pack_forget()
         self.ac_page.pack_forget()
         self.ets2_page.pack_forget()
+        self.setups_page.pack_forget()
+        self.apps_page.pack_forget()
         self.home_page.pack(fill="both", expand=True)
         self.home_page.refresh()
         self.update_tiles()
+
+    def _show_only(self, page, view):
+        self.view = view
+        self.remember_view("")
+        for p in self.panels.values():
+            p.pack_forget()
+        for pg in (self.settings_page, self.stats_page, self.ac_page, self.ets2_page, self.home_page, self.setups_page, self.apps_page):
+            pg.pack_forget()
+        if self.selected not in self.panels:
+            self.make_panel(self.selected)
+            translate_tree(self.panels[self.selected])
+            self.panels[self.selected].pack_forget()
+        self._tiles_key = None
+        self.update_tiles()
+        page.pack(fill="both", expand=True)
+        page.rebuild()
+
+    def show_setups(self):
+        """Отдельный экран «Сетапы»."""
+        self._show_only(self.setups_page, "setups")
+
+    def show_apps(self):
+        """Отдельный экран «Программы»."""
+        self._show_only(self.apps_page, "apps")
 
     def show_settings(self):
         self.view = "settings"
@@ -9243,6 +9366,8 @@ class App:
         self.ac_page.pack_forget()
         self.ets2_page.pack_forget()
         self.home_page.pack_forget()
+        self.setups_page.pack_forget()
+        self.apps_page.pack_forget()
         self.settings_page.pack(fill="both", expand=True)
         self.update_tiles()
 
@@ -9254,23 +9379,24 @@ class App:
         self.ac_page.pack_forget()
         self.ets2_page.pack_forget()
         self.home_page.pack_forget()
+        self.setups_page.pack_forget()
+        self.apps_page.pack_forget()
         self.stats_page.pack(fill="both", expand=True)
         self.stats_page.reload()
         self.update_tiles()
 
     def open_panel_page(self, page, card=None):
-        """Вкладки «Сетапы» и «Программы»: открыть страницу в панели выбранной игры."""
-        self.select_game(self.selected)
-        try:
-            p = self.panels[self.selected]
-            p.show_page(page)
-            if card:
-                for c in getattr(p, "_cards", []):
-                    if str(c.get("title", "")).startswith(card):
-                        p._open[c["key"]] = True
-                        p.apply_card(c)
-        except Exception:                                # noqa: BLE001
-            pass
+        """Вкладки «Сетапы» и «Программы» — отдельные экраны; остальное — страница панели выбранной игры."""
+        if page == "apps":
+            self.show_apps()
+        elif card == "Сетапы":
+            self.show_setups()
+        else:
+            self.select_game(self.selected)
+            try:
+                self.panels[self.selected].show_page(page)
+            except Exception:                                # noqa: BLE001
+                pass
         self.mark_tabs()
 
     def mark_tabs(self):
@@ -9283,14 +9409,16 @@ class App:
             name = "home"
         elif v == "stats":
             name = "stats"
+        elif v == "setups":
+            name = "setups"
+        elif v == "apps":
+            name = "apps"
         elif v == "settings":
             name = None
         elif v in ("ac", "ets2"):
             name = "overlay"
         else:
-            p = self.panels.get(self.selected)
-            page = getattr(p, "page", "")
-            name = "apps" if page == "apps" else "overlay"
+            name = "overlay"
         tb.mark(name)
 
     def update_tiles(self):
@@ -9299,7 +9427,7 @@ class App:
             return
         self._tiles_key = key
         for g, t in self.tiles.items():
-            t.set_state(g == self.view or (self.view == "home" and g == self.selected), g == self.detected)
+            t.set_state(g == self.view or (self.view in ("home", "setups", "apps") and g == self.selected), g == self.detected)
         for g, p in self.panels.items():                    # левый список — от выбранной игры, подсветка — по текущей странице
             if g == self.selected and self.view not in ("ac", "ets2"):
                 p.nav.pack(fill="both", expand=True)
@@ -9317,25 +9445,31 @@ class App:
         self.apply_accent()
 
     def chrome_for_view(self):
-        """Главная, Статистика и Настройки — отдельные экраны на всю ширину: шапку с играми и левое меню на них прячем.
-        Верхняя панель вкладок остаётся всегда; на страницах оверлея шапка и меню показываются."""
+        """Верхняя панель вкладок остаётся всегда. Главная, Статистика и Настройки — экраны на всю ширину (без игр сверху и без
+        левого меню); Сетапы и Программы — без левого меню, но с выбором игры; страницы оверлея — с шапкой и меню."""
         ch = getattr(self, "_chrome", None)
         if not ch:
             return
         tiles, head, body = ch
-        full = self.view in ("home", "stats", "settings")
+        v = self.view
+        full = v in ("home", "stats", "settings")
+        slim = v in ("setups", "apps")
         try:
             if full and tiles.winfo_manager():
                 tiles.pack_forget()
-                head.pack_forget()
-                self.navhost.grid_remove()
             elif not full and not tiles.winfo_manager():
                 tiles.pack(fill="x", before=body)
+            if (full or slim) and head.winfo_manager():
+                head.pack_forget()
+            elif not (full or slim) and not head.winfo_manager():
                 head.pack(fill="x", before=body)
+            if (full or slim) and self.navhost.winfo_manager():
+                self.navhost.grid_remove()
+            elif not (full or slim) and not self.navhost.winfo_manager():
                 self.navhost.grid()
-            if self.view == "home":
+            if v == "home":
                 body.pack_configure(padx=0, pady=0)
-            elif full:
+            elif full or slim:
                 body.pack_configure(padx=22, pady=(14, 12))
             else:
                 body.pack_configure(padx=14, pady=(2, 10))
@@ -9375,6 +9509,8 @@ class App:
         self.reload_apps_pages()
 
     def reload_apps_pages(self):
+        if self.view == "apps":
+            self.apps_page.rebuild()
         for p in self.panels.values():
             try:
                 if p.page == "apps":

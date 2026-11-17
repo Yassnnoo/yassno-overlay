@@ -582,8 +582,16 @@ class LauncherLook(unittest.TestCase):
                 self.assertEqual(tb.cur, "overlay")
             app.open_panel_page("apps")
             self.assertEqual(tb.cur, "apps")
+            app.root.update()
+            self.assertTrue(app.apps_page.winfo_ismapped())            # «Программы» — отдельный экран, не страница панели
+            app.open_panel_page("general", "Сетапы")
+            app.root.update()
+            self.assertEqual(tb.cur, "setups")
+            self.assertTrue(app.setups_page.winfo_ismapped())
+            self.assertFalse(app.navhost.winfo_ismapped())              # на этих экранах левого меню нет
             app.show_home()
-            self.assertNotIn("home", app.panels[app.selected].extra_ui)   # «Главной» в левом меню больше нет
+            self.assertEqual(app.panels[app.selected].extra_ui, {})     # в левом меню нет ни «Главной», ни статистики, ни настроек
+            self.assertNotIn("apps", app.panels[app.selected].rows_ui)   # «Главной» в левом меню больше нет
             app.select_game("lmu")                              # лаунчер стартует на «Главной», страницы игры открываем явно
             app.root.update()
             p = app.panels["lmu"]
