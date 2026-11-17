@@ -67,7 +67,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "2.15.0"
+APP_VERSION = "3.0.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -1478,7 +1478,16 @@ EN.update({
     "Устанавливаю…": "Installing…", "Не удалось открыть": "Could not open", "Настройки лаунчера": "Launcher settings",
     "Сам определять игру и запускать оверлей с её профилем": "Detect the game and start the overlay with its profile",
     "Лаунчер не запустился": "The launcher failed to start", "ПАНЕЛИ ОВЕРЛЕЯ": "OVERLAY PANELS", "Сохранить": "Save",
-    "Сохранить и перезапустить оверлей": "Save and restart the overlay", "Не сохранено": "Not saved", "Главная": "Home", "Автозапуск оверлея с игрой": "Auto-start overlay with the game", "Закрывать вместе с игрой": "Close with the game", "ГОТОВО К ГОНКЕ": "READY TO RACE", "Только оверлей": "Overlay only",
+    "Сохранить и перезапустить оверлей": "Save and restart the overlay", "Не сохранено": "Not saved", "Главная": "Home", "Оверлей": "Overlay", "Сетапы": "Setups", "Статистика": "Statistics", "Программы": "Programs",
+    "Версия": "Version", "Запущена": "Running", "Найдена · Steam": "Found · Steam", "Не найдена в Steam": "Not found in Steam",
+    "Найдена · плагин включён": "Found · plugin on", "Найдена · плагин выключен": "Found · plugin off", "Готова к запуску": "Ready",
+    "Скоро": "Soon", "Тестовая версия": "Test build", "включено": "on", "панелей из": "panels of", "раскладок": "layouts",
+    "с игрой": "with the game", "Сетапы HYMO": "HYMO setups", "в наборе": "in the pack", "Трасса": "Track", "Машина": "Car",
+    "зайдите на трассу с оверлеем": "go on track with the overlay", "Подобрать сетап в игру": "Find a setup for the game",
+    "HYMO и P1Doks — бесплатные сетапы, авторы разрешили их раздавать.": "HYMO and P1Doks are free setups shared with the authors' permission.",
+    "Сетапы пока есть только для Le Mans Ultimate.": "Setups are only available for Le Mans Ultimate for now.",
+    "Для этой игры нет программ-спутников.": "No companion programs for this game.", "своя": "custom",
+    "Сам определять игру и запускать оверлей": "Detect the game and start the overlay", "Автозапуск оверлея с игрой": "Auto-start overlay with the game", "Закрывать вместе с игрой": "Close with the game", "ГОТОВО К ГОНКЕ": "READY TO RACE", "Только оверлей": "Overlay only",
     "Настроить панели →": "Set up panels →", "Статус": "Status", "Телеметрия": "Telemetry", "Последняя сессия": "Last session",
     "Вся статистика": "All statistics", "Запускать вместе с игрой": "Start with the game", "Настроить": "Set up",
     "Быстрые действия": "Quick actions", "Журнал оверлея": "Overlay log", "Выбрана игра": "Selected game",
@@ -8331,97 +8340,244 @@ class SettingsPage(ttk.Frame):
         self.app.root.after(30, self.app.rebuild)
 
 
-class HomePage(ttk.Frame):
-    """2.15: экран «Главная» — выбранная игра крупно с кнопками запуска, статус, последняя сессия, доп. программы
-    и быстрые действия. Данные берутся из тех же мест, что и остальные страницы (статистика, профили, раннер)."""
+TRACK_SHAPE = [(80, 250), (66, 185), (120, 138), (220, 140), (300, 112), (400, 70), (488, 104), (508, 196),
+               (420, 258), (300, 250), (170, 286)]                 # условная трасса для карточки игры (в рамке 560×316)
+
+
+def _catmull(pts, n=14):
+    """Замкнутая гладкая кривая через точки (Catmull-Rom)."""
+    out, k = [], len(pts)
+    for i in range(k):
+        p0, p1, p2, p3 = pts[i - 1], pts[i], pts[(i + 1) % k], pts[(i + 2) % k]
+        for j in range(n):
+            t = j / n
+            t2, t3 = t * t, t * t * t
+            out.append(tuple(0.5 * ((2 * p1[c]) + (-p0[c] + p2[c]) * t + (2 * p0[c] - 5 * p1[c] + 4 * p2[c] - p3[c]) * t2 +
+                                    (-p0[c] + 3 * p1[c] - 3 * p2[c] + p3[c]) * t3) for c in (0, 1)))
+    return out
+
+
+def hero_image(master, w, h, acc, panel, border, outer, r=18):
+    """Фон карточки игры на «Главной» (Pillow): скругление, свечение цвета игры справа, контур трассы. Нет Pillow — None."""
+    try:
+        from PIL import Image, ImageDraw, ImageTk
+    except Exception:                                    # noqa: BLE001
+        return None
+    try:
+        S = 2
+        W, H = w * S, h * S
+        rgb = lambda c: tuple(int(c[i:i + 2], 16) for i in (1, 3, 5))
+        a_, p_ = rgb(acc), rgb(panel)
+        gw, gh = 64, 36                                  # свечение считаем на маленькой картинке и растягиваем
+        g = Image.new("RGB", (gw, gh))
+        px = g.load()
+        for y in range(gh):
+            for x in range(gw):
+                dx, dy = (x / gw - 0.82) / 0.75, (y / gh - 0.35) / 0.95
+                k = max(0.0, 1.0 - (dx * dx + dy * dy) ** 0.5) ** 1.6 * 0.38
+                px[x, y] = tuple(int(p_[c] + (a_[c] - p_[c]) * k) for c in range(3))
+        g = g.resize((W, H), Image.BICUBIC)
+        img = Image.new("RGB", (W, H), outer)
+        mask = Image.new("L", (W, H), 0)
+        ImageDraw.Draw(mask).rounded_rectangle((0, 0, W - 1, H - 1), radius=r * S, fill=255)
+        img.paste(g, (0, 0), mask)
+        d = ImageDraw.Draw(img)
+        d.rounded_rectangle((0, 0, W - 1, H - 1), radius=r * S, outline=border, width=S)
+        # трасса — справа, по высоте карточки
+        th = h * 0.78
+        sc = th / 316.0
+        ox, oy = w - 560 * sc - w * 0.04, (h - th) / 2
+        if ox > w * 0.42:
+            pts = [((ox + x * sc) * S, (oy + y * sc) * S) for x, y in _catmull(TRACK_SHAPE)]
+            pts.append(pts[0])
+            d.line(pts, fill=acc, width=int(10 * sc * S) or 2, joint="curve")
+            dark = "#%02x%02x%02x" % tuple(int(v * 0.35) for v in a_)
+            for i in range(0, len(pts) - 1, 3):
+                x, y = pts[i]
+                d.ellipse((x - 1.6 * S, y - 1.6 * S, x + 1.6 * S, y + 1.6 * S), fill=dark)
+            hx, hy = (ox + 400 * sc) * S, (oy + 70 * sc) * S
+            rr = 9 * sc * S
+            d.ellipse((hx - rr, hy - rr, hx + rr, hy + rr), fill="#eceef2")
+        return ImageTk.PhotoImage(img.resize((w, h), Image.LANCZOS), master=master)
+    except Exception:                                    # noqa: BLE001
+        return None
+
+
+class GameCard(tk.Canvas):
+    """Карточка игры в ряду на «Главной»: название, подпись о состоянии, точка; выбранная — в рамке цвета игры."""
+    H = 68
+
+    def __init__(self, parent, game, name, command):
+        super().__init__(parent, height=self.H, bg=UI_BG, highlightthickness=0, borderwidth=0, cursor="hand2")
+        self.game, self.name, self.command = game, name, command
+        self.sub, self.selected, self.hot, self.ok = "", False, False, True
+        self.f1 = tkfont.Font(family="Segoe UI Semibold", size=11)
+        self.f2 = tkfont.Font(family="Segoe UI", size=9)
+        self._no_tint = True
+        self.bind("<Configure>", lambda e: self.draw())
+        self.bind("<Button-1>", lambda e: self.command())
+        self.bind("<Enter>", lambda e: self.set_hot(True))
+        self.bind("<Leave>", lambda e: self.set_hot(False))
+
+    def set_hot(self, on):
+        self.hot = on
+        self.draw()
+
+    def set(self, selected, sub, ok=True):
+        self.selected, self.sub, self.ok = selected, sub, ok
+        self.draw()
+
+    def draw(self):
+        try:
+            self.delete("all")
+            w, H = self.winfo_width(), self.H
+            if w < 20:
+                return
+            acc = accent_for(self.game, ACCENT_BY_GAME)[0]
+            fill = mix(UI_PANEL, UI_FG, 0.03) if (self.selected or self.hot) else UI_PANEL
+            edge = acc if self.selected else (mix(UI_BORDER, UI_DIM, 0.3) if self.hot else UI_BORDER)
+            r, x0, y0, x1, y1 = 12, 1, 1, w - 2, H - 2
+            pts = [x0 + r, y0, x1 - r, y0, x1, y0, x1, y0 + r, x1, y1 - r, x1, y1, x1 - r, y1, x0 + r, y1,
+                   x0, y1, x0, y1 - r, x0, y0 + r, x0, y0]
+            self.create_polygon(pts, smooth=True, fill=fill, outline=edge, width=2 if self.selected else 1)
+            self.create_text(16, 24, text=tr(self.name), anchor="w", font=self.f1, fill=UI_FG)
+            self.create_text(16, 46, text=self.sub, anchor="w", font=self.f2, fill=UI_DIM if self.ok else mix(UI_DIM, UI_BG, 0.3))
+            dot = acc if self.selected else (UI_GREEN if self.sub == tr("Запущена") else UI_OFF)
+            self.create_oval(w - 22, 20, w - 14, 28, fill=dot, outline="")
+        except tk.TclError:
+            pass
+
+
+class HomePage(tk.Frame):
+    """2.15: экран «Главная» — свой заголовок с вкладками, ряд игр, карточка выбранной игры с кнопками запуска, статус,
+    последняя сессия, сетапы и программы, которые стартуют вместе с игрой. Левое меню и шапка лаунчера здесь скрыты."""
 
     def __init__(self, parent, app):
-        super().__init__(parent, padding=(20, 12, 12, 12))
+        super().__init__(parent, bg=UI_BG)
         self.app = app
-        self._tick = None
-        self.columnconfigure(0, weight=1)
-        ttk.Label(self, text=tr("Главная"), style="Title.TLabel").grid(row=0, column=0, sticky="w")
-        self.sub = ttk.Label(self, text="", style="Dim.TLabel")
-        self.sub.grid(row=1, column=0, sticky="w", pady=(2, 12))
-
+        self._tick, self._hero_img, self._hero_key = None, None, None
+        self._found = None
+        pad = 22
+        # --- заголовок: логотип, вкладки, версия и настройки ---
         top = tk.Frame(self, bg=UI_BG)
-        top.grid(row=2, column=0, sticky="ew")
-        top.columnconfigure(0, weight=1)
-        # --- карточка игры ---
-        hero = RoundBox(top, radius=18, fill=UI_PANEL, border=UI_BORDER, outer=UI_BG, autow=False, shadow=10)
-        hero.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
-        h = tk.Frame(hero.inner, bg=UI_PANEL)
-        h.pack(fill="both", expand=True, padx=26, pady=22)
-        tk.Label(h, text=tr("ГОТОВО К ГОНКЕ"), bg=UI_PANEL, fg=UI_ACCENT, font=("Segoe UI Semibold", 9), anchor="w").pack(anchor="w")
-        self.h_name = tk.Label(h, text="", bg=UI_PANEL, fg=UI_FG, font=("Segoe UI Semibold", 30), anchor="w")
-        self.h_name.pack(anchor="w", pady=(2, 4))
-        self.h_info = tk.Label(h, text="", bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 11), anchor="w")
-        self.h_info.pack(anchor="w")
-        btns = tk.Frame(h, bg=UI_PANEL)
-        btns.pack(anchor="w", pady=(26, 0))
-        ttk.Button(btns, text="▶  Запустить игру", style="Launch.TButton", command=lambda: self.app.launch_game()).pack(side="left")
-        self.b_ov = ttk.Button(btns, text="Только оверлей", style="Ghost.TButton", command=self.overlay_only)
+        top.pack(fill="x", padx=pad, pady=(14, 0))
+        Brand(top).pack(side="left", padx=(0, 30))
+        self.tabs = []
+        for text, cmd in (("Главная", None), ("Оверлей", lambda: self.app.select_game(self.app.selected)),
+                          ("Сетапы", lambda: self.open_panel("general", "Сетапы")), ("Статистика", self.app.show_stats),
+                          ("Программы", lambda: self.open_panel("apps"))):
+            col = tk.Frame(top, bg=UI_BG)
+            col.pack(side="left", padx=(0, 6))
+            lb = tk.Label(col, text=tr(text), bg=UI_BG, fg=UI_FG if cmd is None else UI_DIM, font=("Segoe UI Semibold", 11),
+                          padx=10, pady=8, cursor="arrow" if cmd is None else "hand2")
+            lb.pack()
+            line = tk.Frame(col, bg=UI_ACCENT if cmd is None else UI_BG, height=2)
+            line.pack(fill="x")
+            if cmd is not None:
+                lb.bind("<Button-1>", lambda e, c=cmd: c())
+                lb.bind("<Enter>", lambda e, l=lb: l.config(fg=UI_FG))
+                lb.bind("<Leave>", lambda e, l=lb: l.config(fg=UI_DIM))
+        gear = tk.Label(top, text="⚙", bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI Symbol", 13), width=3, pady=4, cursor="hand2",
+                        highlightthickness=1, highlightbackground=UI_BORDER)
+        gear.pack(side="right")
+        gear.bind("<Button-1>", lambda e: self.app.show_settings())
+        Tip(gear, "Настройки лаунчера")
+        self.ver = StatusChip(top)
+        self.ver.pack(side="right", padx=(0, 10))
+        tk.Frame(self, bg=UI_BORDER, height=1).pack(fill="x", pady=(0, 0))
+
+        main = tk.Frame(self, bg=UI_BG)
+        main.pack(fill="both", expand=True, padx=pad, pady=(18, 16))
+        main.columnconfigure(0, weight=1)
+        # --- ряд игр ---
+        gr = tk.Frame(main, bg=UI_BG)
+        gr.grid(row=0, column=0, sticky="ew")
+        self.cards = {}
+        games = list(GAMES.items()) + [("ac", "Assetto Corsa")] + ([("ets2", "ETS 2")] if ETS2 is not None else [])
+        for i, (g, name) in enumerate(games):
+            gr.columnconfigure(i, weight=1, uniform="gc")
+            cmd = (lambda g=g: self.app.pick_game(g)) if g in GAMES else (self.app.show_ac if g == "ac" else self.app.show_ets2)
+            c = GameCard(gr, g, name, cmd)
+            c.grid(row=0, column=i, sticky="ew", padx=(0 if i == 0 else 6, 0 if i == len(games) - 1 else 6))
+            self.cards[g] = c
+
+        # --- карточка игры и статус ---
+        mid = tk.Frame(main, bg=UI_BG)
+        mid.grid(row=1, column=0, sticky="ew", pady=(14, 0))
+        mid.columnconfigure(0, weight=1)
+        self.hero = tk.Canvas(mid, height=300, bg=UI_BG, highlightthickness=0, borderwidth=0)
+        self.hero.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
+        self.hero._no_tint = True
+        self.hero.bind("<Configure>", lambda e: self.draw_hero())
+        hb = tk.Frame(self.hero, bg=UI_PANEL)
+        self.b_launch = ttk.Button(hb, text="▶  Запустить игру", style="Launch.TButton", command=lambda: self.app.launch_game())
+        self.b_launch.pack(side="left")
+        self.b_ov = ttk.Button(hb, text="Только оверлей", style="Ghost.TButton", command=lambda: self.panel_call("run_or_stop"))
         self.b_ov.pack(side="left", padx=(10, 0))
-        lk = tk.Label(btns, text=tr("Настроить панели →"), bg=UI_PANEL, fg=UI_FG, font=("Segoe UI Semibold", 10), cursor="hand2")
+        lk = tk.Label(hb, text=tr("Настроить панели →"), bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI Semibold", 10), cursor="hand2")
         lk.pack(side="left", padx=(18, 0))
         lk.bind("<Button-1>", lambda e: self.open_panel("general"))
-        lk.bind("<Enter>", lambda e: lk.config(fg=UI_ACCENT))
-        lk.bind("<Leave>", lambda e: lk.config(fg=UI_FG))
+        lk.bind("<Enter>", lambda e: lk.config(fg=UI_FG))
+        lk.bind("<Leave>", lambda e: lk.config(fg=UI_DIM))
+        self._hb, self._hb_lk = hb, lk
 
-        # --- статус ---
-        st = RoundBox(top, radius=18, fill=UI_PANEL, border=UI_BORDER, outer=UI_BG, autow=False, shadow=10)
-        st.configure(width=360)
+        st = RoundBox(mid, radius=16, fill=UI_PANEL, border=UI_BORDER, outer=UI_BG, autow=False, fillh=True)
+        st.configure(width=380)
         st.grid(row=0, column=1, sticky="nsew")
         s_ = tk.Frame(st.inner, bg=UI_PANEL)
-        s_.pack(fill="both", expand=True, padx=18, pady=14)
-        tk.Label(s_, text=tr("Статус"), bg=UI_PANEL, fg=UI_FG, font=("Segoe UI Semibold", 11), anchor="w").pack(fill="x", pady=(0, 6))
+        s_.pack(fill="both", expand=True, padx=16, pady=10)
+        tk.Label(s_, text=tr("Статус"), bg=UI_PANEL, fg=UI_FG, font=("Segoe UI Semibold", 11), anchor="w").pack(fill="x", pady=(0, 2))
         self.s_rows = {}
         for key, name in (("game", "Игра"), ("ov", "Оверлей"), ("tel", "Телеметрия")):
             r = tk.Frame(s_, bg=UI_PANEL)
-            r.pack(fill="x", pady=3)
-            dot = tk.Label(r, text="●", bg=UI_PANEL, fg=UI_OFF, font=("Segoe UI", 10))
+            r.pack(fill="x")
+            dot = tk.Label(r, text="●", bg=UI_PANEL, fg=UI_OFF, font=("Segoe UI", 9))
             dot.pack(side="left")
-            tk.Label(r, text=tr(name), bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 10)).pack(side="left", padx=(6, 0))
+            tk.Label(r, text=tr(name), bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 10), pady=9).pack(side="left", padx=(6, 0))
             val = tk.Label(r, text="—", bg=UI_PANEL, fg=UI_FG, font=("Segoe UI Semibold", 10), anchor="e")
             val.pack(side="right")
             self.s_rows[key] = (dot, val)
-        tk.Frame(s_, bg=UI_BORDER, height=1).pack(fill="x", pady=(10, 8))
-        Toggle(s_, tr("Автозапуск оверлея с игрой"), app.auto_var, bg=UI_PANEL, command=app.save_cfg).pack(anchor="w", pady=3)
-        Toggle(s_, tr("Закрывать вместе с игрой"), app.close_var, bg=UI_PANEL, command=app.save_cfg).pack(anchor="w", pady=3)
+            tk.Frame(s_, bg=UI_BORDER, height=1).pack(fill="x")
+        for text, var in (("Сам определять игру и запускать оверлей", app.auto_var), ("Закрывать оверлей вместе с игрой", app.close_var)):
+            r = tk.Frame(s_, bg=UI_PANEL)
+            r.pack(fill="x")
+            Toggle(r, "", var, bg=UI_PANEL, command=app.save_cfg).pack(side="right")
+            tk.Label(r, text=tr(text), bg=UI_PANEL, fg=UI_FG, font=("Segoe UI", 10), anchor="w", justify="left", wraplength=250,
+                     pady=9).pack(side="left", fill="x")
+            tk.Frame(s_, bg=UI_BORDER, height=1).pack(fill="x")
 
         # --- нижние карточки ---
-        row = tk.Frame(self, bg=UI_BG)
-        row.grid(row=3, column=0, sticky="nsew", pady=(14, 0))
-        self.rowconfigure(3, weight=1)
+        row = tk.Frame(main, bg=UI_BG)
+        row.grid(row=2, column=0, sticky="nsew", pady=(14, 0))
+        main.rowconfigure(2, weight=1)
+        row.rowconfigure(0, weight=1)
         for i in range(3):
             row.columnconfigure(i, weight=1, uniform="home")
         self.c_sess = self.card(row, 0, "Последняя сессия", "Вся статистика", self.app.show_stats)
-        self.c_apps = self.card(row, 1, "Запускать вместе с игрой", "Настроить", lambda: self.open_panel("apps"))
-        self.c_fast = self.card(row, 2, "Быстрые действия", "", None)
-        for text, cmd in (("Демо без игры", lambda: self.panel_call("launch", "demo")),
-                          ("Двигать окна", lambda: self.panel_call("toggle_move")),
-                          ("Проверить оверлей", lambda: self.panel_call("selftest")),
-                          ("Журнал оверлея", lambda: self.panel_call("show_log"))):
-            ttk.Button(self.c_fast, text=text, style="Ghost.TButton", command=cmd).pack(fill="x", pady=3)
-        self.bind("<Map>", lambda e: self.refresh(), add="+")
+        self.c_set, self.c_set_badge = self.card(row, 1, "Сетапы HYMO", "", None, badge=True)
+        self.c_apps = self.card(row, 2, "Запускать вместе с игрой", "Настроить", lambda: self.open_panel("apps"))
+        self.bind("<Map>", lambda e: self.refresh() if e.widget is self else None, add="+")
 
-    def card(self, parent, col, title, link, cmd):
-        box = RoundBox(parent, radius=16, fill=UI_PANEL, border=UI_BORDER, outer=UI_BG, autow=False, shadow=8)
-        box.grid(row=0, column=col, sticky="nsew", padx=(0 if col == 0 else 6, 0 if col == 2 else 6))
+    def card(self, parent, col, title, link, cmd, badge=False):
+        box = RoundBox(parent, radius=16, fill=UI_PANEL, border=UI_BORDER, outer=UI_BG, autow=False, fillh=True)
+        box.grid(row=0, column=col, sticky="nsew", padx=(0 if col == 0 else 7, 0 if col == 2 else 7))
         f = tk.Frame(box.inner, bg=UI_PANEL)
-        f.pack(fill="both", expand=True, padx=16, pady=12)
+        f.pack(fill="both", expand=True, padx=14, pady=10)
         hd = tk.Frame(f, bg=UI_PANEL)
-        hd.pack(fill="x", pady=(0, 8))
+        hd.pack(fill="x", pady=(0, 6))
         tk.Label(hd, text=tr(title), bg=UI_PANEL, fg=UI_FG, font=("Segoe UI Semibold", 11), anchor="w").pack(side="left")
+        bd = None
+        if badge:
+            bd = tk.Label(hd, text="", bg=UI_ACCENT, fg=UI_ACCENT_FG, font=("Segoe UI Semibold", 8), padx=6)
         if link and cmd:
-            lk = tk.Label(hd, text=tr(link), bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 10), cursor="hand2")
+            lk = tk.Label(hd, text=tr(link), bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 10, "underline"), cursor="hand2")
             lk.pack(side="right")
             lk.bind("<Button-1>", lambda e: cmd())
-            lk.bind("<Enter>", lambda e: lk.config(fg=UI_ACCENT))
+            lk.bind("<Enter>", lambda e: lk.config(fg=UI_FG))
             lk.bind("<Leave>", lambda e: lk.config(fg=UI_DIM))
         body = tk.Frame(f, bg=UI_PANEL)
         body.pack(fill="both", expand=True)
-        return body
+        return (body, bd) if badge else body
 
     # --- действия ---
     def panel(self):
@@ -8429,6 +8585,7 @@ class HomePage(ttk.Frame):
         if g not in self.app.panels:
             self.app.make_panel(g)
             translate_tree(self.app.panels[g])
+            self.app.panels[g].pack_forget()
         return self.app.panels[g]
 
     def panel_call(self, name, *args):
@@ -8437,14 +8594,19 @@ class HomePage(ttk.Frame):
         except Exception as e:                           # noqa: BLE001
             log_error(f"Главная: {name}: {e}")
         self.app.refresh_status()
+        self.fill_status()
 
-    def overlay_only(self):
-        self.panel_call("run_or_stop")
-
-    def open_panel(self, page):
-        self.app.select_game(self.app.selected)
+    def open_panel(self, page, card=None):
+        g = self.app.selected
+        self.app.select_game(g)
         try:
-            self.app.panels[self.app.selected].show_page(page)
+            p = self.app.panels[g]
+            p.show_page(page)
+            if card:
+                for c in getattr(p, "_cards", []):
+                    if str(c.get("title", "")).startswith(card):
+                        p._open[c["key"]] = True
+                        p.apply_card(c)
         except Exception:                                # noqa: BLE001
             pass
 
@@ -8459,10 +8621,13 @@ class HomePage(ttk.Frame):
         try:
             if not self.winfo_ismapped():
                 return
-            self.fill_hero()
+            self.fill_cards()
+            self.draw_hero()
             self.fill_status()
             self.fill_session()
+            self.fill_setups()
             self.fill_apps()
+            self.ver.set(f"{tr('Версия')} {APP_VERSION}", "off")
         except tk.TclError:
             return
         self._tick = self.after(1500, self.tick)
@@ -8472,24 +8637,92 @@ class HomePage(ttk.Frame):
         try:
             if self.winfo_ismapped():
                 self.fill_status()
+                self.fill_cards()
                 self._tick = self.after(1500, self.tick)
         except tk.TclError:
             pass
 
-    def fill_hero(self):
+    def found(self):
+        """Что найдено на диске (считаем один раз): LMU, rF2 и плагин."""
+        if self._found is None:
+            f = {}
+            try:
+                f["lmu"] = bool(find_lmu_settings())
+                rd = find_rf2_dir()
+                f["rf2"] = bool(rd)
+                f["rf2_plugin"] = rf2_plugin_state(rd)[1] if rd else False
+            except Exception:                            # noqa: BLE001
+                pass
+            self._found = f
+        return self._found
+
+    def fill_cards(self):
+        a, f = self.app, self.found()
+        for g, c in self.cards.items():
+            if g == a.detected:
+                sub, ok = tr("Запущена"), True
+            elif g == "lmu":
+                sub, ok = (tr("Найдена · Steam"), True) if f.get("lmu") else (tr("Не найдена в Steam"), False)
+            elif g == "rf2":
+                sub, ok = ((tr("Найдена · плагин включён") if f.get("rf2_plugin") else tr("Найдена · плагин выключен")), True) if f.get("rf2") \
+                    else (tr("Не найдена в Steam"), False)
+            elif g == "iracing":
+                sub, ok = tr("Готова к запуску"), True
+            elif g == "ac":
+                sub, ok = tr("Скоро"), False
+            else:
+                sub, ok = tr("Тестовая версия"), True
+            c.set(g == a.selected, sub, ok)
+
+    def draw_hero(self):
+        cv = self.hero
+        try:
+            w, h = cv.winfo_width(), cv.winfo_height()
+            if w < 50:
+                return
+            g = self.app.selected
+            acc = accent_for(g, ACCENT_BY_GAME)[0]
+            key = (w, h, acc, UI_PANEL, UI_THEME_NAME)
+            if key != self._hero_key:
+                self._hero_key = key
+                self._hero_img = hero_image(cv, w, h, acc, UI_PANEL, UI_BORDER, UI_BG)
+            cv.delete("all")
+            if self._hero_img is not None:
+                cv.create_image(0, 0, image=self._hero_img, anchor="nw")
+            else:
+                r, x1, y1 = 18, w - 1, h - 1
+                pts = [r, 0, x1 - r, 0, x1, 0, x1, r, x1, y1 - r, x1, y1, x1 - r, y1, r, y1, 0, y1, 0, y1 - r, 0, r, 0, 0]
+                cv.create_polygon(pts, smooth=True, fill=UI_PANEL, outline=UI_BORDER)
+            x = 36
+            cv.create_text(x, 42, text=tr("ГОТОВО К ГОНКЕ"), anchor="w", fill=acc, font=("Segoe UI", 9, "bold"))
+            cv.create_text(x, 88, text=GAMES.get(g, g), anchor="w", fill=UI_FG, font=("Segoe UI Semibold", 30))
+            cv.create_text(x, 134, text=self.hero_info(), anchor="nw", fill=UI_DIM, font=("Segoe UI", 11), width=max(200, int(w * 0.48)))
+            bg = mix(UI_PANEL, acc, 0.05)                    # кнопки стоят на почти чистом фоне карточки
+            self._hb.config(bg=bg)
+            self._hb_lk.config(bg=bg)
+            cv.create_window(x, h - 40, window=self._hb, anchor="w")
+            run = self.app.runner.running() and self.app.runner.game == g
+            self.b_ov.config(text=tr("Остановить оверлей") if run else tr("Только оверлей"))
+        except tk.TclError:
+            pass
+
+    def hero_info(self):
         g = self.app.selected
-        self.h_name.config(text=GAMES.get(g, g))
-        self.sub.config(text=tr("Выбрана игра") + ": " + GAMES.get(g, g))
         p = self.app.panels.get(g)
-        info = ""
+        parts = []
         if p is not None:
             try:
                 els = [e for _, _, e in p.pages() if e is not None]
-                on = sum(1 for e in els if p.v[e].get())
-                info = f"{tr('Включено панелей')}: {on} {tr('из')} {len(els)}"
+                parts.append(f"{tr('включено')} {sum(1 for e in els if p.v[e].get())} {tr('панелей из')} {len(els)}")
+                lay = p.saved_layouts()
+                if lay:
+                    parts.append(f"{tr('раскладок')}: {len(lay)}")
             except (tk.TclError, KeyError, AttributeError):
-                info = ""
-        self.h_info.config(text=info)
+                pass
+        names = self.app_names()
+        if names:
+            parts.append(tr("с игрой") + ": " + ", ".join(names))
+        return " · ".join(parts).capitalize() if parts else ""
 
     def fill_status(self):
         a, r = self.app, self.app.runner
@@ -8502,13 +8735,14 @@ class HomePage(ttk.Frame):
             tel = True if r.mode == "demo" else read_connected(r.game)
             vals["tel"] = (tr("идёт") if tel else tr("ждёт игру"), UI_GREEN if tel else "#f5b921")
         else:
-            vals["tel"] = ("—", UI_OFF)
+            vals["tel"] = (tr("ждёт игру") if a.auto_var.get() else "—", "#f5b921" if a.auto_var.get() else UI_OFF)
         for k, (txt, col) in vals.items():
             dot, val = self.s_rows[k]
             dot.config(fg=col)
             val.config(text=txt)
         try:
-            self.b_ov.config(text=tr("Остановить оверлей") if (run and r.game == a.selected) else tr("Только оверлей"))
+            run_here = run and r.game == a.selected
+            self.b_ov.config(text=tr("Остановить оверлей") if run_here else tr("Только оверлей"))
         except tk.TclError:
             pass
 
@@ -8520,66 +8754,125 @@ class HomePage(ttk.Frame):
         sess = next((d for _, d in load_sessions() if d.get("game") == g), None)
         if not sess:
             tk.Label(body, text=tr("Пока нет записанных сессий для этой игры. Статистика пишется сама, пока идёт оверлей."),
-                     bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 10), justify="left", anchor="w", wraplength=300).pack(fill="x")
+                     bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 10), justify="left", anchor="w", wraplength=320).pack(fill="x")
             return
         sm = summarize(sess)
         tk.Label(body, text=f"{sess.get('track') or '?'} · {sess.get('label') or sess.get('kind', '')}", bg=UI_PANEL, fg=UI_DIM,
                  font=("Segoe UI", 10), anchor="w").pack(fill="x")
         nums = tk.Frame(body, bg=UI_PANEL)
-        nums.pack(fill="x", pady=(8, 8))
+        nums.pack(fill="x", pady=(10, 6))
         for i, (cap, val, acc) in enumerate((("Лучший круг", fmt_time(sm["best"]), True), ("Кругов", str(sm["laps"]), False),
                                              ("Топливо/круг", fmt_num(sm["fuel"], 2) if sm["fuel"] else "—", False))):
-            nums.columnconfigure(i, weight=1)
+            nums.columnconfigure(i, weight=1, uniform="n")
             c = tk.Frame(nums, bg=UI_PANEL)
             c.grid(row=0, column=i, sticky="w")
             tk.Label(c, text=tr(cap), bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 9)).pack(anchor="w")
             tk.Label(c, text=val, bg=UI_PANEL, fg=UI_ACCENT if acc else UI_FG, font=("Consolas", 15, "bold")).pack(anchor="w")
-        times = [x["time"] for x in sess.get("laps", []) if isinstance(x, dict) and x.get("time") and not x.get("pit")][-30:]
+        times = [x["time"] for x in sess.get("laps", []) if isinstance(x, dict) and x.get("time") and not x.get("pit")][-24:]
         if len(times) >= 2:
-            cv = tk.Canvas(body, height=64, bg=UI_PANEL, highlightthickness=0)
-            cv.pack(fill="x", pady=(4, 0))
+            cv = tk.Canvas(body, height=60, bg=UI_PANEL, highlightthickness=0)
+            cv.pack(fill="both", expand=True, pady=(6, 0))
 
             def draw(e=None, cv=cv, times=times):
                 try:
                     cv.delete("all")
-                    W, H = cv.winfo_width(), 64
+                    W, CH = cv.winfo_width(), max(40, cv.winfo_height())
+                    H = min(CH, 150)                              # столбики не выше 150 px, прижаты к низу карточки
                     lo, hi = min(times), max(times)
-                    hi = min(hi, lo * 1.06) or lo + 1                   # медленные круги (трафик, ошибки) не съедают шкалу
-                    n = len(times)
-                    gap = 3
-                    bw = max(2.0, (W - gap * (n - 1)) / n)
+                    hi = min(hi, lo * 1.06)
+                    n, gap = len(times), 4
+                    bw = max(3.0, (W - gap * (n - 1)) / n)
                     for i, t in enumerate(times):
                         k = (min(t, hi) - lo) / ((hi - lo) or 1)
-                        hh = 10 + (H - 12) * k
+                        hh = H * 0.25 + (H * 0.72) * k
                         x0 = i * (bw + gap)
-                        cv.create_rectangle(x0, H - hh, x0 + bw, H, fill=UI_ACCENT if t == lo else UI_OFF, outline="")
+                        col = UI_ACCENT if t == lo else UI_OFF
+                        r = min(4, bw / 2)
+                        top = CH - hh
+                        cv.create_rectangle(x0, top + r, x0 + bw, CH, fill=col, outline="")
+                        cv.create_oval(x0, top, x0 + bw, top + 2 * r, fill=col, outline="")
                 except tk.TclError:
                     pass
             cv.bind("<Configure>", draw)
+
+    def fill_setups(self):
+        body, badge = self.c_set, self.c_set_badge
+        for w in body.winfo_children():
+            w.destroy()
+        badge.pack_forget()
+        if self.app.selected != "lmu" or setups is None:
+            tk.Label(body, text=tr("Сетапы пока есть только для Le Mans Ultimate."), bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 10),
+                     justify="left", anchor="w", wraplength=320).pack(fill="x")
+            return
+        n = len(getattr(setups, "PACK_KNOWN", []))
+        if n:
+            badge.config(text=f"{n} {tr('в наборе')}")
+            badge.pack(side="right")
+        sess = setups.read_session(LOGS) or {}
+        fresh = sess.get("game") in (None, "lmu") and sess.get("track") and time.time() - float(sess.get("t", 0) or 0) < 6 * 3600
+        rows = [("Трасса", sess.get("track") if fresh else tr("зайдите на трассу с оверлеем")),
+                ("Машина", f"{sess.get('model', '')} {sess.get('vehicle', '')}".strip() if fresh else "—")]
+        for cap, val in rows:
+            r = tk.Frame(body, bg=UI_PANEL)
+            r.pack(fill="x")
+            tk.Label(r, text=tr(cap), bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 10), pady=8).pack(side="left")
+            tk.Label(r, text=val or "—", bg=UI_PANEL, fg=UI_FG, font=("Segoe UI Semibold", 10)).pack(side="right")
+            tk.Frame(body, bg=UI_BORDER, height=1).pack(fill="x")
+        b = tk.Frame(body, bg=UI_PANEL)
+        b.pack(fill="x", pady=(12, 0))
+        ttk.Button(b, text="Подобрать сетап в игру", style="Accent.TButton" if fresh else "TButton",
+                   command=self.find_setups).pack(side="left")
+        tk.Label(body, text=tr("HYMO и P1Doks — бесплатные сетапы, авторы разрешили их раздавать."), bg=UI_PANEL, fg=UI_DIM,
+                 font=("Segoe UI", 9), justify="left", anchor="w", wraplength=320).pack(fill="x", pady=(10, 0))
+
+    def find_setups(self):
+        self.open_panel("general", "Сетапы")
+        try:
+            self.app.panels["lmu"].download_setups()
+        except Exception as e:                           # noqa: BLE001
+            log_error(f"Главная: сетапы: {e}")
+
+    def app_names(self):
+        g = self.app.selected
+        p = self.app.panels.get(g)
+        out = []
+        for k, name in companions_for(g):
+            try:
+                if companion_runs(k, g) and p is not None and p.v["app_" + k].get():
+                    out.append(name)
+            except (KeyError, tk.TclError):
+                pass
+        return out + [c["name"] for c in self.app.cfg.get("custom_apps", []) if g in c.get("games", [])]
 
     def fill_apps(self):
         body = self.c_apps
         for w in body.winfo_children():
             w.destroy()
         g = self.app.selected
-        p = self.app.panels.get(g)
-        names = []
+        p = self.panel()
+        items = []
         for k, name in companions_for(g):
-            try:
-                if companion_runs(k, g) and p is not None and p.v["app_" + k].get():
-                    names.append(name)
-            except (KeyError, tk.TclError):
-                pass
-        names += [c["name"] for c in self.app.cfg.get("custom_apps", []) if g in c.get("games", [])]
-        if not names:
-            tk.Label(body, text=tr("Ничего не запускается вместе с игрой. RaceLab, SimHub, Crew Chief и свои программы добавляются в «Настроить»."),
-                     bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 10), justify="left", anchor="w", wraplength=300).pack(fill="x")
-            return
-        for n in names:
+            if companion_runs(k, g) and ("app_" + k) in p.v:
+                items.append((name, p.v["app_" + k]))
+        if not items:
+            tk.Label(body, text=tr("Для этой игры нет программ-спутников."), bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 10),
+                     anchor="w").pack(fill="x")
+        for name, var in items:
             r = tk.Frame(body, bg=UI_PANEL)
-            r.pack(fill="x", pady=3)
-            tk.Label(r, text=n[:2].upper(), bg=UI_FIELD, fg=UI_DIM, font=("Segoe UI Semibold", 9), width=3).pack(side="left")
-            tk.Label(r, text=n, bg=UI_PANEL, fg=UI_FG, font=("Segoe UI", 10)).pack(side="left", padx=(10, 0))
+            r.pack(fill="x")
+            caps = [ch for ch in name if ch.isupper()]
+            tk.Label(r, text=("".join(caps[:2]) if len(caps) >= 2 else name[:2].upper()), bg=UI_FIELD,
+                     fg=UI_DIM, font=("Segoe UI Semibold", 9), width=3, pady=4).pack(side="left", pady=7)
+            tk.Label(r, text=name, bg=UI_PANEL, fg=UI_FG, font=("Segoe UI", 10)).pack(side="left", padx=(12, 0))
+            Toggle(r, "", var, bg=UI_PANEL, command=lambda: self.panel().save(quiet=True)).pack(side="right")
+            tk.Frame(body, bg=UI_BORDER, height=1).pack(fill="x")
+        for c in [c for c in self.app.cfg.get("custom_apps", []) if g in c.get("games", [])]:
+            r = tk.Frame(body, bg=UI_PANEL)
+            r.pack(fill="x")
+            tk.Label(r, text=c["name"][:2].upper(), bg=UI_FIELD, fg=UI_DIM, font=("Segoe UI Semibold", 9), width=3, pady=4).pack(side="left", pady=7)
+            tk.Label(r, text=c["name"], bg=UI_PANEL, fg=UI_FG, font=("Segoe UI", 10)).pack(side="left", padx=(12, 0))
+            tk.Label(r, text=tr("своя"), bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 9)).pack(side="right")
+            tk.Frame(body, bg=UI_BORDER, height=1).pack(fill="x")
 
 
 class App:
@@ -8773,6 +9066,7 @@ class App:
 
         body = ttk.Frame(self.root)
         body.pack(fill="both", expand=True, padx=14, pady=(2, 10))
+        self._chrome = (tiles, head, body)                 # шапка и тело: на «Главной» шапку и левое меню прячем
         body.columnconfigure(1, weight=1)
         body.rowconfigure(0, weight=1)
         self.navhost = tk.Frame(body, bg=UI_BG, width=268)
@@ -8967,7 +9261,29 @@ class App:
                 en.pack(fill="both", expand=True)
             else:
                 en.pack_forget()
+        self.chrome_for_view()
         self.apply_accent()
+
+    def chrome_for_view(self):
+        """«Главная» рисует свой заголовок: шапку лаунчера и левое меню на ней прячем, на остальных страницах — показываем."""
+        ch = getattr(self, "_chrome", None)
+        if not ch:
+            return
+        tiles, head, body = ch
+        home = self.view == "home"
+        try:
+            if home and tiles.winfo_manager():
+                tiles.pack_forget()
+                head.pack_forget()
+                self.navhost.grid_remove()
+                body.pack_configure(padx=0, pady=0)
+            elif not home and not tiles.winfo_manager():
+                tiles.pack(fill="x", before=body)
+                head.pack(fill="x", before=body)
+                self.navhost.grid()
+                body.pack_configure(padx=14, pady=(2, 10))
+        except tk.TclError:
+            pass
 
     # ---------- настройки лаунчера ----------
     def on_paths_changed(self):
