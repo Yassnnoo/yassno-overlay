@@ -35,6 +35,10 @@ try:
     import yassno_ets2 as ETS2
 except Exception:                                      # noqa: BLE001
     ETS2 = None
+try:
+    import yassno_ets2_save as ETS2SAVE                # lifetime-статистика профиля ETS 2 из файлов сохранений
+except Exception:                                      # noqa: BLE001
+    ETS2SAVE = None
 ETS2_TEST_BUILD = False                                # True — тестовая сборка: онлайн-обновление выключено
 try:
     import yassno_setups as setups                # бесплатные сетапы LMU из открытого репозитория
@@ -67,7 +71,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.3.0"
+APP_VERSION = "3.4.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -210,7 +214,7 @@ MODES = {"stand_mode": [("table", "Таблица"), ("compact", "Компакт
          "tyres_view": [("table", "Подробная"), ("compact", "Компактная: шины рисунком"),
                        ("wear", "Износ: остаток и за круг")]}
 MAP_RADII = [200, 300, 500, 800, 1200]
-UPDATE_FILES = ("yassno_overlay.py", "yassno_launcher.py", "yassno_svgmap.py", "yassno_readers.py", "yassno_ets2.py", "yassno_route.py", "ets2_roads.txt", "ets2_cities.txt", "README.txt")
+UPDATE_FILES = ("yassno_overlay.py", "yassno_launcher.py", "yassno_svgmap.py", "yassno_readers.py", "yassno_ets2.py", "yassno_ets2_save.py", "yassno_route.py", "ets2_roads.txt", "ets2_cities.txt", "README.txt")
 BACKUP_DIR = os.path.join(HERE, "backup")
 UPDATE_REPO, UPDATE_BRANCH = "Yassnnoo/yassno-overlay", "main"        # откуда лаунчер сам берёт обновления
 UPDATE_EXT = (".py", ".txt", ".png", ".cmd")
@@ -8743,6 +8747,36 @@ class HomePage(tk.Frame):
     def ets2_stats(self):
         return read_json(os.path.join(LOGS, "ets2-stats.json")) or {}
 
+    def ets2_save_stats(self):
+        """Статистика профиля из сохранений игры (расшифровка ~0,4 с — в фоне, результат кэшируется на минуту)."""
+        if ETS2SAVE is None:
+            return None
+        now = time.time()
+        if not getattr(self, "_sv_busy", False) and now - getattr(self, "_sv_t", 0) > 60:
+            self._sv_busy, self._sv_t = True, now
+
+            def work():
+                try:
+                    self._sv = ETS2SAVE.load_stats()
+                except Exception as e:                       # noqa: BLE001
+                    log_error(f"ETS 2: сохранения: {e}")
+                    self._sv = None
+                self._sv_busy, self._sv_new = False, True
+            threading.Thread(target=work, daemon=True).start()
+            self.after(500, self._sv_poll)
+        return getattr(self, "_sv", None)
+
+    def _sv_poll(self):
+        try:
+            if getattr(self, "_sv_busy", False):
+                self.after(400, self._sv_poll)
+            elif getattr(self, "_sv_new", False):
+                self._sv_new = False
+                if self.sel() == "ets2" and self.winfo_exists():
+                    self.fill_ets2()
+        except tk.TclError:
+            pass
+
     @staticmethod
     def kv_rows(body, rows):
         for cap, val in rows:
@@ -8787,11 +8821,25 @@ class HomePage(tk.Frame):
                 ("Маршрут", route), ("Расстояние", f"{km:,.0f} км".replace(",", " ") + (f" · осталось {left:,.0f}".replace(",", " ") if state == tr("в пути") or lj.get("state") == "active" else "")),
                 ("Доход", f"{int(lj.get('income') or 0):,} €".replace(",", " ")), ("Состояние", tr(state) + (f" · {when}" if when else ""))])
         km_total = float(st.get("km_total") or 0)
-        self.kv_rows(self.c_set, [
-            ("Проехано с оверлеем", f"{km_total:,.0f} км".replace(",", " ")),
-            ("Доставлено грузов", str(int(st.get("jobs_done") or 0))),
-            ("Заработано", f"{int(st.get('income_total') or 0):,} €".replace(",", " ")),
-            ("Отменено рейсов", str(int(st.get("jobs_cancelled") or 0)))])
+        sv = self.ets2_save_stats()
+        mine = f"{km_total:,.0f} км · {int(st.get('jobs_done') or 0)} рейс.".replace(",", " ")
+        if sv:
+            fmt = lambda n: f"{int(n):,}".replace(",", " ")
+            rows = [("Всего за рулём", f"{fmt(sv.get('km') or 0)} км"),
+                    ("Баланс", f"{fmt(sv.get('money') or 0)} €" + (f" · кредиты {fmt(sv['debt'])} €" if sv.get("debt") else "")),
+                    ("Опыт", f"{fmt(sv.get('xp') or 0)} XP"),
+                    ("Городов посещено", str(sv.get("cities") or 0)),
+                    ("Отменено рейсов", str(sv.get("cancelled") if sv.get("cancelled") is not None else int(st.get("jobs_cancelled") or 0))),
+                    ("С оверлеем", mine)]
+            if sv.get("stale"):
+                rows.append(("Сохранение", "старая копия (.bak)"))
+            self.kv_rows(self.c_set, rows)
+        else:
+            self.kv_rows(self.c_set, [
+                ("Проехано с оверлеем", f"{km_total:,.0f} км".replace(",", " ")),
+                ("Доставлено грузов", str(int(st.get("jobs_done") or 0))),
+                ("Заработано", f"{int(st.get('income_total') or 0):,} €".replace(",", " ")),
+                ("Отменено рейсов", str(int(st.get("jobs_cancelled") or 0)))])
         tr_ = st.get("truck") or {}
         name = f"{tr_.get('brand', '')} {tr_.get('name', '')}".strip()
         self.kv_rows(self.c_apps, [

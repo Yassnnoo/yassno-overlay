@@ -444,6 +444,24 @@ class MfdMapTab(unittest.TestCase):
             root.destroy()
 
 
+class Ets2SaveTests(unittest.TestCase):
+    def test_aes_vector_and_text_save(self):
+        import tempfile
+        import yassno_ets2_save as S
+        key = bytes(range(32))
+        ct = bytes.fromhex("8ea2b7ca516745bfeafc49904b496089")
+        self.assertEqual(S.aes_cbc_decrypt(key, bytes(16), ct).hex(), "00112233445566778899aabbccddeeff")
+        with tempfile.TemporaryDirectory() as d:
+            sd = os.path.join(d, "Euro Truck Simulator 2", "profiles", "AA", "save", "1")
+            os.makedirs(sd)
+            with open(os.path.join(sd, "game.sii"), "w", encoding="utf-8") as f:
+                f.write("SiiNunit\n{\neconomy : _nameless.1 {\n experience_points: 1234\n cancelled_job_count: 2\n"
+                        " total_distances_by_mode[0]: 777\n total_fuel_litres: 99\n visited_cities_count: 5\n}\n"
+                        "bank : _nameless.2 {\n money_account: 5000\n}\nbank_loan : _nameless.3 {\n amount: 100\n}\n}\n")
+            st = S.load_stats([d])
+            self.assertEqual((st["km"], st["money"], st["xp"], st["cancelled"], st["debt"], st["stale"]), (777, 5000, 1234, 2, 100, False))
+
+
 class TripLogTests(unittest.TestCase):
     def test_job_lifecycle_and_km(self):
         import tempfile
@@ -651,6 +669,13 @@ class LauncherLook(unittest.TestCase):
                 app.root.update()
                 self.assertEqual(app.view, "home")
                 self.assertEqual(app.home_page.sel(), "ets2")
+                hp = app.home_page
+                hp._sv, hp._sv_t = {"km": 65810, "money": 462061, "xp": 86877, "cities": 97, "cancelled": 1, "debt": 5, "stale": True}, time.time()
+                hp.fill_ets2()
+                txt = " ".join(w.cget("text") for r in hp.c_set.winfo_children() for w in r.winfo_children() if w.winfo_class() == "Label")
+                self.assertIn("65 810 км", txt)
+                self.assertIn("462 061 €", txt)
+                self.assertIn("старая копия", txt)
             app.pick_game("lmu")
             app.root.update()
             self.assertEqual(app.home_page.sel(), "lmu")

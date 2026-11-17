@@ -1,5 +1,5 @@
 {
-  "version": "3.3.0",
+  "version": "3.4.0",
   "notes": "Версия 3.0: новый вид лаунчера и экран «Главная»",
   "files": [
     "README.txt",
@@ -60,6 +60,7 @@
     "run-launcher.cmd",
     "run.cmd",
     "yassno_ets2.py",
+    "yassno_ets2_save.py",
     "yassno_launcher.py",
     "yassno_overlay.py",
     "yassno_readers.py",
