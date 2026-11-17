@@ -178,6 +178,98 @@ def load_cfg():
     return cfg
 
 
+STATS_PATH = os.path.join(HERE, "logs", "ets2-stats.json")
+
+
+class TripLog:
+    """Копит для лаунчера (экран «Главная» → ETS 2): последний рейс, груз, километры за рулём и пробег грузовика.
+    Пишет logs/ets2-stats.json не чаще раза в 10 секунд и сразу при смене состояния рейса. Демо-режим не записывается."""
+
+    def __init__(self, path=STATS_PATH):
+        self.path = path
+        self.data = {"km_total": 0.0, "jobs_done": 0, "jobs_cancelled": 0, "income_total": 0, "last_job": None, "truck": {}}
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                old = json.load(f)
+            if isinstance(old, dict):
+                self.data.update(old)
+        except (OSError, ValueError):
+            pass
+        self.odo = None
+        self.cur = None
+        self.last_save = 0.0
+        self.dirty = False
+
+    @staticmethod
+    def job_key(d):
+        return (d.get("cargo", ""), d.get("city_src", ""), d.get("city_dst", ""), d.get("comp_src", ""), d.get("comp_dst", ""))
+
+    def feed(self, d, now=None):
+        """d — кадр телеметрии (parse_map). Возвращает True, если что-то записали."""
+        if not d or not d.get("sdk", True):
+            return False
+        now = time.time() if now is None else now
+        odo = float(d.get("odo") or 0.0)
+        if odo > 0:
+            if self.odo is not None and 0 < odo - self.odo < 5.0:            # километры за рулём: разумные шаги, без скачков при смене грузовика
+                self.data["km_total"] = float(self.data.get("km_total", 0.0)) + (odo - self.odo)
+                self.dirty = True
+            self.odo = odo
+            self.data["truck"] = {"brand": d.get("brand", ""), "name": d.get("truck", ""), "plate": d.get("plate", ""), "odo": odo, "t": now}
+        key = self.job_key(d)
+        changed = False
+        if d.get("on_job") and (d.get("cargo") or d.get("city_dst")):
+            if self.cur is None or self.cur["key"] != key:
+                self._finish("interrupted", now)                             # прежнее задание закончилось без доставки (сменили/отменили)
+                self.cur = {"key": key, "t0": now, "start_km": float(d.get("route_km") or 0.0)}
+                changed = True
+            c = self.cur
+            c["route_km"] = float(d.get("route_km") or 0.0)
+            c["damage"] = float(d.get("cargo_damage") or 0.0)
+            self.data["last_job"] = {"cargo": d.get("cargo", ""), "mass_t": float(d.get("cargo_mass") or 0.0) / 1000.0,
+                                     "src": d.get("city_src", ""), "dst": d.get("city_dst", ""), "comp_src": d.get("comp_src", ""),
+                                     "comp_dst": d.get("comp_dst", ""), "income": int(d.get("income") or 0),
+                                     "km": round(c["start_km"], 1), "left_km": round(c["route_km"], 1),
+                                     "damage": round(c["damage"], 4), "state": "active", "t": now, "t0": c["t0"]}
+            self.dirty = True
+        elif self.cur is not None:
+            near = self.cur.get("route_km", 99.0) < 5.0                      # задание пропало рядом с целью — доставлено
+            self._finish("delivered" if near else "cancelled", now)
+            changed = True
+        if changed or (self.dirty and now - self.last_save > 10.0):
+            return self.save(now)
+        return False
+
+    def _finish(self, state, now):
+        if self.cur is None:
+            return
+        lj = self.data.get("last_job")
+        if lj and lj.get("state") == "active":
+            lj["state"] = state if state != "interrupted" else "cancelled"
+            lj["t"] = now
+            if lj["state"] == "delivered":
+                lj["left_km"] = 0.0
+                self.data["jobs_done"] = int(self.data.get("jobs_done", 0)) + 1
+                self.data["income_total"] = int(self.data.get("income_total", 0)) + int(lj.get("income", 0))
+            else:
+                self.data["jobs_cancelled"] = int(self.data.get("jobs_cancelled", 0)) + 1
+        self.cur = None
+        self.dirty = True
+
+    def save(self, now=None):
+        try:
+            os.makedirs(os.path.dirname(self.path), exist_ok=True)
+            tmp = self.path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(self.data, f, ensure_ascii=False)
+            os.replace(tmp, self.path)
+        except OSError:
+            return False
+        self.last_save = time.time() if now is None else now
+        self.dirty = False
+        return True
+
+
 def save_cfg(cfg):
     try:
         tmp = CFG_PATH + ".tmp"
@@ -2496,6 +2588,7 @@ class App:
         self.tiles = TileMap() if HAVE_PIL else None
         self.route = RouteMgr(self)
         self.d = None
+        self.trips = TripLog()
         self.wins = []
         self.convoy = DemoConvoy() if demo else ConvoyFeed(self.cfg["convoy_ids"])
         apply_theme(self.cfg.get("theme", "amber"), self.cfg.get("win_style", "classic"))
@@ -2792,6 +2885,11 @@ class App:
                 self.d = d
                 self.write_state()
             self.d = d
+            if d is not None and not self.demo:
+                try:
+                    self.trips.feed(d)
+                except Exception:                            # noqa: BLE001
+                    pass
             if self.tiles is not None and d is not None and self.tiles.allow_net:
                 self.prefetch(d)
             self.update_visibility(d)
@@ -2834,6 +2932,11 @@ class App:
     def quit(self):
         self.running = False
         self.convoy.alive = False
+        try:
+            if self.trips.dirty and not self.demo:
+                self.trips.save()
+        except Exception:                                    # noqa: BLE001
+            pass
         try:
             os.remove(STATE_PATH)
         except OSError:

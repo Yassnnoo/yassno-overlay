@@ -444,6 +444,34 @@ class MfdMapTab(unittest.TestCase):
             root.destroy()
 
 
+class TripLogTests(unittest.TestCase):
+    def test_job_lifecycle_and_km(self):
+        import tempfile
+        p = os.path.join(tempfile.mkdtemp(), "logs", "s.json")
+        E_ = E
+        tl = E_.TripLog(p)
+        base = {"sdk": True, "odo": 1000.0, "brand": "Scania", "truck": "R", "plate": "X", "cargo": "Бетон", "city_src": "A", "city_dst": "B",
+                "comp_src": "", "comp_dst": "", "cargo_mass": 18000.0, "income": 5200, "cargo_damage": 0.01, "on_job": True, "route_km": 300.0}
+        t = 1000.0
+        tl.feed(dict(base), t)
+        tl.feed(dict(base, odo=1002.5, route_km=297.5), t + 5)
+        self.assertAlmostEqual(tl.data["km_total"], 2.5)
+        self.assertEqual(tl.data["last_job"]["state"], "active")
+        tl.feed(dict(base, odo=1300.0, route_km=2.0, on_job=True), t + 10)   # скачок больше 5 км не считается пробегом
+        self.assertAlmostEqual(tl.data["km_total"], 2.5)
+        tl.feed(dict(base, odo=1300.5, route_km=0.0, on_job=False), t + 20)
+        self.assertEqual(tl.data["last_job"]["state"], "delivered")
+        self.assertEqual(tl.data["jobs_done"], 1)
+        self.assertEqual(tl.data["income_total"], 5200)
+        self.assertTrue(os.path.isfile(p))
+        again = E_.TripLog(p)                                   # данные переживают перезапуск оверлея
+        self.assertEqual(again.data["jobs_done"], 1)
+        tl.feed(dict(base, cargo="Дрова", route_km=200.0), t + 30)
+        tl.feed(dict(base, cargo="Дрова", route_km=150.0, on_job=False), t + 40)
+        self.assertEqual(tl.data["last_job"]["state"], "cancelled")
+        self.assertEqual(tl.data["jobs_cancelled"], 1)
+
+
 class LauncherEts2Bar(unittest.TestCase):
     def test_bar_like_other_games(self):
         P = yassno_launcher.Ets2Page
@@ -589,6 +617,20 @@ class LauncherLook(unittest.TestCase):
             self.assertEqual(tb.cur, "setups")
             self.assertTrue(app.setups_page.winfo_ismapped())
             self.assertFalse(app.navhost.winfo_ismapped())              # на этих экранах левого меню нет
+            app.show_home()
+            app.home_pick("ac")                                         # AC и ETS 2 выбираются на самой «Главной», без перехода на другую страницу
+            app.root.update()
+            self.assertEqual(app.view, "home")
+            self.assertEqual(app.home_page.sel(), "ac")
+            self.assertIn("EVO", " ".join(w.cget("text") for w in app.home_page.c_apps.winfo_children() if w.winfo_class() == "Label"))
+            if L.ETS2 is not None:
+                app.home_pick("ets2")
+                app.root.update()
+                self.assertEqual(app.view, "home")
+                self.assertEqual(app.home_page.sel(), "ets2")
+            app.pick_game("lmu")
+            app.root.update()
+            self.assertEqual(app.home_page.sel(), "lmu")
             app.show_home()
             self.assertEqual(app.panels[app.selected].extra_ui, {})     # в левом меню нет ни «Главной», ни статистики, ни настроек
             self.assertNotIn("apps", app.panels[app.selected].rows_ui)   # «Главной» в левом меню больше нет

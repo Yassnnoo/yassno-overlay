@@ -67,7 +67,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.1.0"
+APP_VERSION = "3.2.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -8544,7 +8544,7 @@ class TopBar(tk.Frame):
         for w in [lead] + list(lead.winfo_children()) + [c for ch in lead.winfo_children() for c in ch.winfo_children()]:
             w.bind("<Button-1>", lambda e: app.show_home())
             w.configure(cursor="hand2")
-        cmds = (app.show_home, lambda: app.select_game(app.selected), lambda: app.open_panel_page("general", "Сетапы"),
+        cmds = (app.show_home, app.open_overlay, lambda: app.open_panel_page("general", "Сетапы"),
                 app.show_stats, lambda: app.open_panel_page("apps"))
         labels = ("Главная", "Оверлей", "Сетапы", "Статистика", "Программы")
         self.tabs = {}
@@ -8596,6 +8596,7 @@ class HomePage(tk.Frame):
         self.app = app
         self._tick, self._hero_img, self._hero_key = None, None, None
         self._found = None
+        self._cui, self._mode = {}, None
         pad = 22
         main = tk.Frame(self, bg=UI_BG)
         main.pack(fill="both", expand=True, padx=pad, pady=(18, 16))
@@ -8607,7 +8608,7 @@ class HomePage(tk.Frame):
         games = list(GAMES.items()) + [("ac", "Assetto Corsa")] + ([("ets2", "ETS 2")] if ETS2 is not None else [])
         for i, (g, name) in enumerate(games):
             gr.columnconfigure(i, weight=1, uniform="gc")
-            cmd = (lambda g=g: self.app.pick_game(g)) if g in GAMES else (self.app.show_ac if g == "ac" else self.app.show_ets2)
+            cmd = (lambda g=g: self.app.pick_game(g)) if g in GAMES else (lambda g=g: self.app.home_pick(g))
             c = GameCard(gr, g, name, cmd)
             c.grid(row=0, column=i, sticky="ew", padx=(0 if i == 0 else 6, 0 if i == len(games) - 1 else 6))
             self.cards[g] = c
@@ -8676,19 +8677,129 @@ class HomePage(tk.Frame):
         f.pack(fill="both", expand=True, padx=14, pady=10)
         hd = tk.Frame(f, bg=UI_PANEL)
         hd.pack(fill="x", pady=(0, 6))
-        tk.Label(hd, text=tr(title), bg=UI_PANEL, fg=UI_FG, font=("Segoe UI Semibold", 11), anchor="w").pack(side="left")
+        tl = tk.Label(hd, text=tr(title), bg=UI_PANEL, fg=UI_FG, font=("Segoe UI Semibold", 11), anchor="w")
+        tl.pack(side="left")
         bd = None
         if badge:
             bd = tk.Label(hd, text="", bg=UI_ACCENT, fg=UI_ACCENT_FG, font=("Segoe UI Semibold", 8), padx=6)
-        if link and cmd:
-            lk = tk.Label(hd, text=tr(link), bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 10, "underline"), cursor="hand2")
-            lk.pack(side="right")
-            lk.bind("<Button-1>", lambda e: cmd())
-            lk.bind("<Enter>", lambda e: lk.config(fg=UI_FG))
-            lk.bind("<Leave>", lambda e: lk.config(fg=UI_DIM))
+        lk = tk.Label(hd, text="", bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 10, "underline"), cursor="hand2")
+        holder = {"cmd": cmd}
+        lk.bind("<Button-1>", lambda e, h_=holder: h_["cmd"] and h_["cmd"]())
+        lk.bind("<Enter>", lambda e: lk.config(fg=UI_FG))
+        lk.bind("<Leave>", lambda e: lk.config(fg=UI_DIM))
+        self._cui[col] = (tl, lk, holder)
+        self.set_card(col, title, link, cmd)
         body = tk.Frame(f, bg=UI_PANEL)
         body.pack(fill="both", expand=True)
         return (body, bd) if badge else body
+
+    def set_card(self, col, title, link, cmd):
+        """Заголовок и ссылка карточки: на «Главной» ETS 2 и Assetto Corsa в нижнем ряду другие разделы."""
+        tl, lk, holder = self._cui[col]
+        tl.config(text=tr(title))
+        holder["cmd"] = cmd
+        if link and cmd:
+            lk.config(text=tr(link))
+            lk.pack(side="right")
+        else:
+            lk.pack_forget()
+
+    def sel(self):
+        """Что показано на «Главной»: игра с оверлеем, а для Assetto Corsa и ETS 2 — свой набор карточек без перехода на другую страницу."""
+        return self.app.home_sub or self.app.selected
+
+    @staticmethod
+    def name_of(g):
+        return GAMES.get(g) or {"ac": "Assetto Corsa", "ets2": "ETS 2"}.get(g, g)
+
+    def apply_mode(self):
+        """Заголовки нижних карточек и кнопки под выбранную игру."""
+        g = self.sel()
+        if g == self._mode:
+            return
+        self._mode = g
+        if g == "ac":
+            for i, (code, name, text) in enumerate(AC_TITLES):
+                self.set_card(i, name, "", None)
+        elif g == "ets2":
+            self.set_card(0, "Последний рейс", "", None)
+            self.set_card(1, "Всего за рулём", "", None)
+            self.set_card(2, "Грузовик", "Оверлей ETS 2", self.app.show_ets2)
+        else:
+            self.set_card(0, "Последняя сессия", "Вся статистика", self.app.show_stats)
+            self.set_card(1, "Сетапы HYMO", "", None)
+            self.set_card(2, "Запускать вместе с игрой", "Настроить", lambda: self.open_panel("apps"))
+        self.c_set_badge.pack_forget()
+        try:
+            if g == "ac":
+                self.b_ov.pack_forget()
+                self._hb_lk.pack_forget()
+            else:
+                self.b_ov.pack(side="left", padx=(10, 0))
+                self._hb_lk.pack(side="left", padx=(18, 0))
+        except tk.TclError:
+            pass
+
+    def ets2_stats(self):
+        return read_json(os.path.join(LOGS, "ets2-stats.json")) or {}
+
+    @staticmethod
+    def kv_rows(body, rows):
+        for cap, val in rows:
+            r = tk.Frame(body, bg=UI_PANEL)
+            r.pack(fill="x")
+            tk.Label(r, text=tr(cap), bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 10), pady=7).pack(side="left")
+            tk.Label(r, text=val or "—", bg=UI_PANEL, fg=UI_FG, font=("Segoe UI Semibold", 10), anchor="e", justify="right",
+                     wraplength=210).pack(side="right")
+            tk.Frame(body, bg=UI_BORDER, height=1).pack(fill="x")
+
+    def fill_ac(self):
+        for i, body in enumerate((self.c_sess, self.c_set, self.c_apps)):
+            for w in body.winfo_children():
+                w.destroy()
+            code, name, text = AC_TITLES[i]
+            tk.Label(body, text=code, bg=UI_PANEL, fg="#e22226", font=("Segoe UI Semibold", 22), anchor="w").pack(fill="x")
+            tk.Label(body, text=tr(text), bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 10), justify="left", anchor="w",
+                     wraplength=320).pack(fill="x", pady=(6, 0))
+        tk.Label(self.c_apps, text=tr("Во всех трёх сработают панели по данным твоей машины: ввод и шифт-лайт, спидометр, шины, двигатель, "
+                                      "топливо, журнал кругов, дельта и предупреждения. Таблица и релатив — в ACC, радар — в ACC и AC."),
+                 bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 9), justify="left", anchor="w", wraplength=320).pack(fill="x", pady=(14, 0))
+
+    def fill_ets2(self):
+        st = self.ets2_stats()
+        for body in (self.c_sess, self.c_set, self.c_apps):
+            for w in body.winfo_children():
+                w.destroy()
+        lj = st.get("last_job")
+        if not lj:
+            tk.Label(self.c_sess, text=tr("Пока нет данных: запустите оверлей ETS 2 и начните рейс — лаунчер сохранит последний груз и пройденные километры."),
+                     bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 10), justify="left", anchor="w", wraplength=320).pack(fill="x")
+        else:
+            state = {"active": "в пути", "delivered": "доставлен", "cancelled": "отменён"}.get(lj.get("state"), "")
+            when = ""
+            if lj.get("t"):
+                when = time.strftime("%d.%m.%Y %H:%M", time.localtime(float(lj["t"])))
+            route = " → ".join(x for x in (lj.get("src"), lj.get("dst")) if x)
+            km = float(lj.get("km") or 0)
+            left = float(lj.get("left_km") or 0)
+            self.kv_rows(self.c_sess, [
+                ("Груз", f"{lj.get('cargo') or '—'}" + (f" · {lj['mass_t']:.1f} т" if lj.get("mass_t") else "")),
+                ("Маршрут", route), ("Расстояние", f"{km:,.0f} км".replace(",", " ") + (f" · осталось {left:,.0f}".replace(",", " ") if state == tr("в пути") or lj.get("state") == "active" else "")),
+                ("Доход", f"{int(lj.get('income') or 0):,} €".replace(",", " ")), ("Состояние", tr(state) + (f" · {when}" if when else ""))])
+        km_total = float(st.get("km_total") or 0)
+        self.kv_rows(self.c_set, [
+            ("Проехано с оверлеем", f"{km_total:,.0f} км".replace(",", " ")),
+            ("Доставлено грузов", str(int(st.get("jobs_done") or 0))),
+            ("Заработано", f"{int(st.get('income_total') or 0):,} €".replace(",", " ")),
+            ("Отменено рейсов", str(int(st.get("jobs_cancelled") or 0)))])
+        tr_ = st.get("truck") or {}
+        name = f"{tr_.get('brand', '')} {tr_.get('name', '')}".strip()
+        self.kv_rows(self.c_apps, [
+            ("Модель", name), ("Номер", tr_.get("plate", "")),
+            ("Пробег", f"{float(tr_.get('odo') or 0):,.0f} км".replace(",", " ") if tr_.get("odo") else "")])
+        if not tr_:
+            tk.Label(self.c_apps, text=tr("Данные появятся после первой поездки с включённым оверлеем."), bg=UI_PANEL, fg=UI_DIM,
+                     font=("Segoe UI", 9), justify="left", anchor="w", wraplength=320).pack(fill="x", pady=(10, 0))
 
     # --- действия ---
     def panel(self):
@@ -8701,7 +8812,10 @@ class HomePage(tk.Frame):
 
     def panel_call(self, name, *args):
         try:
-            getattr(self.panel(), name)(*args)
+            if self.sel() == "ets2":
+                getattr(self.app.ets2_page, name)(*args)
+            else:
+                getattr(self.panel(), name)(*args)
         except Exception as e:                           # noqa: BLE001
             log_error(f"Главная: {name}: {e}")
         self.app.refresh_status()
@@ -8713,6 +8827,9 @@ class HomePage(tk.Frame):
             return
         if card == "Сетапы":
             self.app.show_setups()
+            return
+        if self.sel() == "ets2":
+            self.app.show_ets2()
             return
         g = self.app.selected
         self.app.select_game(g)
@@ -8738,12 +8855,19 @@ class HomePage(tk.Frame):
         try:
             if not self.winfo_ismapped():
                 return
+            self.apply_mode()
             self.fill_cards()
             self.draw_hero()
             self.fill_status()
-            self.fill_session()
-            self.fill_setups()
-            self.fill_apps()
+            g = self.sel()
+            if g == "ac":
+                self.fill_ac()
+            elif g == "ets2":
+                self.fill_ets2()
+            else:
+                self.fill_session()
+                self.fill_setups()
+                self.fill_apps()
         except tk.TclError:
             return
         self._tick = self.after(1500, self.tick)
@@ -8754,6 +8878,8 @@ class HomePage(tk.Frame):
             if self.winfo_ismapped():
                 self.fill_status()
                 self.fill_cards()
+                if self.sel() == "ets2":
+                    self.fill_ets2()                     # данные рейса обновляет оверлей
                 self._tick = self.after(1500, self.tick)
         except tk.TclError:
             pass
@@ -8788,7 +8914,7 @@ class HomePage(tk.Frame):
                 sub, ok = tr("Скоро"), False
             else:
                 sub, ok = tr("Тестовая версия"), True
-            c.set(g == a.selected, sub, ok)
+            c.set(g == self.sel(), sub, ok)
 
     def draw_hero(self):
         cv = self.hero
@@ -8796,7 +8922,7 @@ class HomePage(tk.Frame):
             w, h = cv.winfo_width(), cv.winfo_height()
             if w < 50:
                 return
-            g = self.app.selected
+            g = self.sel()
             acc = accent_for(g, ACCENT_BY_GAME)[0]
             key = (w, h, acc, UI_PANEL, UI_THEME_NAME)
             if key != self._hero_key:
@@ -8810,20 +8936,34 @@ class HomePage(tk.Frame):
                 pts = [r, 0, x1 - r, 0, x1, 0, x1, r, x1, y1 - r, x1, y1, x1 - r, y1, r, y1, 0, y1, 0, y1 - r, 0, r, 0, 0]
                 cv.create_polygon(pts, smooth=True, fill=UI_PANEL, outline=UI_BORDER)
             x = 36
-            cv.create_text(x, 42, text=tr("ГОТОВО К ГОНКЕ"), anchor="w", fill=acc, font=("Segoe UI", 9, "bold"))
-            cv.create_text(x, 88, text=GAMES.get(g, g), anchor="w", fill=UI_FG, font=("Segoe UI Semibold", 30))
+            kick = {"ac": "ПОДДЕРЖКА В РАЗРАБОТКЕ", "ets2": "ГОТОВО К РЕЙСУ"}.get(g, "ГОТОВО К ГОНКЕ")
+            cv.create_text(x, 42, text=tr(kick), anchor="w", fill=acc, font=("Segoe UI", 9, "bold"))
+            cv.create_text(x, 88, text=self.name_of(g), anchor="w", fill=UI_FG, font=("Segoe UI Semibold", 30))
             cv.create_text(x, 134, text=self.hero_info(), anchor="nw", fill=UI_DIM, font=("Segoe UI", 11), width=max(200, int(w * 0.48)))
             bg = mix(UI_PANEL, acc, 0.05)                    # кнопки стоят на почти чистом фоне карточки
             self._hb.config(bg=bg)
             self._hb_lk.config(bg=bg)
             cv.create_window(x, h - 40, window=self._hb, anchor="w")
-            run = self.app.runner.running() and self.app.runner.game == g
+            run = (self.app.ets2_page.running() if g == "ets2" else self.app.runner.running() and self.app.runner.game == g) if g != "ac" else False
             self.b_ov.config(text=tr("Остановить оверлей") if run else tr("Только оверлей"))
         except tk.TclError:
             pass
 
     def hero_info(self):
-        g = self.app.selected
+        g = self.sel()
+        if g == "ac":
+            return tr("AC, ACC и EVO — одна плашка. Оверлей будет сам определять запущенную игру и работать с общим профилем настроек. "
+                      "Формат данных игр нужно проверить на реальных запусках.")
+        if g == "ets2":
+            st = self.ets2_stats()
+            tk_ = st.get("truck") or {}
+            nm = f"{tk_.get('brand', '')} {tk_.get('name', '')}".strip()
+            parts = [nm] if nm else []
+            if st.get("km_total"):
+                parts.append(f"{float(st['km_total']):,.0f} {tr('км за рулём')}".replace(",", " "))
+            if st.get("jobs_done"):
+                parts.append(f"{int(st['jobs_done'])} {tr('грузов доставлено')}")
+            return " · ".join(parts) if parts else tr("Телеметрия через плагин SDK. Все окна оверлея настраиваются на странице «Оверлей».")
         p = self.app.panels.get(g)
         parts = []
         if p is not None:
@@ -8857,7 +8997,8 @@ class HomePage(tk.Frame):
             dot.config(fg=col)
             val.config(text=txt)
         try:
-            run_here = run and r.game == a.selected
+            g = self.sel()
+            run_here = a.ets2_page.running() if g == "ets2" else (run and r.game == a.selected)
             self.b_ov.config(text=tr("Остановить оверлей") if run_here else tr("Только оверлей"))
         except tk.TclError:
             pass
@@ -9015,6 +9156,7 @@ class App:
         self.selected = self.cfg.get("last_game") if self.cfg.get("last_game") in GAMES else next(iter(GAMES))
         self.view = self.selected                          # игра или "settings"
         self.view = "home"                                 # лаунчер всегда открывается на «Главной»; выбранная игра — последняя
+        self.home_sub = None                               # "ac" / "ets2": что показано на «Главной» вместо игры с оверлеем
         self.panels, self.tray = {}, None
         self.tray_q = queue.Queue()
         self.auto_var = tk.BooleanVar(value=self.cfg["autostart"])
@@ -9230,10 +9372,29 @@ class App:
             except Exception:
                 pass
 
+    def home_pick(self, game):
+        """Assetto Corsa и ETS 2 на «Главной»: остаёмся на ней, меняются только карточки."""
+        self.home_sub = game
+        if self.view != "home":
+            self.show_home()
+        self._tiles_key = None
+        self.update_tiles()
+        self.home_page.refresh()
+
+    def open_overlay(self):
+        """Вкладка «Оверлей»: страницы того, что выбрано на «Главной»."""
+        if self.home_sub == "ets2":
+            self.show_ets2()
+        elif self.home_sub == "ac":
+            self.show_ac()
+        else:
+            self.select_game(self.selected)
+
     def pick_game(self, game):
         """Клик по игре в шапке: на «Главной» остаёмся на ней, иначе открываем страницы игры."""
         if self.view in ("home", "setups", "apps"):
             self.selected = game
+            self.home_sub = None
             if self.cfg.get("last_game") != game:
                 self.cfg["last_game"] = game
                 try:
@@ -9257,6 +9418,7 @@ class App:
 
     def select_game(self, game):
         self.selected, self.view = game, game
+        self.home_sub = None
         self.remember_view("")
         if self.cfg.get("last_game") != game:
             self.cfg["last_game"] = game
@@ -9287,6 +9449,7 @@ class App:
 
     def show_ac(self):
         self.view = "ac"
+        self.home_sub = "ac"
         self.remember_view("ac")
         for p in self.panels.values():
             p.pack_forget()
@@ -9300,6 +9463,7 @@ class App:
         self.update_tiles()
 
     def show_ets2(self):
+        self.home_sub = "ets2"
         self.view = "ets2"
         self.remember_view("ets2")
         self.home_page.pack_forget()
@@ -9422,12 +9586,12 @@ class App:
         tb.mark(name)
 
     def update_tiles(self):
-        key = (self.view, self.detected, self.selected, tuple(self.panels), id(self.tiles), tuple(id(p) for p in self.panels.values()))
+        key = (self.view, self.home_sub, self.detected, self.selected, tuple(self.panels), id(self.tiles), tuple(id(p) for p in self.panels.values()))
         if getattr(self, "_tiles_key", None) == key:
             return
         self._tiles_key = key
         for g, t in self.tiles.items():
-            t.set_state(g == self.view or (self.view in ("home", "setups", "apps") and g == self.selected), g == self.detected)
+            t.set_state(g == self.view or (self.view in ("home", "setups", "apps") and g == (self.home_sub or self.selected)), g == self.detected)
         for g, p in self.panels.items():                    # левый список — от выбранной игры, подсветка — по текущей странице
             if g == self.selected and self.view not in ("ac", "ets2"):
                 p.nav.pack(fill="both", expand=True)
@@ -9532,10 +9696,11 @@ class App:
             p.say(text)
 
     def launch_game(self, game=None):
-        if game is None and self.view == "ac":
+        sub = self.home_sub if self.view == "home" else self.view
+        if game is None and sub == "ac":
             mb_info("Assetto Corsa", "Поддержка Assetto Corsa пока в разработке — запускать оверлей рано.")
             return
-        if game is None and self.view == "ets2":
+        if game is None and sub == "ets2":
             try:
                 os.startfile("steam://rungameid/227300")
                 self.say("Запускаю Euro Truck Simulator 2…")
