@@ -67,7 +67,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "2.12.0"
+APP_VERSION = "2.13.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -633,7 +633,7 @@ def default_launcher():
     return {"autostart": True, "close_with_game": True, "theme": "dark", "lang": "ru", "win_start": False,
             "start_min": False, "min_tray": False, "close_tray": False, "stop_on_exit": False, "poll_sec": 2.5,
             "apps_close": True, "launch_with_game": True, "telemetry": True, "i2_path": "", "tel_strips": [],
-            "auto_update": True, "shortcut_asked": False, "last_view": "", "intro_anim": True, "ui_anim": True, "accent_by_game": True, "pv_bg": "dark", "perf_log": False}
+            "auto_update": True, "shortcut_asked": False, "last_view": "", "intro_anim": True, "ui_anim": True, "accent_by_game": True, "shadows": True, "pv_bg": "dark", "perf_log": False}
 
 
 def load_launcher():
@@ -965,6 +965,12 @@ def setup_style(root):
     st.map("TCombobox", fieldbackground=[("readonly", UI_FIELD)], foreground=[("readonly", UI_FG)])
     st.configure("TSpinbox", fieldbackground=UI_FIELD, background=UI_PANEL, foreground=UI_FG, arrowcolor=UI_FG)
     st.configure("TEntry", fieldbackground=UI_FIELD, foreground=UI_FG)
+    st.configure("Ghost.TButton", background=UI_BG, foreground=UI_FG, bordercolor=UI_BORDER, lightcolor=UI_BG, darkcolor=UI_BG,
+                 padding=(14, 7))                                                  # 2.13: второстепенные действия внизу
+    st.map("Ghost.TButton", background=[("active", UI_ACTIVE)], lightcolor=[("active", UI_ACTIVE)], darkcolor=[("active", UI_ACTIVE)])
+    st.configure("Ghost.TMenubutton", background=UI_BG, foreground=UI_FG, bordercolor=UI_BORDER, lightcolor=UI_BG, darkcolor=UI_BG,
+                 padding=(12, 7), arrowcolor=UI_DIM)
+    st.map("Ghost.TMenubutton", background=[("active", UI_ACTIVE)])
     st.configure("Mini.TButton", padding=(8, 3), font=("Segoe UI", 9))                 # ряд маленьких кнопок под предпросмотром
     st.configure("Saved.TButton", background=UI_GREEN_DK, foreground="#ffffff")        # «Сохранено ✓» на секунду после сохранения
     st.map("Saved.TButton", background=[("active", UI_GREEN_DK)])
@@ -1468,7 +1474,8 @@ EN.update({
     "Устанавливаю…": "Installing…", "Не удалось открыть": "Could not open", "Настройки лаунчера": "Launcher settings",
     "Сам определять игру и запускать оверлей с её профилем": "Detect the game and start the overlay with its profile",
     "Лаунчер не запустился": "The launcher failed to start", "ПАНЕЛИ ОВЕРЛЕЯ": "OVERLAY PANELS", "Сохранить": "Save",
-    "Сохранить и перезапустить оверлей": "Save and restart the overlay", "Сбросить положение окон": "Reset window positions",
+    "Сохранить и перезапустить оверлей": "Save and restart the overlay", "Не сохранено": "Not saved", "Всё сохранено": "All saved", "Двигать окна": "Move windows",
+    "✔ Окна двигаются — закрепить": "✔ Windows movable — lock", "Тени у карточек (со следующего запуска лаунчера)": "Card shadows (from the next launcher start)", "Сбросить положение окон": "Reset window positions",
     "Режим перемещения окон": "Window move mode", "Демо без игры": "Demo without the game", "Журнал": "Log",
     "Все панели оверлея сразу. Клик по панели в предпросмотре включает или выключает её. Шрифт и цвета общие для всего оверлея.":
         "All overlay panels at once. Click a panel in the preview to switch it on or off. Font and colours are shared by the whole overlay.",
@@ -1971,11 +1978,72 @@ def pv_track(n=60):
     return out
 
 
+SHADOWS = True                                          # «Тени у карточек» в настройках лаунчера (нужен Pillow)
+_SHADOW_CACHE = {}
+
+
+def shadow_image(master, w, h, r, m, bg):
+    """Мягкая тень под скруглённую карточку размером w×h с полями m (Pillow). Нет Pillow — None, карточка без тени.
+    Картинки кэшируются по размеру: одинаковые карточки не пересчитываются."""
+    if not valid_hex(bg):
+        return None
+    key = (w, h, r, m, bg.lower(), UI_THEME_NAME)
+    img = _SHADOW_CACHE.get(key)
+    if img is not None:
+        return img
+    try:
+        from PIL import Image, ImageDraw, ImageFilter, ImageTk
+    except Exception:                                    # noqa: BLE001
+        return None
+    try:
+        dark = UI_THEME_NAME != "light"
+        k = 0.85 if dark else 0.22                     # на тёмном фоне тень должна быть плотнее, иначе её не видно
+        dy = max(1, m // 3)
+        mask = Image.new("L", (w, h), 0)
+        ImageDraw.Draw(mask).rounded_rectangle((m, m + dy, w - m - 1, h - m - 1 + dy), radius=r, fill=int(255 * k))
+        mask = mask.filter(ImageFilter.GaussianBlur(max(1, m * 0.55)))
+        base = Image.new("RGB", (w, h), bg)
+        shade = Image.new("RGB", (w, h), "#000000" if dark else "#1b2230")
+        pic = ImageTk.PhotoImage(Image.composite(shade, base, mask), master=master)
+    except Exception:                                    # noqa: BLE001
+        return None
+    if len(_SHADOW_CACHE) > 160:
+        _SHADOW_CACHE.clear()
+    _SHADOW_CACHE[key] = pic
+    return pic
+
+
+def style_titlebar(root):
+    """Windows 10/11: заголовок окна в цвет темы лаунчера (тёмный заголовок, цвет полосы и рамки как у фона)."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        root.update_idletasks()
+        hwnd = ctypes.windll.user32.GetParent(root.winfo_id()) or root.winfo_id()
+        dwm = ctypes.windll.dwmapi
+        dark = ctypes.c_int(1 if UI_THEME_NAME != "light" else 0)
+        for attr in (20, 19):                          # DWMWA_USE_IMMERSIVE_DARK_MODE (новые и старые сборки Windows 10)
+            if dwm.DwmSetWindowAttribute(hwnd, attr, ctypes.byref(dark), ctypes.sizeof(dark)) == 0:
+                break
+
+        def colorref(c):
+            return ctypes.c_int(int(c[5:7], 16) << 16 | int(c[3:5], 16) << 8 | int(c[1:3], 16))
+        for attr, col in ((35, UI_BG), (34, UI_BORDER), (36, UI_FG)):   # заголовок, рамка, текст — только Windows 11
+            v = colorref(col)
+            dwm.DwmSetWindowAttribute(hwnd, attr, ctypes.byref(v), ctypes.sizeof(v))
+    except Exception:                                    # noqa: BLE001
+        pass
+
+
 class RoundBox(tk.Canvas):
     """Скруглённая рамка: внутрь кладутся виджеты через .inner; высота подстраивается под содержимое."""
 
-    def __init__(self, parent, radius=12, fill=None, border=None, outer=None, m=1, autow=True, fillh=False):
+    def __init__(self, parent, radius=12, fill=None, border=None, outer=None, m=1, autow=True, fillh=False, shadow=0):
         self.autow, self.fillh = autow, fillh
+        self.shadow = shadow if shadow and SHADOWS else 0      # 2.13: мягкая тень вокруг рамки (поля под неё — m)
+        if self.shadow:
+            m = max(m, self.shadow)
         self.fill, self.border, self.rad, self.m = fill or UI_BG, border or UI_BORDER, radius, m
         super().__init__(parent, bg=outer or UI_BG, highlightthickness=0, borderwidth=0, height=20)
         self.inner = tk.Frame(self, bg=self.fill)
@@ -2000,6 +2068,11 @@ class RoundBox(tk.Canvas):
             return
         self.delete("box")
         r, m = self.rad, self.m
+        if self.shadow:
+            img = shadow_image(self, w, h, r, self.m, str(self.cget("bg")))
+            if img is not None:
+                self._shimg = img
+                self.create_image(0, 0, image=img, anchor="nw", tags="box")
         x0, y0, x1, y1 = m, m, w - m - 1, h - m - 1
         pts = [x0 + r, y0, x1 - r, y0, x1, y0, x1, y0 + r, x1, y1 - r, x1, y1, x1 - r, y1, x0 + r, y1,
                x0, y1, x0, y1 - r, x0, y0 + r, x0, y0]
@@ -2027,7 +2100,7 @@ class _SecInner(ttk.Frame):
 
 def section(parent, title):
     """Раздел настроек в скруглённой рамке с заголовком (страницы лаунчера, в одном стиле с карточками оверлея)."""
-    rb = RoundBox(parent, radius=14, fill=UI_BG, border=mix(UI_BORDER, UI_DIM, 0.18))
+    rb = RoundBox(parent, radius=14, fill=UI_BG, border=mix(UI_BORDER, UI_DIM, 0.18), shadow=8)
     tk.Label(rb.inner, text=tr(title), bg=UI_BG, fg=UI_FG, font=("Segoe UI Semibold", 11), anchor="w",
              padx=12, pady=10).pack(fill="x")
     inner = _SecInner(rb.inner, padding=(8, 0, 6, 8))
@@ -2403,12 +2476,10 @@ class Ets2Page(ttk.Frame):
         self.ctrl = ttk.Frame(center)
         self.ctrl.grid(row=3, column=0, sticky="w", pady=(10, 0))
         # --- снизу, как у остальных игр: сохранить слева, запуск/перемещение/«Ещё» справа, статус строкой ниже ---
+        tk.Frame(self, bg=UI_BORDER, height=1).grid(row=1, column=0, columnspan=2, sticky="new", pady=(10, 0))
         bar = ttk.Frame(self)
-        bar.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 0))
-        self.btn_save = ttk.Button(bar, text="Сохранить", command=self.save_click)
-        self.btn_save.pack(side="left", padx=(0, 8))
-        ttk.Button(bar, text="Сохранить и перезапустить оверлей", style="Accent.TButton", command=lambda: self.start(False)).pack(side="left", padx=(0, 8))
-        more = ttk.Menubutton(bar, text=tr("Ещё") + " ▾")
+        bar.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(21, 0))
+        more = ttk.Menubutton(bar, text=tr("Ещё"), style="Ghost.TMenubutton")
         mm = tk.Menu(more, tearoff=0, bg=UI_PANEL, fg=UI_FG, activebackground=UI_ACCENT, activeforeground=UI_ACCENT_FG, bd=0, font=("Segoe UI", 10))
         mm.add_command(label=tr("Демо без игры"), command=lambda: self.start(True))
         mm.add_command(label=tr("Остановить оверлей"), command=self.stop)
@@ -2416,10 +2487,13 @@ class Ets2Page(ttk.Frame):
         mm.add_command(label=tr("Сбросить положение окон"), command=self.reset_pos)
         more.configure(menu=mm)
         more.pack(side="right")
-        self.btn_move = ttk.Button(bar, text="Режим перемещения окон", command=self.toggle_move)
+        ttk.Button(bar, text="Сохранить и перезапустить оверлей", style="Accent.TButton", command=lambda: self.start(False)).pack(side="right", padx=(0, 8))
+        self.btn_save = ttk.Button(bar, text="Сохранить", command=self.save_click)
+        self.btn_save.pack(side="right", padx=(0, 8))
+        self.btn_start = ttk.Button(bar, text="Запустить оверлей (ETS2)", command=self.run_or_stop, style="Ghost.TButton")
+        self.btn_start.pack(side="right", padx=(0, 20))
+        self.btn_move = ttk.Button(bar, text="Двигать окна", command=self.toggle_move, style="Ghost.TButton")
         self.btn_move.pack(side="right", padx=(0, 8))
-        self.btn_start = ttk.Button(bar, text="Запустить оверлей (ETS2)", command=self.run_or_stop)
-        self.btn_start.pack(side="right", padx=(0, 8))
         Tip(self.btn_move, "Окна можно двигать мышью и растягивать за край или угол; красный крестик убирает окно.")
         self.run_lbl = ttk.Label(self, text="", style="Dim.TLabel")
         self.run_lbl.grid(row=2, column=0, columnspan=2, sticky="w", pady=(6, 0))
@@ -2875,8 +2949,8 @@ class Ets2Page(ttk.Frame):
 
     def set_move_btn(self, on):
         try:
-            self.btn_move.config(style="Active.TButton" if on else "TButton",
-                                 text=tr("✔ Режим перемещения ВКЛ — нажмите, чтобы закрепить") if on else tr("Режим перемещения окон"))
+            self.btn_move.config(style="Active.TButton" if on else "Ghost.TButton",
+                                 text=tr("✔ Окна двигаются — закрепить") if on else tr("Двигать окна"))
         except tk.TclError:
             pass
 
@@ -3639,7 +3713,7 @@ class ProfilePanel(ttk.Frame):
         self._center = center
         center.bind("<Configure>", lambda e: self.fit_later())
         self.note.grid(row=1, column=0, sticky="w", pady=(2, 10))
-        pbox = RoundBox(center, radius=16, fill=MOCK_BG, border=mix(UI_BORDER, UI_DIM, 0.3))
+        pbox = RoundBox(center, radius=16, fill=MOCK_BG, border=mix(UI_BORDER, UI_DIM, 0.3), shadow=10)
         pbox.configure(width=self.PW + 22 + 2 * pbox.off)
         self._pbox = pbox
         pbox.grid(row=2, column=0, sticky="n")                      # по центру колонки, предпросмотр в скруглённой рамке
@@ -3698,12 +3772,17 @@ class ProfilePanel(ttk.Frame):
         self.settings.bind("<Configure>", lambda e: self.scroll.configure(scrollregion=(0, 0, e.width, e.height)))
         enable_wheel(self.scroll, holder)
 
+        # 2.13: нижняя панель — слева статус сохранения, справа тихие действия, затем «Сохранить» и одна главная кнопка
+        tk.Frame(self, bg=UI_BORDER, height=1).grid(row=1, column=0, columnspan=2, sticky="new", pady=(10, 0))
         bar = ttk.Frame(self)
-        bar.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 0))
-        self.btn_save = ttk.Button(bar, text="Сохранить", command=self.save)
-        self.btn_save.pack(side="left", padx=(0, 8))
-        ttk.Button(bar, text="Сохранить и перезапустить оверлей", style="Accent.TButton", command=self.save_apply).pack(side="left", padx=(0, 8))
-        more = ttk.Menubutton(bar, text=tr("Ещё") + " ▾")
+        bar.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(21, 0))
+        st = tk.Frame(bar, bg=UI_BG)
+        st.pack(side="left")
+        self.dirty_dot = tk.Label(st, text="●", bg=UI_BG, fg=UI_BG, font=("Segoe UI", 10), bd=0)
+        self.dirty_dot.pack(side="left", padx=(2, 6))
+        self.dirty_lbl = tk.Label(st, text=tr("Всё сохранено"), bg=UI_BG, fg=UI_DIM, font=("Segoe UI", 10), bd=0)
+        self.dirty_lbl.pack(side="left")
+        more = ttk.Menubutton(bar, text=tr("Ещё"), style="Ghost.TMenubutton")
         mm = tk.Menu(more, tearoff=0, bg=UI_PANEL, fg=UI_FG, activebackground=UI_ACCENT, activeforeground=UI_ACCENT_FG, bd=0,
                      font=("Segoe UI", 10))
         mm.add_command(label=tr("Демо без игры"), command=lambda: self.launch("demo"))
@@ -3715,10 +3794,13 @@ class ProfilePanel(ttk.Frame):
             mm.add_command(label=tr("Настроить плагин rF2"), command=self.setup_rf2_plugin)
         more.configure(menu=mm)
         more.pack(side="right")
-        self.btn_move = ttk.Button(bar, text="Режим перемещения окон", command=self.toggle_move)
+        ttk.Button(bar, text="Сохранить и перезапустить оверлей", style="Accent.TButton", command=self.save_apply).pack(side="right", padx=(0, 8))
+        self.btn_save = ttk.Button(bar, text="Сохранить", command=self.save)
+        self.btn_save.pack(side="right", padx=(0, 8))
+        self.btn_run = ttk.Button(bar, text=f"Запустить оверлей ({GAMES[self.game]})", command=self.run_or_stop, style="Ghost.TButton")
+        self.btn_run.pack(side="right", padx=(0, 20))
+        self.btn_move = ttk.Button(bar, text="Двигать окна", command=self.toggle_move, style="Ghost.TButton")
         self.btn_move.pack(side="right", padx=(0, 8))
-        self.btn_run = ttk.Button(bar, text=f"Запустить оверлей ({GAMES[self.game]})", command=self.run_or_stop)
-        self.btn_run.pack(side="right", padx=(0, 8))
         Tip(self.btn_move, "Окна можно двигать мышью и растягивать за угол. Края экрана и соседние окна притягивают (Shift — без магнита).")
         self.msg = ttk.Label(self, text="", style="Dim.TLabel")
         self.msg.grid(row=2, column=0, columnspan=2, sticky="w", pady=(6, 0))
@@ -3806,7 +3888,7 @@ class ProfilePanel(ttk.Frame):
 
     def card(self, title, side):
         """Раздел настроек под спойлером: заголовок со знаком +/−, внутри — сетка элементов."""
-        wrap = RoundBox(side, radius=14, fill=UI_BG, border=mix(UI_BORDER, UI_DIM, 0.18))
+        wrap = RoundBox(side, radius=14, fill=UI_BG, border=mix(UI_BORDER, UI_DIM, 0.18), shadow=8)
         wrap.pack(fill="x", pady=(0, 10))
         hdr = tk.Frame(wrap.inner, bg=UI_BG, cursor="hand2")
         hdr.pack(fill="x", padx=2, pady=(2, 0))
@@ -4539,8 +4621,8 @@ class ProfilePanel(ttk.Frame):
 
     def set_move_btn(self, on):
         try:
-            self.btn_move.config(style="Active.TButton" if on else "TButton",
-                                 text=tr("✔ Режим перемещения ВКЛ — нажмите, чтобы закрепить") if on else tr("Режим перемещения окон"))
+            self.btn_move.config(style="Active.TButton" if on else "Ghost.TButton",
+                                 text=tr("✔ Окна двигаются — закрепить") if on else tr("Двигать окна"))
         except tk.TclError:
             pass
 
@@ -4684,7 +4766,10 @@ class ProfilePanel(ttk.Frame):
                 b.after_cancel(b._flash)
                 b._flash = None
             on = getattr(self, "_dirty", False)
-            b.config(text=("● " if on else "") + tr("Сохранить"), style="Dirty.TButton" if on else "TButton")
+            b.config(text=tr("Сохранить"), style="Dirty.TButton" if on else "TButton")
+            self.dirty_dot.config(fg=UI_ACCENT if on else UI_BG)
+            self.dirty_lbl.config(text=tr("Не сохранено") if on else tr("Всё сохранено"),
+                                  fg=UI_FG if on else UI_DIM)
         except (tk.TclError, AttributeError):
             pass
 
@@ -7708,6 +7793,7 @@ class SettingsPage(ttk.Frame):
             "ui_anim": tk.BooleanVar(value=bool(cfg.get("ui_anim", True))),
             "perf_log": tk.BooleanVar(value=bool(cfg.get("perf_log", False))),
             "accent_by_game": tk.BooleanVar(value=bool(cfg.get("accent_by_game", True))),
+            "shadows": tk.BooleanVar(value=bool(cfg.get("shadows", True))),
         }
         self.i2_var = tk.StringVar(value=str(cfg.get("i2_path", "")))
         self.columnconfigure(0, weight=1)
@@ -7765,6 +7851,7 @@ class SettingsPage(ttk.Frame):
         self.tray_btn = ttk.Button(box, text="Установить поддержку трея", command=self.install_tray)
         self.tray_btn.grid(row=6, column=0, sticky="w", pady=(6, 0))
         self.tg(box, 7, "Замер скорости оверлея (после перезапуска пишет logs/perf-*.log)", "perf_log")
+        self.tg(box, 8, "Тени у карточек (со следующего запуска лаунчера)", "shadows")
 
         box = section(col3, "Горячие клавиши оверлея")
         box.pack(fill="x", pady=(0, 10))
@@ -7859,7 +7946,7 @@ class SettingsPage(ttk.Frame):
         ttk.Button(box, text="Сбросить настройки лаунчера", command=self.reset).pack(anchor="w")
         ttk.Label(box, text="Профили оверлея (LMU и rFactor 2) не затрагиваются.", style="Dim.TLabel").pack(anchor="w", pady=(4, 0))
 
-        for key in ("win_start", "start_min", "min_tray", "close_tray", "stop_on_exit", "telemetry", "auto_update", "intro_anim", "ui_anim", "accent_by_game", "perf_log"):
+        for key in ("win_start", "start_min", "min_tray", "close_tray", "stop_on_exit", "telemetry", "auto_update", "intro_anim", "ui_anim", "accent_by_game", "shadows", "perf_log"):
             self.v[key].trace_add("write", lambda *a: self.apply())
         self.refresh_tray()
 
@@ -7904,7 +7991,7 @@ class SettingsPage(ttk.Frame):
 
     def apply(self):
         cfg = self.app.cfg
-        for k in ("win_start", "start_min", "min_tray", "close_tray", "stop_on_exit", "telemetry", "auto_update", "intro_anim", "ui_anim", "accent_by_game", "perf_log"):
+        for k in ("win_start", "start_min", "min_tray", "close_tray", "stop_on_exit", "telemetry", "auto_update", "intro_anim", "ui_anim", "accent_by_game", "shadows", "perf_log"):
             cfg[k] = bool(self.v[k].get())
         global UI_ANIM, ACCENT_BY_GAME
         UI_ANIM = cfg["ui_anim"]
@@ -8272,8 +8359,11 @@ class App:
 
     def build(self):
         global UI_ANIM, ACCENT_BY_GAME, UI_ACCENT, UI_ACCENT_HI, UI_ACCENT_FG
+        global SHADOWS
         set_ui_theme(self.cfg["theme"])
         UI_ANIM, ACCENT_BY_GAME = bool(self.cfg.get("ui_anim", True)), bool(self.cfg.get("accent_by_game", True))
+        SHADOWS = bool(self.cfg.get("shadows", True))
+        self.root.after(0, lambda: style_titlebar(self.root))
         self._accent_target = accent_for(self.accent_key(), ACCENT_BY_GAME)     # интерфейс сразу строится в цвете игры
         UI_ACCENT, UI_ACCENT_HI, UI_ACCENT_FG = self._accent_target
         _ACCENT_HIST.clear()
