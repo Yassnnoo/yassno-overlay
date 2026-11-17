@@ -299,6 +299,27 @@ def documents_dirs():
     return out
 
 
+def save_time(game_path):
+    """Время записи сохранения: file_time из info.sii (у копий .bak mtime у всех одинаковый), иначе mtime файла."""
+    try:
+        txt = (read_sii(os.path.join(os.path.dirname(game_path), "info.sii"), 20000) or b"").decode("utf8", "replace")
+        m = re.search(r"file_time:\s*(\d+)", txt)
+        if m:
+            return float(m.group(1))
+    except (OSError, zlib.error, struct.error):
+        pass
+    return os.path.getmtime(game_path)
+
+
+def profile_nick(profile_dir):
+    """Имя профиля: папки steam_profiles названы hex-строкой UTF-8 (…666C6164… = «Vladimir …»)."""
+    n = os.path.basename(profile_dir)
+    try:
+        return bytes.fromhex(n).decode("utf8") if len(n) % 2 == 0 else n
+    except ValueError:
+        return n
+
+
 def find_saves(docs=None):
     """[(mtime, game.sii, profile_dir, stale)] — свежие сначала. stale=True — копии в *.bak."""
     found = []
@@ -309,7 +330,7 @@ def find_saves(docs=None):
                 stale = root.lower().endswith(".bak") or ".bak" in os.path.basename(root).lower()
                 for g in glob.glob(os.path.join(root, "*", "save", "*", "game.sii")):
                     try:
-                        found.append((os.path.getmtime(g), g, os.path.dirname(os.path.dirname(os.path.dirname(g))), stale))
+                        found.append((save_time(g), g, os.path.dirname(os.path.dirname(os.path.dirname(g))), stale))
                     except OSError:
                         pass
     found.sort(key=lambda x: (x[3], -x[0]))
@@ -320,8 +341,9 @@ _cache = {}
 _lock = threading.Lock()
 
 
-def load_stats(docs=None, tries=4):
-    """Лучшая (с наибольшим пробегом среди свежих сохранений) статистика профиля или None. Результат кэшируется по файлу."""
+def load_stats(docs=None, tries=1):
+    """Статистика самого свежего сохранения (по file_time из info.sii; настоящие профили раньше копий .bak) или None.
+    Результат кэшируется по файлу."""
     saves = find_saves(docs)
     if not saves:
         return None
@@ -341,7 +363,7 @@ def load_stats(docs=None, tries=4):
             except (OSError, zlib.error, struct.error, ValueError):
                 st = None
             if st is not None:
-                st = dict(st, name=read_profile_name(pdir), mtime=mt, stale=stale, path=path)
+                st = dict(st, name=read_profile_name(pdir), nick=profile_nick(pdir), save=os.path.basename(os.path.dirname(path)), mtime=mt, stale=stale, path=path)
             with _lock:
                 _cache[key] = st or {}
         if st and (best is None or (st.get("km") or 0, mt) > (best.get("km") or 0, best["mtime"])):

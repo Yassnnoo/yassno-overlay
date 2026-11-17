@@ -71,7 +71,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.5.0"
+APP_VERSION = "3.5.1"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -8722,6 +8722,7 @@ class HomePage(tk.Frame):
         if g == self._mode:
             return
         self._mode = g
+        self._ets2_key = None
         if g == "ac":
             for i, (code, name, text) in enumerate(AC_TITLES):
                 self.set_card(i, name, "", None)
@@ -8778,7 +8779,7 @@ class HomePage(tk.Frame):
             self.after(500, self._sv_poll)
         return float(c["rate"]) if c.get("rate") else None
 
-    def ets2_avatar(self, body, name):
+    def ets2_avatar(self, body, name, nick=""):
         """Аватарка Steam и название компании над строками. Нет Steam или файла — ничего не рисуем."""
         try:
             path = ETS2SAVE.steam_avatar()
@@ -8790,7 +8791,11 @@ class HomePage(tk.Frame):
             r = tk.Frame(body, bg=UI_PANEL)
             r.pack(fill="x", pady=(0, 8))
             tk.Label(r, image=self._av, bg=UI_PANEL, bd=0).pack(side="left")
-            tk.Label(r, text=name or "", bg=UI_PANEL, fg=UI_FG, font=("Segoe UI Semibold", 12)).pack(side="left", padx=12)
+            col = tk.Frame(r, bg=UI_PANEL)
+            col.pack(side="left", padx=12)
+            tk.Label(col, text=nick or name or "", bg=UI_PANEL, fg=UI_FG, font=("Segoe UI Semibold", 12), anchor="w").pack(fill="x")
+            if nick and name:
+                tk.Label(col, text=name, bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 9), anchor="w").pack(fill="x")
         except Exception as e:                           # noqa: BLE001
             log_error(f"ETS 2: аватарка: {e}")
 
@@ -8855,6 +8860,11 @@ class HomePage(tk.Frame):
 
     def fill_ets2(self):
         st = self.ets2_stats()
+        sv0 = self.ets2_save_stats()
+        key = repr((st, sv0, self.currency(), self.eur_rate() if self.currency() == "rub" else 0, LANG if "LANG" in globals() else 0))
+        if key == getattr(self, "_ets2_key", None) and self.c_set.winfo_children():
+            return                                              # данные не менялись — не перерисовываем (иначе мерцает)
+        self._ets2_key = key
         for body in (self.c_sess, self.c_set, self.c_apps):
             for w in body.winfo_children():
                 w.destroy()
@@ -8875,7 +8885,7 @@ class HomePage(tk.Frame):
                 ("Маршрут", route), ("Расстояние", f"{km:,.0f} км".replace(",", " ") + (f" · осталось {left:,.0f}".replace(",", " ") if state == tr("в пути") or lj.get("state") == "active" else "")),
                 ("Доход", f"{int(lj.get('income') or 0):,} €".replace(",", " ")), ("Состояние", tr(state) + (f" · {when}" if when else ""))])
         km_total = float(st.get("km_total") or 0)
-        sv = self.ets2_save_stats()
+        sv = sv0
         mine = f"{km_total:,.0f} км · {int(st.get('jobs_done') or 0)} рейс.".replace(",", " ")
         if sv:
             fmt = lambda n: f"{int(n):,}".replace(",", " ")
@@ -8887,9 +8897,9 @@ class HomePage(tk.Frame):
                     ("Городов посещено", str(sv.get("cities") or 0)),
                     ("Отменено рейсов", str(sv.get("cancelled") if sv.get("cancelled") is not None else int(st.get("jobs_cancelled") or 0))),
                     ("С оверлеем", mine)]
-            if sv.get("stale"):
-                rows.append(("Сохранение", "старая копия (.bak)"))
-            self.ets2_avatar(self.c_set, sv.get("name"))
+            when = time.strftime("%d.%m.%Y %H:%M", time.localtime(sv["mtime"])) if sv.get("mtime") else ""
+            rows.append(("Сохранение", f"{sv.get('save') or ''} · {when}" + (" · копия .bak" if sv.get("stale") else "")))
+            self.ets2_avatar(self.c_set, sv.get("name"), sv.get("nick"))
             self.kv_rows(self.c_set, rows)
         else:
             self.kv_rows(self.c_set, [

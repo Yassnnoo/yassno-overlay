@@ -465,6 +465,14 @@ class Ets2SaveTests(unittest.TestCase):
                 f.write("SiiNunit\n{\neconomy : _nameless.1 {\n experience_points: 1234\n cancelled_job_count: 2\n"
                         " total_distances_by_mode[0]: 777\n total_fuel_litres: 99\n visited_cities_count: 5\n}\n"
                         "bank : _nameless.2 {\n money_account: 5000\n}\nbank_loan : _nameless.3 {\n amount: 100\n}\n}\n")
+            sd2 = os.path.join(d, "Euro Truck Simulator 2", "profiles", "AA", "save", "2")
+            os.makedirs(sd2)
+            with open(os.path.join(sd2, "game.sii"), "w", encoding="utf-8") as f:
+                f.write("SiiNunit\n{\neconomy : _nameless.1 {\n total_distances_by_mode[0]: 1\n}\nbank : _nameless.2 {\n money_account: 1\n}\n}\n")
+            with open(os.path.join(sd, "info.sii"), "w") as f:
+                f.write("SiiNunit\n{\nsave_container : _nameless.1 {\n file_time: 2000\n}\n}\n")
+            with open(os.path.join(sd2, "info.sii"), "w") as f:
+                f.write("SiiNunit\n{\nsave_container : _nameless.1 {\n file_time: 1000\n}\n}\n")
             st = S.load_stats([d])
             self.assertEqual((st["km"], st["money"], st["xp"], st["cancelled"], st["debt"], st["stale"]), (777, 5000, 1234, 2, 100, False))
 
@@ -682,7 +690,7 @@ class LauncherLook(unittest.TestCase):
                 txt = " ".join(w.cget("text") for r in hp.c_set.winfo_children() for w in r.winfo_children() if w.winfo_class() == "Label")
                 self.assertIn("65 810 км", txt)
                 self.assertIn("462 061 €", txt)
-                self.assertIn("старая копия", txt)
+                self.assertIn("копия .bak", txt)
                 hp.currency, hp.eur_rate = (lambda: "rub"), (lambda: 100.0)
                 hp.fill_ets2()
                 txt = " ".join(w.cget("text") for r in hp.c_set.winfo_children() for w in r.winfo_children() if w.winfo_class() == "Label")
