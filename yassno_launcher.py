@@ -71,7 +71,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.5.2"
+APP_VERSION = "3.6.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -8571,6 +8571,9 @@ class TopBar(tk.Frame):
         self.ver = StatusChip(top)
         self.ver.pack(side="right", padx=(0, 10))
         self.ver.set(f"{tr('Версия')} {APP_VERSION}", "off")
+        self.ver.configure(cursor="hand2")
+        self.ver.bind("<Button-1>", lambda e: app.on_version_click())
+        Tip(self.ver, "Нажмите, чтобы проверить обновления")
         tk.Frame(self, bg=UI_BORDER, height=1).pack(fill="x")
         self.cur = None
 
@@ -9304,8 +9307,8 @@ class App:
         self.root.after(300, self.pump)
         if "--minimized" in sys.argv or self.cfg.get("start_min_now"):
             self.root.after(400, self.start_hidden)
-        elif self.cfg.get("auto_update", True):
-            self.root.after(4000, lambda: self.check_update(False))
+        if self.cfg.get("auto_update", True):
+            self.root.after(4000, self.auto_check)
         if os.name == "nt" and "--minimized" not in sys.argv and not self.cfg.get("shortcut_asked"):
             self.root.after(2500, self.offer_shortcut)
 
@@ -10091,15 +10094,44 @@ class App:
             self.tray_q.put(("upd_info", info, err, manual))
         threading.Thread(target=work, daemon=True).start()
 
+    def auto_check(self):
+        """Тихая проверка в фоне при запуске и раз в 3 часа: окон не показывает, только подсвечивает чип версии."""
+        if self.cfg.get("auto_update", True):
+            self.check_update(False)
+        self.root.after(3 * 3600 * 1000, self.auto_check)
+
+    def set_version_chip(self):
+        info = getattr(self, "upd_info", None)
+        try:
+            if info and info.get("newer"):
+                self.topbar.ver.set(f"{tr('Доступна')} {info['version']} · {tr('Обновить')}", "wait")
+            else:
+                self.topbar.ver.set(f"{tr('Версия')} {APP_VERSION}", "off")
+        except (tk.TclError, AttributeError):
+            pass
+
+    def on_version_click(self):
+        info = getattr(self, "upd_info", None)
+        if info and info.get("newer"):
+            self.ask_install(info)
+        else:
+            self.check_update(True)
+
     def on_update_info(self, info, err, manual):
         if err:
             if manual:
                 mb_error("Обновление", tr("Не удалось проверить обновления:") + "\n" + err)
             return
+        self.upd_info = info if info["newer"] else None
+        self.set_version_chip()
         if not info["newer"]:
             if manual:
                 mb_info("Обновление", tr("У вас последняя версия: ") + APP_VERSION)
             return
+        if manual:                                           # при автопроверке окно не выскакивает — есть кнопка в шапке
+            self.ask_install(info)
+
+    def ask_install(self, info):
         msg = (tr("Доступна версия ") + info["version"] + tr(" (у вас ") + APP_VERSION + ").\n\n"
                + (info["notes"] + "\n\n" if info["notes"] else "")
                + tr("Установить сейчас? Текущие файлы сохранятся в папке backup, настройки не меняются."))

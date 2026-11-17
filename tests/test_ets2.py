@@ -704,6 +704,13 @@ class LauncherLook(unittest.TestCase):
                 txt = " ".join(w.cget("text") for r in hp.c_set.winfo_children() for w in r.winfo_children() if w.winfo_class() == "Label")
                 self.assertIn("46 206 100 ₽", txt)
                 del hp.currency, hp.eur_rate
+            app.upd_info = {"newer": True, "version": "9.9.9", "notes": "", "files": []}
+            app.set_version_chip()
+            self.assertIn("9.9.9", app.topbar.ver.text)
+            self.assertEqual(app.topbar.ver.state, "wait")
+            app.upd_info = None
+            app.set_version_chip()
+            self.assertEqual(app.topbar.ver.state, "off")
             app.pick_game("lmu")
             app.root.update()
             self.assertEqual(app.home_page.sel(), "lmu")
