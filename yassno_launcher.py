@@ -3795,8 +3795,7 @@ class ProfilePanel(ttk.Frame):
         tk.Label(prog, text="ПРОГРАММА", bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI Semibold", 9),
                  anchor="w").pack(fill="x", padx=20, pady=(8, 2))
         self.rows_ui["apps"] = make_row("Доп. программы", lambda: self.open_page("apps"), parent=prog, icon="⧉")
-        self.extra_ui = {"home": make_row("Главная", self.app.show_home, dot=False, parent=prog, icon="⌂"),
-                         "stats": make_row("Статистика", self.app.show_stats, dot=False, parent=prog, icon="▤"),
+        self.extra_ui = {"stats": make_row("Статистика", self.app.show_stats, dot=False, parent=prog, icon="▤"),
                          "settings": make_row("Настройки лаунчера", self.app.show_settings, dot=False, parent=prog, icon="⚙")}
 
         center = ttk.Frame(self)
@@ -3935,6 +3934,10 @@ class ProfilePanel(ttk.Frame):
                 w.config(bg=bg)
             _nav_icon(row, sel)
         self.mark_view(self.game)
+        try:
+            self.app.mark_tabs()
+        except Exception:                                # noqa: BLE001
+            pass
         self.canvas.config(height=190 if key == "apps" else self.gen_h() if key == "general" else self.PH)
         self.scroll.yview_moveto(0)
         self.title.config(text=tr(next(t for k, t, _ in PAGES if k == key)))
@@ -8448,9 +8451,67 @@ class GameCard(tk.Canvas):
             pass
 
 
+class TopBar(tk.Frame):
+    """3.0: верхняя панель вкладок — всегда на виду на любой странице лаунчера: логотип, Главная / Оверлей / Сетапы /
+    Статистика / Программы, версия и настройки. Меняется только то, что под ней."""
+    NAMES = ("home", "overlay", "setups", "stats", "apps")
+
+    def __init__(self, parent, app):
+        super().__init__(parent, bg=UI_BG)
+        self.app = app
+        top = tk.Frame(self, bg=UI_BG)
+        top.pack(fill="x", padx=22, pady=(14, 0))
+        lead = Brand(top)
+        lead.pack(side="left", padx=(0, 30))
+        for w in [lead] + list(lead.winfo_children()) + [c for ch in lead.winfo_children() for c in ch.winfo_children()]:
+            w.bind("<Button-1>", lambda e: app.show_home())
+            w.configure(cursor="hand2")
+        cmds = (app.show_home, lambda: app.select_game(app.selected), lambda: app.open_panel_page("general", "Сетапы"),
+                app.show_stats, lambda: app.open_panel_page("apps"))
+        labels = ("Главная", "Оверлей", "Сетапы", "Статистика", "Программы")
+        self.tabs = {}
+        for name, text, cmd in zip(self.NAMES, labels, cmds):
+            col = tk.Frame(top, bg=UI_BG)
+            col.pack(side="left", padx=(0, 6))
+            lb = tk.Label(col, text=tr(text), bg=UI_BG, fg=UI_DIM, font=("Segoe UI Semibold", 11), padx=10, pady=8, cursor="hand2")
+            lb.pack()
+            line = tk.Frame(col, bg=UI_BG, height=2)
+            line.pack(fill="x")
+            lb.bind("<Button-1>", lambda e, c=cmd: c())
+            lb.bind("<Enter>", lambda e, n=name: self.hover(n, True))
+            lb.bind("<Leave>", lambda e, n=name: self.hover(n, False))
+            self.tabs[name] = (lb, line)
+        gear = tk.Label(top, text="⚙", bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI Symbol", 13), width=3, pady=4, cursor="hand2",
+                        highlightthickness=1, highlightbackground=UI_BORDER)
+        gear.pack(side="right")
+        gear.bind("<Button-1>", lambda e: app.show_settings())
+        Tip(gear, "Настройки лаунчера")
+        self.ver = StatusChip(top)
+        self.ver.pack(side="right", padx=(0, 10))
+        self.ver.set(f"{tr('Версия')} {APP_VERSION}", "off")
+        tk.Frame(self, bg=UI_BORDER, height=1).pack(fill="x")
+        self.cur = None
+
+    def hover(self, name, on):
+        lb, _ = self.tabs[name]
+        if name != self.cur:
+            lb.config(fg=UI_FG if on else UI_DIM)
+
+    def mark(self, name):
+        """Подсветка текущей вкладки (name — одна из NAMES или None)."""
+        self.cur = name
+        for n, (lb, line) in self.tabs.items():
+            on = n == name
+            try:
+                lb.config(fg=UI_FG if on else UI_DIM, cursor="arrow" if on else "hand2")
+                line.config(bg=UI_ACCENT if on else UI_BG)
+            except tk.TclError:
+                pass
+
+
 class HomePage(tk.Frame):
     """2.15: экран «Главная» — свой заголовок с вкладками, ряд игр, карточка выбранной игры с кнопками запуска, статус,
-    последняя сессия, сетапы и программы, которые стартуют вместе с игрой. Левое меню и шапка лаунчера здесь скрыты."""
+    последняя сессия, сетапы и программы, которые стартуют вместе с игрой. Шапка с играми и левое меню здесь скрыты, верхняя панель вкладок — общая для всех страниц."""
 
     def __init__(self, parent, app):
         super().__init__(parent, bg=UI_BG)
@@ -8458,34 +8519,6 @@ class HomePage(tk.Frame):
         self._tick, self._hero_img, self._hero_key = None, None, None
         self._found = None
         pad = 22
-        # --- заголовок: логотип, вкладки, версия и настройки ---
-        top = tk.Frame(self, bg=UI_BG)
-        top.pack(fill="x", padx=pad, pady=(14, 0))
-        Brand(top).pack(side="left", padx=(0, 30))
-        self.tabs = []
-        for text, cmd in (("Главная", None), ("Оверлей", lambda: self.app.select_game(self.app.selected)),
-                          ("Сетапы", lambda: self.open_panel("general", "Сетапы")), ("Статистика", self.app.show_stats),
-                          ("Программы", lambda: self.open_panel("apps"))):
-            col = tk.Frame(top, bg=UI_BG)
-            col.pack(side="left", padx=(0, 6))
-            lb = tk.Label(col, text=tr(text), bg=UI_BG, fg=UI_FG if cmd is None else UI_DIM, font=("Segoe UI Semibold", 11),
-                          padx=10, pady=8, cursor="arrow" if cmd is None else "hand2")
-            lb.pack()
-            line = tk.Frame(col, bg=UI_ACCENT if cmd is None else UI_BG, height=2)
-            line.pack(fill="x")
-            if cmd is not None:
-                lb.bind("<Button-1>", lambda e, c=cmd: c())
-                lb.bind("<Enter>", lambda e, l=lb: l.config(fg=UI_FG))
-                lb.bind("<Leave>", lambda e, l=lb: l.config(fg=UI_DIM))
-        gear = tk.Label(top, text="⚙", bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI Symbol", 13), width=3, pady=4, cursor="hand2",
-                        highlightthickness=1, highlightbackground=UI_BORDER)
-        gear.pack(side="right")
-        gear.bind("<Button-1>", lambda e: self.app.show_settings())
-        Tip(gear, "Настройки лаунчера")
-        self.ver = StatusChip(top)
-        self.ver.pack(side="right", padx=(0, 10))
-        tk.Frame(self, bg=UI_BORDER, height=1).pack(fill="x", pady=(0, 0))
-
         main = tk.Frame(self, bg=UI_BG)
         main.pack(fill="both", expand=True, padx=pad, pady=(18, 16))
         main.columnconfigure(0, weight=1)
@@ -8627,7 +8660,6 @@ class HomePage(tk.Frame):
             self.fill_session()
             self.fill_setups()
             self.fill_apps()
-            self.ver.set(f"{tr('Версия')} {APP_VERSION}", "off")
         except tk.TclError:
             return
         self._tick = self.after(1500, self.tick)
@@ -9011,26 +9043,11 @@ class App:
             w.destroy()
         setup_style(self.root)
         self.panels = {}
+        self.topbar = TopBar(self.root, self)
+        self.topbar.pack(fill="x")
         tiles = ttk.Frame(self.root, padding=(16, 12, 16, 0))
         tiles.pack(fill="x")
-        lead = Brand(tiles)
-        lead.pack(side="left", padx=(0, 22))
-        for w in [lead] + list(lead.winfo_children()) + [c for ch in lead.winfo_children() for c in ch.winfo_children()]:
-            w.bind("<Button-1>", lambda e: self.show_home())
-            w.configure(cursor="hand2")
         self.tiles = {}
-
-        def _fit_tiles(e=None, st={"on": True}):             # на узком окне логотип убирается — переключателю игр хватает места
-            need = 1180
-            if e is not None and e.widget is tiles:
-                want = e.width >= need
-                if want != st["on"]:
-                    st["on"] = want
-                    if want:
-                        lead.pack(side="left", padx=(0, 22), before=tiles.pack_slaves()[0])
-                    else:
-                        lead.pack_forget()
-        tiles.bind("<Configure>", _fit_tiles)
         seg = RoundBox(tiles, radius=12, fill=UI_PANEL, border=UI_BORDER, outer=UI_BG, m=0)
         seg.pack(side="left")
         segi = seg.inner
@@ -9241,6 +9258,41 @@ class App:
         self.stats_page.reload()
         self.update_tiles()
 
+    def open_panel_page(self, page, card=None):
+        """Вкладки «Сетапы» и «Программы»: открыть страницу в панели выбранной игры."""
+        self.select_game(self.selected)
+        try:
+            p = self.panels[self.selected]
+            p.show_page(page)
+            if card:
+                for c in getattr(p, "_cards", []):
+                    if str(c.get("title", "")).startswith(card):
+                        p._open[c["key"]] = True
+                        p.apply_card(c)
+        except Exception:                                # noqa: BLE001
+            pass
+        self.mark_tabs()
+
+    def mark_tabs(self):
+        """Подсвечивает вкладку верхней панели по текущей странице."""
+        tb = getattr(self, "topbar", None)
+        if tb is None:
+            return
+        v = self.view
+        if v == "home":
+            name = "home"
+        elif v == "stats":
+            name = "stats"
+        elif v == "settings":
+            name = None
+        elif v in ("ac", "ets2"):
+            name = "overlay"
+        else:
+            p = self.panels.get(self.selected)
+            page = getattr(p, "page", "")
+            name = "apps" if page == "apps" else "overlay"
+        tb.mark(name)
+
     def update_tiles(self):
         key = (self.view, self.detected, self.selected, tuple(self.panels), id(self.tiles), tuple(id(p) for p in self.panels.values()))
         if getattr(self, "_tiles_key", None) == key:
@@ -9261,25 +9313,31 @@ class App:
             else:
                 en.pack_forget()
         self.chrome_for_view()
+        self.mark_tabs()
         self.apply_accent()
 
     def chrome_for_view(self):
-        """«Главная» рисует свой заголовок: шапку лаунчера и левое меню на ней прячем, на остальных страницах — показываем."""
+        """Главная, Статистика и Настройки — отдельные экраны на всю ширину: шапку с играми и левое меню на них прячем.
+        Верхняя панель вкладок остаётся всегда; на страницах оверлея шапка и меню показываются."""
         ch = getattr(self, "_chrome", None)
         if not ch:
             return
         tiles, head, body = ch
-        home = self.view == "home"
+        full = self.view in ("home", "stats", "settings")
         try:
-            if home and tiles.winfo_manager():
+            if full and tiles.winfo_manager():
                 tiles.pack_forget()
                 head.pack_forget()
                 self.navhost.grid_remove()
-                body.pack_configure(padx=0, pady=0)
-            elif not home and not tiles.winfo_manager():
+            elif not full and not tiles.winfo_manager():
                 tiles.pack(fill="x", before=body)
                 head.pack(fill="x", before=body)
                 self.navhost.grid()
+            if self.view == "home":
+                body.pack_configure(padx=0, pady=0)
+            elif full:
+                body.pack_configure(padx=22, pady=(14, 12))
+            else:
                 body.pack_configure(padx=14, pady=(2, 10))
         except tk.TclError:
             pass

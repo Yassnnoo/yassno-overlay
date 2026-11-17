@@ -567,6 +567,23 @@ class LauncherLook(unittest.TestCase):
         try:
             app.root.update()
             self.assertEqual(app.view, "home")                  # по умолчанию открывается «Главная»
+            tb = app.topbar
+            self.assertTrue(tb.winfo_ismapped())
+            self.assertEqual(tb.cur, "home")
+            for view, fn, tab in (("stats", app.show_stats, "stats"), ("settings", app.show_settings, None)):
+                fn()
+                app.root.update()
+                self.assertTrue(tb.winfo_ismapped(), view)         # верхняя панель на месте на любой странице
+                self.assertEqual(tb.cur, tab, view)
+            if L.ETS2 is not None:
+                app.show_ets2()
+                app.root.update()
+                self.assertTrue(tb.winfo_ismapped())
+                self.assertEqual(tb.cur, "overlay")
+            app.open_panel_page("apps")
+            self.assertEqual(tb.cur, "apps")
+            app.show_home()
+            self.assertNotIn("home", app.panels[app.selected].extra_ui)   # «Главной» в левом меню больше нет
             app.select_game("lmu")                              # лаунчер стартует на «Главной», страницы игры открываем явно
             app.root.update()
             p = app.panels["lmu"]
