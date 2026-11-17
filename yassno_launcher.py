@@ -71,7 +71,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.4.1"
+APP_VERSION = "3.5.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -8778,6 +8778,22 @@ class HomePage(tk.Frame):
             self.after(500, self._sv_poll)
         return float(c["rate"]) if c.get("rate") else None
 
+    def ets2_avatar(self, body, name):
+        """Аватарка Steam и название компании над строками. Нет Steam или файла — ничего не рисуем."""
+        try:
+            path = ETS2SAVE.steam_avatar()
+            if not path:
+                return
+            from PIL import Image, ImageTk
+            im = Image.open(path).convert("RGBA").resize((46, 46), Image.LANCZOS)
+            self._av = ImageTk.PhotoImage(im, master=body)
+            r = tk.Frame(body, bg=UI_PANEL)
+            r.pack(fill="x", pady=(0, 8))
+            tk.Label(r, image=self._av, bg=UI_PANEL, bd=0).pack(side="left")
+            tk.Label(r, text=name or "", bg=UI_PANEL, fg=UI_FG, font=("Segoe UI Semibold", 12)).pack(side="left", padx=12)
+        except Exception as e:                           # noqa: BLE001
+            log_error(f"ETS 2: аватарка: {e}")
+
     def ets2_save_stats(self):
         """Статистика профиля из сохранений игры (расшифровка ~0,4 с — в фоне, результат кэшируется на минуту)."""
         if ETS2SAVE is None:
@@ -8873,6 +8889,7 @@ class HomePage(tk.Frame):
                     ("С оверлеем", mine)]
             if sv.get("stale"):
                 rows.append(("Сохранение", "старая копия (.bak)"))
+            self.ets2_avatar(self.c_set, sv.get("name"))
             self.kv_rows(self.c_set, rows)
         else:
             self.kv_rows(self.c_set, [

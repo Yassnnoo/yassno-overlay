@@ -347,3 +347,35 @@ def load_stats(docs=None, tries=4):
         if st and (best is None or (st.get("km") or 0, mt) > (best.get("km") or 0, best["mtime"])):
             best = st
     return best
+
+
+# ---------------- аватарка Steam ----------------
+def steam_dirs():
+    out = []
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam") as k:
+            out.append(winreg.QueryValueEx(k, "SteamPath")[0].replace("/", "\\"))
+    except Exception:                              # noqa: BLE001 — не Windows или Steam не стоит
+        pass
+    for env in ("ProgramFiles(x86)", "ProgramFiles"):
+        if os.environ.get(env):
+            out.append(os.path.join(os.environ[env], "Steam"))
+    return [d for i, d in enumerate(out) if d and d not in out[:i] and os.path.isdir(d)]
+
+
+def steam_avatar(dirs=None):
+    """Путь к png-аватарке активного аккаунта Steam (из avatarcache) или None."""
+    for d in (dirs if dirs is not None else steam_dirs()):
+        try:
+            with open(os.path.join(d, "config", "loginusers.vdf"), encoding="utf-8", errors="replace") as f:
+                txt = f.read()
+        except OSError:
+            continue
+        users = re.findall(r'"(7656\d{13})"\s*\{(.*?)\n\s*\}', txt, re.S)
+        users.sort(key=lambda u: '"MostRecent"\t\t"1"' not in u[1] and not re.search(r'"MostRecent"\s+"1"', u[1]))
+        for sid, _ in users:
+            p = os.path.join(d, "config", "avatarcache", sid + ".png")
+            if os.path.isfile(p):
+                return p
+    return None

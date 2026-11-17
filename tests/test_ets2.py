@@ -448,6 +448,13 @@ class Ets2SaveTests(unittest.TestCase):
     def test_aes_vector_and_text_save(self):
         import tempfile
         import yassno_ets2_save as S
+        with tempfile.TemporaryDirectory() as sd:
+            os.makedirs(os.path.join(sd, "config", "avatarcache"))
+            with open(os.path.join(sd, "config", "loginusers.vdf"), "w") as f:
+                f.write('"users"\n{\n\t"76561198000000001"\n\t{\n\t\t"MostRecent"\t\t"0"\n\t}\n\t"76561198000000002"\n\t{\n\t\t"MostRecent"\t\t"1"\n\t}\n}\n')
+            for n in ("76561198000000001", "76561198000000002"):
+                open(os.path.join(sd, "config", "avatarcache", n + ".png"), "wb").write(b"x")
+            self.assertTrue(S.steam_avatar([sd]).endswith("76561198000000002.png"))
         key = bytes(range(32))
         ct = bytes.fromhex("8ea2b7ca516745bfeafc49904b496089")
         self.assertEqual(S.aes_cbc_decrypt(key, bytes(16), ct).hex(), "00112233445566778899aabbccddeeff")
