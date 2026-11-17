@@ -471,6 +471,27 @@ class TripLogTests(unittest.TestCase):
         self.assertEqual(tl.data["last_job"]["state"], "cancelled")
         self.assertEqual(tl.data["jobs_cancelled"], 1)
 
+    def test_sdk_delivery_events(self):
+        """С данными SDK рейс закрывается по смене выручки/штрафа, а не по эвристике: доход и повреждения берутся точные."""
+        import tempfile
+        tl = E.TripLog(os.path.join(tempfile.mkdtemp(), "s.json"))
+        base = {"sdk": True, "odo": 500.0, "cargo": "Дрова", "city_src": "A", "city_dst": "B", "cargo_mass": 20000.0, "income": 4000,
+                "cargo_damage": 0.0, "on_job": True, "route_km": 120.0, "deliv_revenue": 0, "cancel_penalty": 0, "deliv_km": 0.0,
+                "deliv_damage": 0.0, "deliv_xp": 0}
+        tl.feed(dict(base), 100.0)
+        tl.feed(dict(base, route_km=50.0), 110.0)
+        tl.feed(dict(base, on_job=False, route_km=50.0), 120.0)           # задание пропало далеко от цели, но выручка ещё не пришла
+        self.assertEqual(tl.data["last_job"]["state"], "active")
+        tl.feed(dict(base, on_job=False, route_km=50.0, deliv_revenue=4300, deliv_km=118.0, deliv_damage=0.02, deliv_xp=90), 121.0)
+        lj = tl.data["last_job"]
+        self.assertEqual(lj["state"], "delivered")                        # по SDK доставлен, хотя по эвристике «осталось 50 км» это была бы отмена
+        self.assertEqual((lj["income"], lj["km"], lj["xp"]), (4300, 118.0, 90))
+        self.assertEqual(tl.data["income_total"], 4300)
+        tl.feed(dict(base, cargo="Уголь", deliv_revenue=4300), 200.0)
+        tl.feed(dict(base, cargo="Уголь", on_job=False, deliv_revenue=4300, cancel_penalty=500), 210.0)
+        self.assertEqual(tl.data["last_job"]["state"], "cancelled")
+        self.assertEqual(tl.data["last_job"]["penalty"], 500)
+
 
 class LauncherEts2Bar(unittest.TestCase):
     def test_bar_like_other_games(self):

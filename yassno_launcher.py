@@ -67,7 +67,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.2.1"
+APP_VERSION = "3.3.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")

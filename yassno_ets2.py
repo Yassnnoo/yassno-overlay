@@ -197,6 +197,7 @@ class TripLog:
             pass
         self.odo = None
         self.cur = None
+        self.base = None
         self.last_save = 0.0
         self.dirty = False
 
@@ -224,6 +225,7 @@ class TripLog:
                 self.cur = {"key": key, "t0": now, "start_km": float(d.get("route_km") or 0.0)}
                 changed = True
             c = self.cur
+            c["end_t"] = None
             c["route_km"] = float(d.get("route_km") or 0.0)
             c["damage"] = float(d.get("cargo_damage") or 0.0)
             self.data["last_job"] = {"cargo": d.get("cargo", ""), "mass_t": float(d.get("cargo_mass") or 0.0) / 1000.0,
@@ -232,21 +234,51 @@ class TripLog:
                                      "km": round(c["start_km"], 1), "left_km": round(c["route_km"], 1),
                                      "damage": round(c["damage"], 4), "state": "active", "t": now, "t0": c["t0"]}
             self.dirty = True
-        elif self.cur is not None:
-            near = self.cur.get("route_km", 99.0) < 5.0                      # задание пропало рядом с целью — доставлено
-            self._finish("delivered" if near else "cancelled", now)
-            changed = True
+        elif self.cur is not None and self.cur.get("end_t") is None:
+            if "deliv_revenue" in d:
+                self.cur["end_t"] = now                                      # ждём из SDK значения доставки или штрафа (до 3 с)
+            else:
+                near = self.cur.get("route_km", 99.0) < 5.0                  # без данных SDK: пропало рядом с целью — доставлено
+                self._finish("delivered" if near else "cancelled", now)
+                changed = True
+        if "deliv_revenue" in d:
+            rev, pen = int(d.get("deliv_revenue") or 0), int(d.get("cancel_penalty") or 0)
+            if self.base is None:
+                self.base = (rev, pen)                                       # первый кадр — точка отсчёта, не событие
+            else:
+                ev = None
+                if rev != self.base[0] and rev > 0:
+                    ev = "delivered"
+                elif pen != self.base[1] and pen > 0:
+                    ev = "cancelled"
+                self.base = (rev, pen)
+                if ev and self.cur is not None:
+                    self._finish(ev, now, d)
+                    changed = True
+                elif self.cur is not None and self.cur.get("end_t") is not None and now - self.cur["end_t"] > 3.0:
+                    near = self.cur.get("route_km", 99.0) < 5.0
+                    self._finish("delivered" if near else "cancelled", now)
+                    changed = True
         if changed or (self.dirty and now - self.last_save > 10.0):
             return self.save(now)
         return False
 
-    def _finish(self, state, now):
+    def _finish(self, state, now, d=None):
         if self.cur is None:
             return
         lj = self.data.get("last_job")
         if lj and lj.get("state") == "active":
             lj["state"] = state if state != "interrupted" else "cancelled"
             lj["t"] = now
+            if d is not None:                                                # точные данные из SDK
+                if lj["state"] == "delivered":
+                    lj["income"] = int(d.get("deliv_revenue") or lj.get("income", 0))
+                    if float(d.get("deliv_km") or 0) > 0:
+                        lj["km"] = round(float(d["deliv_km"]), 1)
+                    lj["damage"] = round(float(d.get("deliv_damage") or 0.0), 4)
+                    lj["xp"] = int(d.get("deliv_xp") or 0)
+                else:
+                    lj["penalty"] = int(d.get("cancel_penalty") or 0)
             if lj["state"] == "delivered":
                 lj["left_km"] = 0.0
                 self.data["jobs_done"] = int(self.data.get("jobs_done", 0)) + 1
@@ -700,6 +732,11 @@ def parse_map(buf):
         "warn_oil": bool(b.oilPressureWarning), "warn_water": bool(b.waterTemperatureWarning), "warn_air": bool(b.airPressureWarning),
         "warn_batt": bool(b.batteryVoltageWarning), "warn_adblue": bool(b.adblueWarning), "gears": m.config_ui.gears,
         "plate": _txt(m.config_s.truckLicensePlate), "time": int(m.time),
+        # события рейса из SDK: значения остаются до следующей доставки, по их смене видно, что рейс завершился
+        "job_delivered": bool(m.special_b.jobDelivered), "job_cancelled": bool(m.special_b.jobCancelled),
+        "deliv_revenue": int(m.gameplay_ll.jobDeliveredRevenue), "deliv_km": float(m.gameplay_f.jobDeliveredDistanceKm),
+        "deliv_damage": float(m.gameplay_f.jobDeliveredCargoDamage), "deliv_xp": int(m.gameplay_i.jobDeliveredEarnedXp),
+        "cancel_penalty": int(m.gameplay_ll.jobCancelledPenalty),
     }
 
 
