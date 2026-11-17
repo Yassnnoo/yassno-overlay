@@ -26,6 +26,7 @@ import threading
 import time
 import traceback
 import urllib.request
+import weakref
 import webbrowser
 import tkinter as tk
 import tkinter.font as tkfont
@@ -66,7 +67,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "2.11.3"
+APP_VERSION = "2.12.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -509,11 +510,12 @@ RADAR_RANGES = [15, 20, 30, 40, 60, 80, 120]
 RESERVES = ["0", "0.5", "1", "2"]
 
 UI_THEMES = {
-    "dark": dict(BG="#0f131a", PANEL="#171c25", FIELD="#202733", FG="#e8ebf1", DIM="#8c97a8", ACCENT="#f2b705",
-                 BORDER="#252c39", ACTIVE="#242c3a", ACCENT_HI="#ffd24a", OFF="#3a4352", KNOB_OFF="#b4bcc9",
+    # 2.12: новая палитра — фон темнее и холоднее, меньше контраста у рамок, один акцент (цвет игры)
+    "dark": dict(BG="#0b0d12", PANEL="#12151c", FIELD="#1d222d", FG="#eceef2", DIM="#9aa3b2", ACCENT="#f2b705",
+                 BORDER="#1f2430", ACTIVE="#181c25", ACCENT_HI="#ffd24a", OFF="#2c3240", KNOB_OFF="#9aa3b2",
                  TILE_TEXT="#ffffff", ACCENT_FG="#111111"),
-    "light": dict(BG="#f2f4f8", PANEL="#e3e7ee", FIELD="#ffffff", FG="#1b2230", DIM="#5f6b7c", ACCENT="#e0a100",
-                  BORDER="#c3cad6", ACTIVE="#d4dae4", ACCENT_HI="#f2b705", OFF="#b8c0cd", KNOB_OFF="#ffffff",
+    "light": dict(BG="#f4f6f9", PANEL="#e9edf2", FIELD="#ffffff", FG="#12151c", DIM="#5b6474", ACCENT="#e0a100",
+                  BORDER="#d6dce5", ACTIVE="#dfe4eb", ACCENT_HI="#f2b705", OFF="#c5ccd6", KNOB_OFF="#ffffff",
                   TILE_TEXT="#ffffff", ACCENT_FG="#111111"),
 }
 UI_BG = UI_PANEL = UI_FIELD = UI_FG = UI_DIM = UI_ACCENT = UI_BORDER = UI_ACTIVE = UI_ACCENT_HI = ""
@@ -946,13 +948,14 @@ def setup_style(root):
     st.configure("TLabel", background=UI_BG, foreground=UI_FG)
     st.configure("Dim.TLabel", foreground=UI_DIM)
     st.configure("Head.TLabel", font=("Segoe UI Semibold", 11))
-    st.configure("Title.TLabel", font=("Segoe UI Semibold", 18))
+    st.configure("Title.TLabel", font=("Segoe UI Semibold", 20))
     st.configure("TLabelframe", background=UI_BG, bordercolor=UI_BORDER)
     st.configure("TLabelframe.Label", background=UI_BG, foreground=UI_ACCENT, font=("Segoe UI Semibold", 10))
     st.configure("TCheckbutton", background=UI_BG, foreground=UI_FG)
     st.map("TCheckbutton", background=[("active", UI_BG)])
-    st.configure("TButton", background=UI_PANEL, foreground=UI_FG, padding=(13, 7), borderwidth=1)
-    st.map("TButton", background=[("active", UI_ACTIVE)])
+    st.configure("TButton", background=UI_PANEL, foreground=UI_FG, padding=(14, 7), borderwidth=1, bordercolor=UI_BORDER,
+                 lightcolor=UI_PANEL, darkcolor=UI_PANEL, focuscolor=UI_PANEL)
+    st.map("TButton", background=[("active", UI_ACTIVE)], lightcolor=[("active", UI_ACTIVE)], darkcolor=[("active", UI_ACTIVE)])
     st.configure("TMenubutton", background=UI_PANEL, foreground=UI_FG, padding=(13, 7), borderwidth=1, arrowcolor=UI_FG)
     st.map("TMenubutton", background=[("active", UI_ACTIVE)])
     st.configure("TNotebook", background=UI_BG, borderwidth=0)
@@ -979,8 +982,14 @@ def setup_style(root):
 def style_accent(st):
     """Часть стилей ttk, которая зависит от акцентного цвета: вызывается и при плавной смене акцента под игру."""
     st.configure("TLabelframe.Label", foreground=UI_ACCENT)
-    st.configure("Accent.TButton", background=UI_ACCENT, foreground=UI_ACCENT_FG, font=("Segoe UI Semibold", 10))
-    st.map("Accent.TButton", background=[("active", UI_ACCENT_HI)])
+    st.configure("Accent.TButton", background=UI_ACCENT, foreground=UI_ACCENT_FG, font=("Segoe UI Semibold", 10),
+                 bordercolor=UI_ACCENT, lightcolor=UI_ACCENT, darkcolor=UI_ACCENT)
+    st.map("Accent.TButton", background=[("active", UI_ACCENT_HI)], bordercolor=[("active", UI_ACCENT_HI)],
+           lightcolor=[("active", UI_ACCENT_HI)], darkcolor=[("active", UI_ACCENT_HI)])
+    st.configure("Launch.TButton", background=UI_ACCENT, foreground=UI_ACCENT_FG, font=("Segoe UI Semibold", 11),
+                 padding=(18, 8), bordercolor=UI_ACCENT, lightcolor=UI_ACCENT, darkcolor=UI_ACCENT)
+    st.map("Launch.TButton", background=[("active", UI_ACCENT_HI)], bordercolor=[("active", UI_ACCENT_HI)],
+           lightcolor=[("active", UI_ACCENT_HI)], darkcolor=[("active", UI_ACCENT_HI)])
     st.configure("Horizontal.TScale", background=UI_ACCENT, troughcolor=UI_OFF, bordercolor=UI_BG,
                  lightcolor=UI_ACCENT, darkcolor=UI_ACCENT)
     st.map("Horizontal.TScale", background=[("active", UI_ACCENT_HI)])
@@ -1070,11 +1079,12 @@ def mix(c1, c2, t):
 # ---------------------------------------------------------------------------
 # игра: {тема: (акцент, акцент при наведении, текст на акценте)}
 GAME_ACCENTS = {
-    "lmu": {"dark": ("#e8382d", "#ff5a4e", "#ffffff"), "light": ("#cf2a20", "#e8382d", "#ffffff")},
+    "lmu": {"dark": ("#e5323f", "#ff5a64", "#ffffff"), "light": ("#cf2a20", "#e8382d", "#ffffff")},
     "rf2": {"dark": ("#dfe5ee", "#ffffff", "#111111"), "light": ("#3b4658", "#566379", "#ffffff")},
-    "iracing": {"dark": ("#3d8bff", "#6aa8ff", "#ffffff"), "light": ("#1f6fe5", "#3d8bff", "#ffffff")},
-    "ets2": {"dark": ("#ff9a1f", "#ffb857", "#111111"), "light": ("#dd7c00", "#ff9a1f", "#111111")},
+    "iracing": {"dark": ("#2563eb", "#4f86f7", "#ffffff"), "light": ("#1f5fd6", "#2563eb", "#ffffff")},
+    "ets2": {"dark": ("#f97316", "#fb923c", "#111111"), "light": ("#dd6a00", "#f97316", "#111111")},
 }
+ACCENT_DRAWN = weakref.WeakSet()                        # виджеты-холсты, которые рисуют акцент сами: draw() при его смене
 UI_ANIM = True                                          # «Анимации интерфейса» в настройках лаунчера
 ACCENT_BY_GAME = True                                   # «Цвет интерфейса под выбранную игру»
 _ACCENT_HIST = set()                                    # цвета акцента, уже разошедшиеся по виджетам (для перекраски)
@@ -1249,6 +1259,16 @@ def nav_hover(row, parts, lbl, on):
         pass
 
 
+def _nav_icon(row, sel):
+    """2.12: выбранный пункт левого меню — заливка и значок цвета акцента (без цветной полоски слева)."""
+    ic = getattr(row, "_icon", None)
+    if ic is not None:
+        try:
+            ic.config(fg=UI_ACCENT if sel else UI_DIM)
+        except tk.TclError:
+            pass
+
+
 def retint(root, colors, new, fg, visible_only=False):
     """Перекрашивает обычные (не ttk) виджеты: любой цвет из colors в перечисленных опциях заменяется на new.
     Поддеревья с _no_tint (предпросмотр оверлея, образцы цветов, плитки игр) не трогаем."""
@@ -1293,6 +1313,12 @@ def set_accent(root, a, h, f, final=True):
         retint(root, _ACCENT_HIST - {a.lower()}, a, f, visible_only=not final)
     except tk.TclError:
         return
+    for w in list(ACCENT_DRAWN):                       # нарисованные на холсте (тумблеры, логотип) перерисовываем сами
+        try:
+            if final or w.winfo_ismapped():
+                w.draw()
+        except tk.TclError:
+            pass
     if final:
         _ACCENT_HIST.clear()
 
@@ -2001,9 +2027,9 @@ class _SecInner(ttk.Frame):
 
 def section(parent, title):
     """Раздел настроек в скруглённой рамке с заголовком (страницы лаунчера, в одном стиле с карточками оверлея)."""
-    rb = RoundBox(parent, radius=10, fill=UI_BG, border=mix(UI_BORDER, UI_DIM, 0.35))
-    tk.Label(rb.inner, text=tr(title).upper(), bg=UI_BG, fg=UI_ACCENT, font=("Segoe UI Semibold", 10), anchor="w",
-             padx=12, pady=9).pack(fill="x")
+    rb = RoundBox(parent, radius=14, fill=UI_BG, border=mix(UI_BORDER, UI_DIM, 0.18))
+    tk.Label(rb.inner, text=tr(title), bg=UI_BG, fg=UI_FG, font=("Segoe UI Semibold", 11), anchor="w",
+             padx=12, pady=10).pack(fill="x")
     inner = _SecInner(rb.inner, padding=(8, 0, 6, 8))
     inner._outer = rb
     ttk.Frame.pack(inner, fill="x")
@@ -2194,8 +2220,8 @@ class StatusChip(tk.Canvas):
 
 
 class Toggle(tk.Frame):
-    """Переключатель-«пилюля»: зелёный с ползунком справа — включено, серый с ползунком слева — выключено."""
-    W, H = 34, 18
+    """Переключатель-«пилюля»: цвета акцента с ползунком справа — включено, серый с ползунком слева — выключено."""
+    W, H = 38, 22
 
     def __init__(self, parent, text, var, bg=None, command=None, font=("Segoe UI", 10)):
         bg = bg or UI_BG
@@ -2209,6 +2235,7 @@ class Toggle(tk.Frame):
             w.bind("<Button-1>", self.flip)
         self._tid = var.trace_add("write", lambda *a: self.on_var())
         self.bind("<Destroy>", self.on_destroy)
+        ACCENT_DRAWN.add(self)
         try:
             self.pos = 1.0 if var.get() else 0.0             # положение ползунка: 0 — выключено, 1 — включено
         except tk.TclError:
@@ -2251,12 +2278,12 @@ class Toggle(tk.Frame):
             c, W, H = self.cv, self.W, self.H
             c.delete("all")
             r = H / 2
-            col = mix(UI_OFF, UI_GREEN_DK, pos)
+            col = mix(UI_OFF, UI_ACCENT, pos)
             c.create_oval(1, 1, H - 1, H - 1, fill=col, outline=col)
             c.create_oval(W - H + 1, 1, W - 1, H - 1, fill=col, outline=col)
             c.create_rectangle(r, 1, W - r, H - 1, fill=col, outline=col)
             kx = r + (W - 2 * r) * pos
-            c.create_oval(kx - r + 3, 3, kx + r - 3, H - 3, fill=mix(UI_KNOB_OFF, "#ffffff", pos), outline="")
+            c.create_oval(kx - r + 4, 4, kx + r - 4, H - 4, fill=mix(UI_KNOB_OFF, UI_ACCENT_FG, pos), outline="")
             self.lbl.config(fg=UI_FG if on else UI_DIM)
         except tk.TclError:
             pass
@@ -2437,7 +2464,7 @@ class Ets2Page(ttk.Frame):
             row.pack(fill="x")
             strip = tk.Frame(row, bg=UI_PANEL, width=4)
             strip.pack(side="left", fill="y")
-            ic = tk.Label(row, text=icon, bg=UI_PANEL, fg=UI_ACCENT, font=("Segoe UI Symbol", 12), width=2, anchor="center", cursor="hand2")
+            ic = tk.Label(row, text=icon, bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI Symbol", 12), width=2, anchor="center", cursor="hand2")
             ic.pack(side="left", padx=(10, 0))
             row._icon = ic
             lbl = tk.Label(row, text=tr(text), bg=UI_PANEL, fg=UI_FG, font=("Segoe UI", 11), anchor="w", padx=8, pady=rpad)
@@ -2456,7 +2483,7 @@ class Ets2Page(ttk.Frame):
         titles = dict(self.PAGES)
         for gname, keys in self.GROUPS:
             if gname:
-                tk.Label(mid, text=tr(gname).upper(), bg=UI_PANEL, fg=UI_ACCENT, font=("Segoe UI Semibold", 11), anchor="w", padx=14, pady=3).pack(fill="x")
+                tk.Label(mid, text=tr(gname).upper(), bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI Semibold", 9), anchor="w", padx=14, pady=6).pack(fill="x")
             for k in keys:
                 self.rows_ui[k] = make_row(titles[k], lambda k=k: self.open_page(k), icon=self.ICONS.get(k, "•"))
         tk.Frame(prog, bg=UI_BORDER, height=1).pack(fill="x", padx=14, pady=(6, 0))
@@ -2473,7 +2500,7 @@ class Ets2Page(ttk.Frame):
             bg = UI_FIELD if sel else UI_PANEL
             for w in (row, lbl, dot, row._icon):
                 w.config(bg=bg)
-            strip.config(bg=UI_ACCENT if sel else UI_PANEL)
+            _nav_icon(row, sel)
 
     # ---- страницы ----
     def open_page(self, key):
@@ -2498,9 +2525,9 @@ class Ets2Page(ttk.Frame):
         slide_in(self.scroll, self._swin, self.title)
 
     def card(self, title):
-        wrap = RoundBox(self.settings, radius=14, fill=UI_BG, border=mix(UI_BORDER, UI_DIM, 0.35))
+        wrap = RoundBox(self.settings, radius=14, fill=UI_BG, border=mix(UI_BORDER, UI_DIM, 0.18))
         wrap.pack(fill="x", pady=(0, 10))
-        tk.Label(wrap.inner, text=tr(title).upper(), bg=UI_BG, fg=UI_ACCENT, font=("Segoe UI Semibold", 10), anchor="w", padx=14, pady=10).pack(fill="x")
+        tk.Label(wrap.inner, text=tr(title), bg=UI_BG, fg=UI_FG, font=("Segoe UI Semibold", 11), anchor="w", padx=14, pady=10).pack(fill="x")
         f = tk.Frame(wrap.inner, bg=UI_BG)
         f.pack(fill="x", padx=14, pady=(0, 12))
         return f
@@ -3176,82 +3203,85 @@ class Ets2Page(ttk.Frame):
             self.start(False)
 
 
-class GameTile(tk.Frame):
-    """Плитка выбора: все одного размера. У игр — логотип: серый, пока игра не выбрана, и цветной у выбранной."""
-    W, H = 172, 50
-    BLUE, BLUE_HI = "#1d4f9c", "#2f6fd0"
+class GameTile(tk.Canvas):
+    """2.12: переключатель игр в шапке — тёмная «пилюля» с названием и точкой: у выбранной игры точка цвета её акцента,
+    у запущенной — зелёная. Логотипы-картинки на белом больше не используются."""
+    H = 36
 
-    def __init__(self, parent, text, command, blue=False, static=False, game=None):
-        super().__init__(parent, bg=UI_PANEL, cursor="hand2", highlightthickness=2, highlightbackground=UI_BORDER,
-                         width=self.W, height=self.H)
-        self.pack_propagate(False)
-        self.text, self.command, self.blue = text, command, blue
-        self.game, self.static, self.selected = game, static, False
+    def __init__(self, parent, text, command, blue=False, static=False, game=None, bg=None):
+        self.font = tkfont.Font(family="Segoe UI Semibold", size=10)
+        self.text, self.command, self.game, self.static = text, command, game, static
+        self.selected = self.running = self.hot = False
+        self.bgc = bg or UI_PANEL
+        w = self.font.measure(tr(text)) + 44
+        super().__init__(parent, width=w, height=self.H, bg=self.bgc, highlightthickness=0, borderwidth=0,
+                         cursor="arrow" if static else "hand2")
         self._no_tint = True                                # цвета плитки ведёт сама плитка
-        cur = "arrow" if static else "hand2"
-        self.config(cursor=cur)
-        self.imgs = {}
-        for st in ("on", "off"):
-            fp = os.path.join(HERE, "logos", f"tile_{game}_{st}.png") if game else ""
-            try:
-                self.imgs[st] = tk.PhotoImage(file=fp) if fp and os.path.isfile(fp) else None
-            except tk.TclError:
-                self.imgs[st] = None
-        self.lbl = tk.Label(self, text=text, bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI Semibold", 11), cursor=cur, bd=0)
-        self.lbl.pack(expand=True, fill="both")
-        self.sub = tk.Label(self, text="", bg=UI_PANEL, fg=UI_GREEN, font=("Segoe UI", 8, "bold"), cursor=cur, bd=0)
         if not static:
-            for w in (self, self.lbl, self.sub):
-                w.bind("<Button-1>", lambda e: self.command())
-                w.bind("<Enter>", lambda e: self.hover(True), add="+")
-                w.bind("<Leave>", lambda e: self.hover(False), add="+")
-        self.set_state(False, False)
+            self.bind("<Button-1>", lambda e: self.command())
+            self.bind("<Enter>", lambda e: self.hover(True))
+            self.bind("<Leave>", lambda e: self.hover(False))
+        self.draw()
 
     def accent(self):
         return accent_for(self.game, ACCENT_BY_GAME)[0]
 
-    def rest_edge(self):
-        """Цвет рамки в покое: у выбранной плитки — акцент её игры."""
-        if self.selected:
-            return self.accent()
-        return self.BLUE_HI if (self.blue and not self.imgs.get("on")) else UI_BORDER
-
     def hover(self, on):
-        """Под мышью рамка невыбранной плитки плавно загорается цветом игры."""
-        if self.selected or self.static:
+        if self.static:
             return
+        self.hot = bool(on)
+        self.draw()
+
+    def set_state(self, selected, running):
+        self.selected, self.running = bool(selected), bool(running)
+        self.draw()
+
+    def draw(self):
         try:
-            c0 = str(self.cget("highlightbackground")).lower()
-            to = mix(UI_BORDER, self.accent(), 0.8) if on else self.rest_edge()
-            if not valid_hex(c0):
-                c0 = UI_BORDER
-            animate(self, "edge", 130, lambda p: self.config(highlightbackground=mix(c0, to, p)))
+            self.delete("all")
+            w, H = int(self.cget("width")), self.H
+            if self.selected:
+                fill, fg = mix(UI_FIELD, UI_FG, 0.05), UI_FG
+            elif self.hot:
+                fill, fg = UI_ACTIVE, UI_FG
+            else:
+                fill, fg = self.bgc, UI_DIM
+            r, x0, y0, x1, y1 = 9, 1, 1, w - 2, H - 2
+            pts = [x0 + r, y0, x1 - r, y0, x1, y0, x1, y0 + r, x1, y1 - r, x1, y1, x1 - r, y1, x0 + r, y1,
+                   x0, y1, x0, y1 - r, x0, y0 + r, x0, y0]
+            self.create_polygon(pts, smooth=True, fill=fill, outline=fill)
+            dot = UI_GREEN if self.running else (self.accent() if self.selected else UI_OFF)
+            cy = H / 2
+            self.create_oval(14, cy - 4, 22, cy + 4, fill=dot, outline="")
+            self.create_text(30, cy, text=tr(self.text), anchor="w", font=self.font, fill=fg)
         except tk.TclError:
             pass
 
-    def set_state(self, selected, running):
-        self.selected = bool(selected)
-        animate(self, "edge", 0, lambda p: None)            # гасим недоигранную подсветку
-        if self.imgs.get("on"):
-            img = self.imgs["on" if selected else "off"]
-            edge = self.accent() if selected else UI_BORDER
-            self.config(bg="#ffffff", highlightbackground=edge)
-            self.lbl.config(image=img, text="", bg="#ffffff")
-            self.sub.config(text=tr("● запущена") if running else "", bg="#ffffff", fg="#1a9a4a")
-            if running:
-                self.sub.place(relx=1.0, rely=0.0, anchor="ne", x=-4, y=1)
-            else:
-                self.sub.place_forget()
-            return
-        if selected:
-            bg, edge, fg = UI_PANEL, self.accent(), "#ffffff"
-        elif self.blue:
-            bg, edge, fg = self.BLUE, self.BLUE_HI, "#ffffff"
-        else:
-            bg, edge, fg = UI_PANEL, UI_BORDER, UI_DIM
-        self.config(bg=bg, highlightbackground=edge)
-        self.lbl.config(text=self.text, bg=bg, fg=fg, image="")
-        self.sub.config(text=tr("● запущена") if running else "", bg=bg, fg=UI_GREEN)
+
+class Brand(tk.Frame):
+    """Логотип в шапке: квадрат цвета акцента с «Y», название и версия."""
+
+    def __init__(self, parent, bg=None):
+        bg = bg or UI_BG
+        super().__init__(parent, bg=bg)
+        self.cv = tk.Canvas(self, width=30, height=30, bg=bg, highlightthickness=0, borderwidth=0)
+        self.cv.pack(side="left")
+        col = tk.Frame(self, bg=bg)
+        col.pack(side="left", padx=(10, 0))
+        tk.Label(col, text="Yassno", bg=bg, fg=UI_FG, font=("Segoe UI Semibold", 12), anchor="w", bd=0).pack(anchor="w")
+        tk.Label(col, text="Overlay " + APP_VERSION, bg=bg, fg=UI_DIM, font=("Segoe UI", 8), anchor="w", bd=0).pack(anchor="w")
+        ACCENT_DRAWN.add(self)
+        self.draw()
+
+    def draw(self):
+        try:
+            c = self.cv
+            c.delete("all")
+            pts = [8, 0, 22, 0, 30, 0, 30, 8, 30, 22, 30, 30, 22, 30, 8, 30, 0, 30, 0, 22, 0, 8, 0, 0]
+            c.create_polygon(pts, smooth=True, fill=UI_ACCENT, outline=UI_ACCENT)
+            c.create_text(15, 15, text="Y", font=("Segoe UI", 13, "bold"), fill=UI_ACCENT_FG)
+        except tk.TclError:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -3554,7 +3584,7 @@ class ProfilePanel(ttk.Frame):
             row.pack(fill="x")
             strip = tk.Frame(row, bg=UI_PANEL, width=4)
             strip.pack(side="left", fill="y")
-            ic = tk.Label(row, text=icon, bg=UI_PANEL, fg=UI_ACCENT, font=("Segoe UI Symbol", 12), width=2, anchor="center",
+            ic = tk.Label(row, text=icon, bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI Symbol", 12), width=2, anchor="center",
                           cursor="hand2")
             ic.pack(side="left", padx=(10, 0))
             row._icon = ic
@@ -3579,7 +3609,7 @@ class ProfilePanel(ttk.Frame):
             if not ks:
                 continue
             if gname:
-                hd = tk.Label(inner, text=tr(gname).upper(), bg=UI_PANEL, fg=UI_ACCENT, font=("Segoe UI Semibold", 11), anchor="w", padx=14, pady=3)
+                hd = tk.Label(inner, text=tr(gname).upper(), bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI Semibold", 9), anchor="w", padx=14, pady=6)
                 self._navitems.append((None, gname, hd))
             for key in ks:
                 self.rows_ui[key] = make_row(titles[key], lambda k=key: self.open_page(k), icon=NAV_ICONS.get(key, "•"))
@@ -3706,13 +3736,13 @@ class ProfilePanel(ttk.Frame):
             bg = UI_FIELD if sel else UI_PANEL
             for w in (row, lbl, dot, getattr(row, "_icon", row)):
                 w.config(bg=bg)
-            strip.config(bg=UI_ACCENT if sel else UI_PANEL)
+            _nav_icon(row, sel)
         for k, (row, lbl, dot, strip) in self.extra_ui.items():
             sel = view == k
             bg = UI_FIELD if sel else UI_PANEL
             for w in (row, lbl, dot, getattr(row, "_icon", row)):
                 w.config(bg=bg)
-            strip.config(bg=UI_ACCENT if sel else UI_PANEL)
+            _nav_icon(row, sel)
 
     def show_page(self, key):
         self.page = key
@@ -3721,7 +3751,7 @@ class ProfilePanel(ttk.Frame):
             bg = UI_FIELD if sel else UI_PANEL
             for w in (row, lbl, dot, getattr(row, "_icon", row)):
                 w.config(bg=bg)
-            strip.config(bg=UI_ACCENT if sel else UI_PANEL)
+            _nav_icon(row, sel)
         self.mark_view(self.game)
         self.canvas.config(height=190 if key == "apps" else self.gen_h() if key == "general" else self.PH)
         self.scroll.yview_moveto(0)
@@ -3776,11 +3806,11 @@ class ProfilePanel(ttk.Frame):
 
     def card(self, title, side):
         """Раздел настроек под спойлером: заголовок со знаком +/−, внутри — сетка элементов."""
-        wrap = RoundBox(side, radius=14, fill=UI_BG, border=mix(UI_BORDER, UI_DIM, 0.35))
+        wrap = RoundBox(side, radius=14, fill=UI_BG, border=mix(UI_BORDER, UI_DIM, 0.18))
         wrap.pack(fill="x", pady=(0, 10))
         hdr = tk.Frame(wrap.inner, bg=UI_BG, cursor="hand2")
         hdr.pack(fill="x", padx=2, pady=(2, 0))
-        lb = tk.Label(hdr, text=tr(title).upper(), bg=UI_BG, fg=UI_FG, font=("Segoe UI Semibold", 10), anchor="w",
+        lb = tk.Label(hdr, text=tr(title), bg=UI_BG, fg=UI_FG, font=("Segoe UI Semibold", 11), anchor="w",
                       padx=14, pady=11, cursor="hand2")
         lb.pack(side="left", fill="x", expand=True)
         sign = tk.Label(hdr, text="▸", bg=UI_BG, fg=UI_DIM, font=("Segoe UI", 11), padx=12, cursor="hand2")
@@ -3802,7 +3832,7 @@ class ProfilePanel(ttk.Frame):
     def apply_card(self, c):
         on = self._open.get(c["key"], False)
         c["sign"].config(text="▾" if on else "▸", fg=UI_ACCENT if on else UI_DIM)
-        c["lb"].config(fg=UI_ACCENT if on else UI_FG)
+        c["lb"].config(fg=UI_FG)
         self.sync_open_btn()
         if on:
             c["body"].pack(fill="x", padx=2, pady=(0, 2))
@@ -8257,35 +8287,38 @@ class App:
             w.destroy()
         setup_style(self.root)
         self.panels = {}
-        tiles = ttk.Frame(self.root, padding=(14, 10, 14, 0))
+        tiles = ttk.Frame(self.root, padding=(16, 12, 16, 0))
         tiles.pack(fill="x")
-        lead = GameTile(tiles, tr("ИГРА"), lambda: None, blue=True, static=True)
-        lead.pack(side="left", padx=(0, 8), anchor="s")
+        lead = Brand(tiles)
+        lead.pack(side="left", padx=(0, 22))
         self.tiles = {}
 
-        def _fit_tiles(e=None, st={"on": True}):             # на узком окне синяя плитка «ИГРА» убирается — остальным хватает места
-            need = 1340
+        def _fit_tiles(e=None, st={"on": True}):             # на узком окне логотип убирается — переключателю игр хватает места
+            need = 1180
             if e is not None and e.widget is tiles:
                 want = e.width >= need
                 if want != st["on"]:
                     st["on"] = want
                     if want:
-                        lead.pack(side="left", padx=(0, 8), anchor="s", before=tiles.pack_slaves()[0])
+                        lead.pack(side="left", padx=(0, 22), before=tiles.pack_slaves()[0])
                     else:
                         lead.pack_forget()
         tiles.bind("<Configure>", _fit_tiles)
+        seg = RoundBox(tiles, radius=12, fill=UI_PANEL, border=UI_BORDER, outer=UI_BG, m=0)
+        seg.pack(side="left")
+        segi = seg.inner
         for game, name in GAMES.items():
-            t = GameTile(tiles, name, lambda g=game: self.select_game(g), game=game)
-            t.pack(side="left", padx=(0, 8), anchor="s")
+            t = GameTile(segi, name, lambda g=game: self.select_game(g), game=game)
+            t.pack(side="left", padx=(0, 2))
             self.tiles[game] = t
-        t = GameTile(tiles, "Assetto Corsa", self.show_ac, game="ac")
-        t.pack(side="left", padx=(0, 8), anchor="s")
+        t = GameTile(segi, "Assetto Corsa", self.show_ac, game="ac")
+        t.pack(side="left", padx=(0, 2))
         self.tiles["ac"] = t
         if ETS2 is not None:
-            t = GameTile(tiles, "Euro Truck Simulator 2", self.show_ets2, game="ets2")
-            t.pack(side="left", padx=(0, 8), anchor="s")
+            t = GameTile(segi, "ETS 2", self.show_ets2, game="ets2")
+            t.pack(side="left")
             self.tiles["ets2"] = t
-        ttk.Button(tiles, text="▶ Запустить игру", style="Accent.TButton", command=lambda: self.launch_game()).pack(side="right", anchor="s", padx=(0, 10), pady=(0, 2))
+        ttk.Button(tiles, text="▶  Запустить игру", style="Launch.TButton", command=lambda: self.launch_game()).pack(side="right")
 
         head = ttk.Frame(self.root, padding=(14, 8, 14, 2))
         head.pack(fill="x")
