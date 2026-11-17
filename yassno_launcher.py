@@ -71,7 +71,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.4.0"
+APP_VERSION = "3.4.1"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -8747,6 +8747,37 @@ class HomePage(tk.Frame):
     def ets2_stats(self):
         return read_json(os.path.join(LOGS, "ets2-stats.json")) or {}
 
+    def currency(self):
+        return (read_json(os.path.join(LOGS, "ets2-ui.json")) or {}).get("currency", "eur")
+
+    def toggle_currency(self):
+        new = "eur" if self.currency() == "rub" else "rub"
+        write_json(os.path.join(LOGS, "ets2-ui.json"), {"currency": new})
+        if new == "rub":
+            self.eur_rate()
+        self.fill_ets2()
+
+    def eur_rate(self):
+        """Курс ЦБ РФ (₽ за 1 €): из кэша, обновляется в фоне раз в 6 часов. None — пока курса нет."""
+        path = os.path.join(LOGS, "eur-rate.json")
+        c = read_json(path) or {}
+        if time.time() - float(c.get("t") or 0) > 6 * 3600 and not getattr(self, "_rate_busy", False):
+            self._rate_busy = True
+
+            def work():
+                try:
+                    j = json.loads(http_get("https://www.cbr-xml-daily.ru/daily_json.js", 10).decode("utf-8"))
+                    e = j["Valute"]["EUR"]
+                    write_json(path, {"rate": float(e["Value"]) / float(e.get("Nominal") or 1), "t": time.time()})
+                    self._sv_new = True
+                except Exception as ex:                       # noqa: BLE001
+                    log_error(f"курс евро: {ex}")
+                    write_json(path, dict(c, t=time.time() - 5 * 3600))     # повтор через час
+                self._rate_busy = False
+            threading.Thread(target=work, daemon=True).start()
+            self.after(500, self._sv_poll)
+        return float(c["rate"]) if c.get("rate") else None
+
     def ets2_save_stats(self):
         """Статистика профиля из сохранений игры (расшифровка ~0,4 с — в фоне, результат кэшируется на минуту)."""
         if ETS2SAVE is None:
@@ -8779,12 +8810,19 @@ class HomePage(tk.Frame):
 
     @staticmethod
     def kv_rows(body, rows):
-        for cap, val in rows:
+        for row in rows:
+            cap, val = row[0], row[1]
+            click = row[2] if len(row) > 2 else None
             r = tk.Frame(body, bg=UI_PANEL)
             r.pack(fill="x")
             tk.Label(r, text=tr(cap), bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 10), pady=7).pack(side="left")
-            tk.Label(r, text=val or "—", bg=UI_PANEL, fg=UI_FG, font=("Segoe UI Semibold", 10), anchor="e", justify="right",
-                     wraplength=210).pack(side="right")
+            lb = tk.Label(r, text=val or "—", bg=UI_PANEL, fg=UI_FG, font=("Segoe UI Semibold", 10), anchor="e", justify="right",
+                          wraplength=210)
+            lb.pack(side="right")
+            if click:
+                for w in (r, lb):
+                    w.configure(cursor="hand2")
+                    w.bind("<Button-1>", lambda e, f=click: f())
             tk.Frame(body, bg=UI_BORDER, height=1).pack(fill="x")
 
     def fill_ac(self):
@@ -8825,8 +8863,10 @@ class HomePage(tk.Frame):
         mine = f"{km_total:,.0f} км · {int(st.get('jobs_done') or 0)} рейс.".replace(",", " ")
         if sv:
             fmt = lambda n: f"{int(n):,}".replace(",", " ")
+            rate = self.eur_rate() if self.currency() == "rub" else None
+            money = (lambda n: f"{fmt(n * rate)} ₽") if rate else (lambda n: f"{fmt(n)} €")
             rows = [("Всего за рулём", f"{fmt(sv.get('km') or 0)} км"),
-                    ("Баланс", f"{fmt(sv.get('money') or 0)} €" + (f" · кредиты {fmt(sv['debt'])} €" if sv.get("debt") else "")),
+                    ("Баланс (нажми — € / ₽)", money(sv.get('money') or 0) + (f" · кредиты {money(sv['debt'])}" if sv.get("debt") else ""), self.toggle_currency),
                     ("Опыт", f"{fmt(sv.get('xp') or 0)} XP"),
                     ("Городов посещено", str(sv.get("cities") or 0)),
                     ("Отменено рейсов", str(sv.get("cancelled") if sv.get("cancelled") is not None else int(st.get("jobs_cancelled") or 0))),

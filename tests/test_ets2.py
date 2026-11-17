@@ -676,6 +676,11 @@ class LauncherLook(unittest.TestCase):
                 self.assertIn("65 810 км", txt)
                 self.assertIn("462 061 €", txt)
                 self.assertIn("старая копия", txt)
+                hp.currency, hp.eur_rate = (lambda: "rub"), (lambda: 100.0)
+                hp.fill_ets2()
+                txt = " ".join(w.cget("text") for r in hp.c_set.winfo_children() for w in r.winfo_children() if w.winfo_class() == "Label")
+                self.assertIn("46 206 100 ₽", txt)
+                del hp.currency, hp.eur_rate
             app.pick_game("lmu")
             app.root.update()
             self.assertEqual(app.home_page.sel(), "lmu")
