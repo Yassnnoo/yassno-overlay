@@ -67,7 +67,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "2.13.0"
+APP_VERSION = "2.14.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -958,6 +958,10 @@ def setup_style(root):
     st.map("TButton", background=[("active", UI_ACTIVE)], lightcolor=[("active", UI_ACTIVE)], darkcolor=[("active", UI_ACTIVE)])
     st.configure("TMenubutton", background=UI_PANEL, foreground=UI_FG, padding=(13, 7), borderwidth=1, arrowcolor=UI_FG)
     st.map("TMenubutton", background=[("active", UI_ACTIVE)])
+    for sb in ("Vertical.TScrollbar", "Horizontal.TScrollbar"):            # 2.14: тихие полосы прокрутки
+        st.configure(sb, background=UI_FIELD, troughcolor=UI_PANEL, bordercolor=UI_PANEL, lightcolor=UI_FIELD,
+                     darkcolor=UI_FIELD, arrowcolor=UI_DIM, gripcount=0)
+        st.map(sb, background=[("active", UI_OFF), ("pressed", UI_OFF)], lightcolor=[("active", UI_OFF)], darkcolor=[("active", UI_OFF)])
     st.configure("TNotebook", background=UI_BG, borderwidth=0)
     st.configure("TNotebook.Tab", background=UI_PANEL, foreground=UI_DIM, padding=(18, 8), font=("Segoe UI Semibold", 10))
     st.map("TNotebook.Tab", background=[("selected", UI_FIELD)], foreground=[("selected", UI_FG)])
@@ -1474,7 +1478,7 @@ EN.update({
     "Устанавливаю…": "Installing…", "Не удалось открыть": "Could not open", "Настройки лаунчера": "Launcher settings",
     "Сам определять игру и запускать оверлей с её профилем": "Detect the game and start the overlay with its profile",
     "Лаунчер не запустился": "The launcher failed to start", "ПАНЕЛИ ОВЕРЛЕЯ": "OVERLAY PANELS", "Сохранить": "Save",
-    "Сохранить и перезапустить оверлей": "Save and restart the overlay", "Не сохранено": "Not saved", "Всё сохранено": "All saved", "Двигать окна": "Move windows",
+    "Сохранить и перезапустить оверлей": "Save and restart the overlay", "Не сохранено": "Not saved", "Поиск панели": "Find a panel", "Всё сохранено": "All saved", "Двигать окна": "Move windows",
     "✔ Окна двигаются — закрепить": "✔ Windows movable — lock", "Тени у карточек (со следующего запуска лаунчера)": "Card shadows (from the next launcher start)", "Сбросить положение окон": "Reset window positions",
     "Режим перемещения окон": "Window move mode", "Демо без игры": "Demo without the game", "Журнал": "Log",
     "Все панели оверлея сразу. Клик по панели в предпросмотре включает или выключает её. Шрифт и цвета общие для всего оверлея.":
@@ -2240,6 +2244,85 @@ class Intro:
             cv.create_text(cx, ty + 98, text="v" + APP_VERSION, font=self.f3, fill=mix(UI_BG, UI_DIM, q))
 
 
+class NavSwitch(tk.Canvas):
+    """2.14: индикатор в левом меню — маленький тумблер вместо точки. Понимает тот же config, что и прежняя метка:
+    text="●" — включено (цвет акцента), "○" — выключено, "" — пусто; bg — фон строки."""
+    W, H = 26, 16
+
+    def __init__(self, parent, text="", bg=None, **kw):
+        self._txt = text
+        super().__init__(parent, width=self.W + 12, height=self.H, bg=bg or UI_PANEL, highlightthickness=0, borderwidth=0)
+        ACCENT_DRAWN.add(self)
+        self.draw()
+
+    def configure(self, cnf=None, **kw):
+        if cnf is None and not kw:
+            return super().configure()
+        kw = dict(cnf or {}, **kw)
+        redraw = "text" in kw or "bg" in kw or "background" in kw
+        if "text" in kw:
+            self._txt = kw.pop("text")
+        for k in ("fg", "foreground", "font", "padx", "pady"):
+            kw.pop(k, None)
+        if kw:
+            super().configure(**kw)
+        if redraw:
+            self.draw()
+
+    config = configure
+
+    def cget(self, key):
+        return self._txt if key == "text" else super().cget(key)
+
+    def draw(self):
+        try:
+            self.delete("all")
+            want = self.W + 12 if self._txt in ("●", "○") else 6
+            if int(super().cget("width")) != want:
+                super().configure(width=want)
+            if self._txt not in ("●", "○"):
+                return
+            on = self._txt == "●"
+            bg = str(super().cget("bg"))
+            col = UI_ACCENT if on else UI_OFF
+            W, H, x0 = self.W, self.H, 4
+            r = H / 2
+            self.create_oval(x0, 0, x0 + H, H, fill=col, outline=col)
+            self.create_oval(x0 + W - H, 0, x0 + W, H, fill=col, outline=col)
+            self.create_rectangle(x0 + r, 0, x0 + W - r, H, fill=col, outline=col)
+            kx = x0 + (W - r if on else r)
+            knob = UI_ACCENT_FG if on else (UI_KNOB_OFF if valid_hex(bg) else "#9aa3b2")
+            self.create_oval(kx - r + 3, 3, kx + r - 3, H - 3, fill=knob, outline="")
+        except tk.TclError:
+            pass
+
+
+def nav_search(parent, var, bg):
+    """2.14: поле поиска в левом меню — значок лупы и подсказка, пока поле пустое."""
+    box = tk.Frame(parent, bg=UI_FIELD, highlightthickness=1, highlightbackground=UI_BORDER, highlightcolor=UI_BORDER)
+    tk.Label(box, text="⌕", bg=UI_FIELD, fg=UI_DIM, font=("Segoe UI Symbol", 12), bd=0).pack(side="left", padx=(8, 2))
+    e = tk.Entry(box, textvariable=var, bg=UI_FIELD, fg=UI_FG, insertbackground=UI_FG, relief="flat", highlightthickness=0,
+                 font=("Segoe UI", 10), bd=0)
+    e.pack(side="left", fill="x", expand=True, ipady=5, padx=(2, 8))
+    ph = tk.Label(box, text=tr("Поиск панели"), bg=UI_FIELD, fg=UI_DIM, font=("Segoe UI", 10), bd=0, cursor="xterm")
+    ph.bind("<Button-1>", lambda ev: e.focus_set())
+
+    def sync(*a):
+        try:
+            if var.get() or e == e.focus_get():
+                ph.place_forget()
+            else:
+                ph.place(in_=e, x=1, rely=0.5, anchor="w")
+        except (tk.TclError, KeyError):
+            pass
+    var.trace_add("write", sync)
+    e.bind("<FocusIn>", sync, add="+")
+    e.bind("<FocusOut>", sync, add="+")
+    e.bind("<Escape>", lambda ev: var.set(""), add="+")
+    box.after_idle(sync)
+    return box, e
+
+
 class StatusChip(tk.Canvas):
     """Чип статуса в шапке: скруглённая плашка с точкой и текстом. Состояния: on — зелёный, wait — жёлтый
     (оба с пульсирующей точкой), off — серый."""
@@ -2524,9 +2607,9 @@ class Ets2Page(ttk.Frame):
 
     # ---- левый список ----
     def build_nav(self):
-        nav = self.nav = tk.Frame(self.app.navhost, bg=UI_PANEL, width=248)
+        nav = self.nav = tk.Frame(self.app.navhost, bg=UI_PANEL, width=268)
         nav.pack_propagate(False)
-        tk.Label(nav, text="ПАНЕЛИ ОВЕРЛЕЯ", bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI Semibold", 9), anchor="w").pack(fill="x", padx=14, pady=(12, 4))
+        tk.Label(nav, text="ПАНЕЛИ ОВЕРЛЕЯ", bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI Semibold", 9), anchor="w").pack(fill="x", padx=20, pady=(12, 4))
         prog = tk.Frame(nav, bg=UI_PANEL)
         prog.pack(side="bottom", fill="x", pady=(0, 6))
         mid = tk.Frame(nav, bg=UI_PANEL)
@@ -2535,16 +2618,16 @@ class Ets2Page(ttk.Frame):
 
         def make_row(text, cmd, dot=True, parent=None, icon=""):
             row = tk.Frame(parent or mid, bg=UI_PANEL, cursor="hand2")
-            row.pack(fill="x")
-            strip = tk.Frame(row, bg=UI_PANEL, width=4)
+            row.pack(fill="x", padx=8)
+            strip = tk.Frame(row, bg=UI_PANEL, width=2)
             strip.pack(side="left", fill="y")
             ic = tk.Label(row, text=icon, bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI Symbol", 12), width=2, anchor="center", cursor="hand2")
             ic.pack(side="left", padx=(10, 0))
             row._icon = ic
+            d = NavSwitch(row, text="", bg=UI_PANEL)
+            d.pack(side="right")
             lbl = tk.Label(row, text=tr(text), bg=UI_PANEL, fg=UI_FG, font=("Segoe UI", 11), anchor="w", padx=8, pady=rpad)
             lbl.pack(side="left", fill="x", expand=True)
-            d = tk.Label(row, text="", bg=UI_PANEL, fg=UI_GREEN, font=("Segoe UI", 9), padx=10)
-            d.pack(side="right")
             for w in (row, lbl, d, strip, ic):
                 w.bind("<Button-1>", lambda e: cmd())
 
@@ -2557,11 +2640,11 @@ class Ets2Page(ttk.Frame):
         titles = dict(self.PAGES)
         for gname, keys in self.GROUPS:
             if gname:
-                tk.Label(mid, text=tr(gname).upper(), bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI Semibold", 9), anchor="w", padx=14, pady=6).pack(fill="x")
+                tk.Label(mid, text=tr(gname).upper(), bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI Semibold", 9), anchor="w", padx=20, pady=6).pack(fill="x")
             for k in keys:
                 self.rows_ui[k] = make_row(titles[k], lambda k=k: self.open_page(k), icon=self.ICONS.get(k, "•"))
         tk.Frame(prog, bg=UI_BORDER, height=1).pack(fill="x", padx=14, pady=(6, 0))
-        tk.Label(prog, text="ПРОГРАММА", bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI Semibold", 9), anchor="w").pack(fill="x", padx=14, pady=(8, 2))
+        tk.Label(prog, text="ПРОГРАММА", bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI Semibold", 9), anchor="w").pack(fill="x", padx=20, pady=(8, 2))
         make_row("Статистика", self.app.show_stats, dot=False, parent=prog, icon="▤")
         make_row("Настройки лаунчера", self.app.show_settings, dot=False, parent=prog, icon="⚙")
         self.refresh_dots()
@@ -2569,7 +2652,7 @@ class Ets2Page(ttk.Frame):
     def refresh_dots(self):
         for k, (row, lbl, dot, strip) in self.rows_ui.items():
             wk = self.WIN.get(k)
-            dot.config(text="●" if wk and self.v[wk].get() else "")
+            dot.config(text=("●" if self.v[wk].get() else "○") if wk else "")
             sel = k == self.key
             bg = UI_FIELD if sel else UI_PANEL
             for w in (row, lbl, dot, row._icon):
@@ -3625,14 +3708,13 @@ class ProfilePanel(ttk.Frame):
         self.columnconfigure(0, weight=1)
         self.columnconfigure(1, minsize=self.RW)
         self.rowconfigure(0, weight=1)
-        nav = self.nav = tk.Frame(self.app.navhost, bg=UI_PANEL, width=248)
+        nav = self.nav = tk.Frame(self.app.navhost, bg=UI_PANEL, width=268)
         nav.pack_propagate(False)
         tk.Label(nav, text="ПАНЕЛИ ОВЕРЛЕЯ", bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI Semibold", 9),
-                 anchor="w").pack(fill="x", padx=14, pady=(12, 4))
+                 anchor="w").pack(fill="x", padx=20, pady=(12, 4))
         self.q = tk.StringVar()
-        qe = tk.Entry(nav, textvariable=self.q, bg=UI_FIELD, fg=UI_FG, insertbackground=UI_FG,
-                      relief="flat", highlightthickness=1, highlightbackground=UI_BORDER, highlightcolor=UI_BORDER, font=("Segoe UI", 10))
-        qe.pack(fill="x", padx=14, pady=(0, 6), ipady=3)
+        qbox, qe = nav_search(nav, self.q, UI_PANEL)
+        qbox.pack(fill="x", padx=12, pady=(0, 6))
         self.q.trace_add("write", lambda *a: self.nav_filter(self.q.get()))
 
         # «Программа» закреплена внизу, список панелей над ней прокручивается — на низких экранах ничего не пропадает
@@ -3655,18 +3737,18 @@ class ProfilePanel(ttk.Frame):
 
         def make_row(text, cmd, dot=True, parent=None, icon=""):
             row = tk.Frame(parent or inner, bg=UI_PANEL, cursor="hand2")
-            row.pack(fill="x")
-            strip = tk.Frame(row, bg=UI_PANEL, width=4)
+            row.pack(fill="x", padx=8)
+            strip = tk.Frame(row, bg=UI_PANEL, width=2)
             strip.pack(side="left", fill="y")
             ic = tk.Label(row, text=icon, bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI Symbol", 12), width=2, anchor="center",
                           cursor="hand2")
             ic.pack(side="left", padx=(10, 0))
             row._icon = ic
             ic.bind("<Button-1>", lambda e: cmd())
+            d = NavSwitch(row, text="●" if dot else "", bg=UI_PANEL)
+            d.pack(side="right")
             lbl = tk.Label(row, text=tr(text), bg=UI_PANEL, fg=UI_FG, font=("Segoe UI", 11), anchor="w", padx=8, pady=rpad)
             lbl.pack(side="left", fill="x", expand=True)
-            d = tk.Label(row, text="●" if dot else "", bg=UI_PANEL, fg=UI_GREEN, font=("Segoe UI", 9), padx=10)
-            d.pack(side="right")
             for w in (row, lbl, d, strip):
                 w.bind("<Button-1>", lambda e: cmd())
 
@@ -3683,7 +3765,7 @@ class ProfilePanel(ttk.Frame):
             if not ks:
                 continue
             if gname:
-                hd = tk.Label(inner, text=tr(gname).upper(), bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI Semibold", 9), anchor="w", padx=14, pady=6)
+                hd = tk.Label(inner, text=tr(gname).upper(), bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI Semibold", 9), anchor="w", padx=20, pady=6)
                 self._navitems.append((None, gname, hd))
             for key in ks:
                 self.rows_ui[key] = make_row(titles[key], lambda k=key: self.open_page(k), icon=NAV_ICONS.get(key, "•"))
@@ -3694,7 +3776,7 @@ class ProfilePanel(ttk.Frame):
         self.nav_filter("")
         tk.Frame(prog, bg=UI_BORDER, height=1).pack(fill="x", padx=14, pady=(6, 0))
         tk.Label(prog, text="ПРОГРАММА", bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI Semibold", 9),
-                 anchor="w").pack(fill="x", padx=14, pady=(8, 2))
+                 anchor="w").pack(fill="x", padx=20, pady=(8, 2))
         self.rows_ui["apps"] = make_row("Доп. программы", lambda: self.open_page("apps"), parent=prog, icon="⧉")
         self.extra_ui = {"stats": make_row("Статистика", self.app.show_stats, dot=False, parent=prog, icon="▤"),
                          "settings": make_row("Настройки лаунчера", self.app.show_settings, dot=False, parent=prog, icon="⚙")}
@@ -4644,7 +4726,7 @@ class ProfilePanel(ttk.Frame):
             if pending is not None:
                 pending.pack(fill="x", pady=(10, 2))
                 pending = None
-            w.pack(fill="x")
+            w.pack(fill="x", padx=8)
             shown += 1
         if not shown and q:
             if not hasattr(self, "_nav_none"):
@@ -8430,7 +8512,7 @@ class App:
         body.pack(fill="both", expand=True, padx=14, pady=(2, 10))
         body.columnconfigure(1, weight=1)
         body.rowconfigure(0, weight=1)
-        self.navhost = tk.Frame(body, bg=UI_BG, width=248)
+        self.navhost = tk.Frame(body, bg=UI_BG, width=268)
         self.navhost.grid(row=0, column=0, sticky="ns", padx=(0, 14), pady=(12, 12))
         self.navhost.pack_propagate(False)
         self.holder = ttk.Frame(body)
