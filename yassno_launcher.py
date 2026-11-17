@@ -67,7 +67,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.2.0"
+APP_VERSION = "3.2.1"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -9227,7 +9227,11 @@ class App:
 
     def accent_key(self):
         """Чей акцент показывать: открытая плитка, а на «Статистике» и «Настройках» — выбранная игра."""
-        return self.view if self.view in ("ac", "ets2") else self.selected
+        if self.view in ("ac", "ets2"):
+            return self.view
+        if self.view in ("home", "setups", "apps") and self.home_sub:
+            return self.home_sub                          # на «Главной» выбрана Assetto Corsa или ETS 2
+        return self.selected
 
     def apply_accent(self, instant=False):
         """Плавно перекрашивает интерфейс в цвет открытой игры."""

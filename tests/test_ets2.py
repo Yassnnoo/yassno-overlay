@@ -622,6 +622,8 @@ class LauncherLook(unittest.TestCase):
             app.root.update()
             self.assertEqual(app.view, "home")
             self.assertEqual(app.home_page.sel(), "ac")
+            self.assertEqual(app.accent_key(), "ac")                    # цвет кнопок — у выбранной игры, а не у предыдущей
+            self.assertEqual(app._accent_target, L.accent_for("ac", True))
             self.assertIn("EVO", " ".join(w.cget("text") for w in app.home_page.c_apps.winfo_children() if w.winfo_class() == "Label"))
             if L.ETS2 is not None:
                 app.home_pick("ets2")
