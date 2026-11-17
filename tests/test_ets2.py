@@ -566,6 +566,9 @@ class LauncherLook(unittest.TestCase):
         app = L.App()
         try:
             app.root.update()
+            self.assertEqual(app.view, "home")                  # по умолчанию открывается «Главная»
+            app.select_game("lmu")                              # лаунчер стартует на «Главной», страницы игры открываем явно
+            app.root.update()
             p = app.panels["lmu"]
             p.show_page("fuel")
             self.assertIn("slide", getattr(p.scroll, "_anims", {}))

@@ -8898,8 +8898,7 @@ class App:
         self._busy = False
         self.selected = self.cfg.get("last_game") if self.cfg.get("last_game") in GAMES else next(iter(GAMES))
         self.view = self.selected                          # игра или "settings"
-        if self.cfg.get("last_view") in ("ac", "ets2", "home"):    # последняя открытая плитка не из списка GAMES
-            self.view = self.cfg["last_view"] if (self.cfg["last_view"] != "ets2" or ETS2 is not None) else self.selected
+        self.view = "home"                                 # лаунчер всегда открывается на «Главной»; выбранная игра — последняя
         self.panels, self.tray = {}, None
         self.tray_q = queue.Queue()
         self.auto_var = tk.BooleanVar(value=self.cfg["autostart"])
