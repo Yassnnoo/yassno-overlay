@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "3.0.0"
+APP_VERSION = "3.1.0"
 import argparse
 import bisect
 import collections
@@ -6079,12 +6079,54 @@ class Overlay:
         except tk.TclError:
             pass
 
-    def write_state(self):
-        """Сообщаем лаунчеру, включён ли режим перемещения (файл рядом с профилем)."""
+    def win_rects(self):
+        """Где сейчас стоят окна и какого они размера: {элемент: [x, y, ш, в]} — для редактора раскладки в лаунчере."""
+        out = {}
+        for on, top in [("standings", self.root)] + [(w.ON, w.top) for w in getattr(self, "subs", [])]:
+            try:
+                if top.winfo_viewable() and top.winfo_width() > 20 and top.winfo_height() > 10:
+                    out[on] = [top.winfo_x(), top.winfo_y(), top.winfo_width(), top.winfo_height()]
+            except (tk.TclError, AttributeError):
+                pass
+        return out
+
+    def live_snapshot(self):
+        """Несколько живых чисел для предпросмотра в лаунчере (топливо, дельта, скорость, передача) — пока идёт телеметрия."""
+        frame = state["frame"]
+        if not state["ok"] or not frame:
+            return None
         try:
-            with open(os.path.splitext(CFG_PATH)[0] + ".state", "w", encoding="utf-8") as f:
-                self._state_conn = bool(state["ok"])
-                json.dump({"locked": bool(self.locked), "pid": os.getpid(), "ts": time.time(), "connected": self._state_conn}, f)
+            me = next((c for c in frame["cars"] if c["player"]), None)
+            if not me:
+                return None
+            inp = frame.get("inputs") or {}
+            d = None
+            try:
+                d = fuel_calc.compute(frame, float(self.cfg.get("fuel_reserve", 0.0)), self.cfg.get("fuel_avg", 5))
+            except Exception:
+                d = None
+            g = int(inp.get("gear", 0) or 0)
+            rnd = lambda v, n=2: round(v, n) if isinstance(v, (int, float)) else None
+            return {"fuel": rnd(me.get("fuel"), 1), "avg": rnd(d.get("avg")) if d else None, "last": rnd(d.get("last")) if d else None,
+                    "laps_fuel": rnd(d.get("laps_fuel"), 1) if d else None, "add": rnd(d.get("add"), 1) if d else None,
+                    "delta": rnd(getattr(delta_tracker, "delta", None)), "spd": int((me.get("speed") or 0) * 3.6),
+                    "gear": "R" if g < 0 else "N" if g == 0 else str(g),
+                    "rpm": rnd((inp.get("rpm") or 0) / ((inp.get("max_rpm") or 0) or 1.0)),
+                    "place": me.get("place"), "laps": me.get("laps")}
+        except Exception:
+            return None
+
+    def write_state(self):
+        """Сообщаем лаунчеру, включён ли режим перемещения (файл рядом с профилем). 3.1: и где стоят окна, и живые числа."""
+        try:
+            self._state_conn = bool(state["ok"])
+            data = {"locked": bool(self.locked), "pid": os.getpid(), "ts": time.time(), "connected": self._state_conn,
+                    "sig": getattr(self, "screen_sig", ""), "b": list(getattr(self, "screen_b", ()) or ()),
+                    "wins": self.win_rects(), "live": self.live_snapshot()}
+            tmp = os.path.splitext(CFG_PATH)[0] + ".state.tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(data, f)
+            os.replace(tmp, os.path.splitext(CFG_PATH)[0] + ".state")
         except OSError:
             pass
 
@@ -6094,8 +6136,10 @@ class Overlay:
         if now - getattr(self, "_cmd_t", 0.0) < 0.5:
             return
         self._cmd_t = now
-        if not getattr(self, "_state_written", False) or getattr(self, "_state_conn", None) != bool(state["ok"]):
-            self._state_written = True                     # лаунчер показывает «телеметрия идёт / жду игру» по этому файлу
+        if (not getattr(self, "_state_written", False) or getattr(self, "_state_conn", None) != bool(state["ok"])
+                or now - getattr(self, "_state_t", 0.0) > 1.0):
+            self._state_written = True                     # лаунчер показывает «телеметрия идёт / жду игру» по этому файлу,
+            self._state_t = now                            # а редактор раскладки — окна и живые числа (раз в секунду)
             self.write_state()
         path = os.path.splitext(CFG_PATH)[0] + ".cmd"
         if not os.path.exists(path):
@@ -6494,7 +6538,7 @@ class Overlay:
             self.cfg[w.POS[0]], self.cfg[w.POS[1]] = w.top.winfo_x(), w.top.winfo_y()
         self.capture_layout()
         self.cfg.setdefault("screen_layouts", {})[self.screen_sig] = {
-            "b": list(self.screen_b), "v": {k: self.cfg[k] for k in SCREEN_KEYS if k in self.cfg}}
+            "b": list(self.screen_b), "v": {k: self.cfg[k] for k in SCREEN_KEYS if k in self.cfg}, "wh": self.win_rects()}
         self.cfg["screen_last"] = self.screen_sig
         try:
             with open(CFG_PATH, "w", encoding="utf-8") as f:

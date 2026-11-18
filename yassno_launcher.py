@@ -67,7 +67,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.0.0"
+APP_VERSION = "3.1.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -91,7 +91,7 @@ PRESETS = [("Эндуро", ("standings", "relative", "trackmap", "weather", "fu
            ("Для стрима", ("standings", "pedals", "trackmap", "weather", "delta", "alerts", "sesstime", "clock", "speedo")),
            ("Минимум", ("relative", "delta", "alerts", "limiter", "lights"))]
 # список панелей слева: (ключ страницы, название, ключ включения или None)
-PAGES = [("general", "Общие и цвета", None), ("standings", "Таблица", "standings"), ("relative", "Релатив", "relative"),
+PAGES = [("general", "Раскладка и вид", None), ("standings", "Таблица", "standings"), ("relative", "Релатив", "relative"),
          ("pedals", "Ввод и шифт-лайт", "pedals"), ("trackmap", "Карта и ветер", "trackmap"), ("radar", "Радар", "radar"),
          ("weather", "Погода", "weather"), ("lights", "Стартовые огни", "lights"), ("limiter", "Пит-лимитер", "limiter"),
          ("fuel", "Топливо", "fuel"), ("delta", "Дельта", "delta"), ("alerts", "Предупреждения", "alerts"),
@@ -1430,7 +1430,13 @@ EN.update({
     "Таблица (стендинг)": "Standings table", "Релатив": "Relative", "Ввод: руль, педали, передача": "Input: wheel, pedals, gear",
     "Шифт-лайт": "Shift light", "Карта трассы и ветер": "Track map and wind", "Радар": "Radar", "Погода": "Weather",
     "Стартовые огни": "Start lights", "Пит-лимитер": "Pit limiter", "Топливный калькулятор": "Fuel calculator",
-    "Общие и цвета": "General and colours", "Таблица": "Standings", "Ввод и шифт-лайт": "Input and shift light",
+    "Общие и цвета": "General and colours", "Раскладка и вид": "Layout and look", "Выбранное окно": "Selected window",
+    "Показывать это окно": "Show this window", "Размер": "Size", "Все настройки окна →": "All window settings →",
+    "Вернуть как было": "Revert", "Живые данные": "Live data", "Демо — игра не запущена": "Demo — the game is not running",
+    "живые данные": "live data", "второй монитор появится здесь, когда оверлей запустится на нём": "another monitor shows up here once the overlay runs on it",
+    "клик — выбрать · тащи — двигать · угол — размер · Shift — без магнита · двойной клик — настройки окна": "click — select · drag — move · corner — resize · Shift — no snapping · double-click — window settings",
+    "Кликни окно на превью: здесь появятся его быстрые настройки. Двойной клик — все настройки окна.": "Click a window in the preview to see its quick settings here. Double-click opens all its settings.",
+    "Таблица": "Standings", "Ввод и шифт-лайт": "Input and shift light",
     "Карта и ветер": "Map and wind", "Топливо": "Fuel",
     "Позиции ▲▼ (изменение места)": "Positions ▲▼ (place change)", "Логотип марки": "Make logo", "Шины": "Tyres",
     "Отставание от передней": "Gap to car ahead", "Отставание от лидера": "Gap to leader", "Лучший круг": "Best lap",
@@ -3511,6 +3517,8 @@ class ProfilePanel(ttk.Frame):
         self.th = dict(THEME_DEFAULT)
         self.build_ui()
         self.anim_start()
+        self.live = None
+        self.after(1500, self.ed_live_tick)
         every = (list(self.v.values()) + list(self.theme.values()) + list(self.cols.values()) +
                  list(self.relc.values()) + list(self.wxc.values()) + list(self.pedc.values()))
         for var in every:
@@ -3813,6 +3821,7 @@ class ProfilePanel(ttk.Frame):
         self._center = center
         center.bind("<Configure>", lambda e: self.fit_later())
         self.note.grid(row=1, column=0, sticky="w", pady=(2, 10))
+        self.ed_bar = tk.Frame(center, bg=UI_BG)                     # 3.1: мониторы и «живые данные» над редактором раскладки
         pbox = RoundBox(center, radius=16, fill=MOCK_BG, border=mix(UI_BORDER, UI_DIM, 0.3), shadow=10)
         pbox.configure(width=self.PW + 22 + 2 * pbox.off)
         self._pbox = pbox
@@ -3821,6 +3830,9 @@ class ProfilePanel(ttk.Frame):
         self.canvas._no_tint = True                         # цвета предпросмотра — цвета оверлея, акцент лаунчера их не трогает
         self.canvas.pack(padx=11, pady=11)
         self.canvas.bind("<Button-1>", self.on_click)
+        self.canvas.bind("<B1-Motion>", lambda e: self.ed_motion(e) if self.page == "general" else None)
+        self.canvas.bind("<ButtonRelease-1>", lambda e: self.ed_release(e) if self.page == "general" else None)
+        self.canvas.bind("<Double-Button-1>", lambda e: self.ed_double(e) if self.page == "general" else None)
         self.canvas.bind("<Motion>", self.on_hover)
         self.canvas.bind("<Leave>", self.on_leave)
 
@@ -3938,6 +3950,16 @@ class ProfilePanel(ttk.Frame):
         self.canvas.config(height=190 if key == "apps" else self.gen_h() if key == "general" else self.PH)
         self.scroll.yview_moveto(0)
         self.title.config(text=tr(next(t for k, t, _ in PAGES if k == key)))
+        try:
+            if key == "general" and getattr(self, "editor_on", True):
+                self.note.grid_remove()
+                self.ed_bar.grid(row=1, column=0, sticky="ew", pady=(4, 10))
+                self.ed_bar_sync()
+            else:
+                self.ed_bar.grid_remove()
+                self.note.grid()
+        except (tk.TclError, AttributeError):
+            pass
         IR_NOTES = {"radar": "Вы в центре. Красная размытая полоса сбоку — машина рядом, её высота показывает, насколько она впереди или позади. "
                              "Жёлтое свечение спереди/сзади — расстояние до машины. Пропадает, когда рядом никого нет."}
         self.note.config(text=tr((IR_NOTES.get(key) if self.game == "iracing" else None) or PAGE_NOTES.get(key, "Все панели оверлея сразу. Клик по панели в предпросмотре включает или выключает её. "
@@ -4154,6 +4176,8 @@ class ProfilePanel(ttk.Frame):
             return f
 
         if key == "general":
+            self.ed_card = self.card("Выбранное окно", L)
+            self.ed_inspect()
             f = self.card("Шрифт и вид", L)
             r = self.lab(f, None, "Шрифт")
             fams = ["(авто)"] + sorted({x for x in tkfont.families() if not x.startswith("@")})
@@ -4559,6 +4583,7 @@ class ProfilePanel(ttk.Frame):
         try:
             st = self.merge_external(self.collect())
             save_settings(self.game, st)
+            self.ed_write()
             self._base = {k: st[k] for k in self.sync_keys() if k in st}
             self.set_dirty(False)
         except OSError as e:
@@ -4769,6 +4794,9 @@ class ProfilePanel(ttk.Frame):
 
     def rev(self):
         """Обороты «разгон — переключение»: пила 0.35…0.98, в цикле 5 передач."""
+        lv = getattr(self, "live", None) or {}
+        if isinstance(lv.get("spd"), (int, float)) and isinstance(lv.get("rpm"), (int, float)):
+            return max(0.0, min(1.0, lv["rpm"])), lv.get("gear") or "N", int(lv["spd"])      # 3.1: живые данные из оверлея
         k = (self.at() / 2.4) % 1.0
         return 0.35 + 0.63 * k, 1 + int((self.at() / 2.4) % 5), 60 + int(((self.at() / 12.0) % 1.0) * 250)
 
@@ -4909,6 +4937,8 @@ class ProfilePanel(ttk.Frame):
     def on_click(self, e):
         if self.page != "general":
             return
+        if getattr(self, "editor_on", True):
+            return self.ed_press(e)
         for key, x0, y0, x1, y1 in self.hits:
             if x0 <= e.x <= x1 and y0 <= e.y <= y1:
                 self.v[key].set(not self.v[key].get())
@@ -4952,6 +4982,12 @@ class ProfilePanel(ttk.Frame):
         c.delete("hov")
         if self.page != "general":
             c.config(cursor="")
+            return
+        if getattr(self, "editor_on", True):
+            key = self.ed_hit(e.x, e.y)
+            grip = c.find_withtag("edgrip")
+            on_grip = bool(grip) and (lambda q: q[0] - 3 <= e.x <= q[2] + 3 and q[1] - 3 <= e.y <= q[3] + 3)(c.coords(grip[0]))
+            c.config(cursor="size_nw_se" if on_grip else ("fleur" if key else ""))
             return
         for key, x0, y0, x1, y1 in self.hits:
             if x0 <= e.x <= x1 and y0 <= e.y <= y1:
@@ -5091,7 +5127,14 @@ class ProfilePanel(ttk.Frame):
 
     def gen_h(self):
         wh = getattr(self.app, "win_h", 1000)
-        return int(max(330, min(self.GH, wh - 250)))
+        full = int(max(330, min(self.GH, wh - 250)))
+        if getattr(self, "editor_on", True):
+            try:
+                b = self.ed_screen()[1]
+                return int(max(260, min(full, (self.PW - 24) * b[3] / float(b[2]) + 52)))     # 3.1: по форме экрана, без пустоты
+            except Exception:                            # noqa: BLE001
+                return full
+        return full
 
     base_k = 1.0
 
@@ -5143,9 +5186,13 @@ class ProfilePanel(ttk.Frame):
         c.delete("all")
         self.hits = []
         ph = int(float(c.cget("height")))
-        draw_scene(c, self.PW, ph, "track", self.pv_light())     # «экран игры» на заднем плане
+        if not (self.page == "general" and getattr(self, "editor_on", True)):
+            draw_scene(c, self.PW, ph, "track", self.pv_light())     # «экран игры» на заднем плане
         scene = set(c.find_withtag("scene"))
-        if self.page == "general":
+        if self.page == "general" and getattr(self, "editor_on", True):
+            self.base_k = 1.0
+            self.draw_editor()
+        elif self.page == "general":
             kk = max(0.3, min(self.PW / 680.0, ph / self.OV_H, 1.7))
             self.base_k = kk
             self._pk = kk
@@ -5163,6 +5210,452 @@ class ProfilePanel(ttk.Frame):
         else:
             self.compute_theme(self.page)
             self.draw_single(self.page)
+
+    # ---------- 3.1: редактор раскладки на странице «Раскладка и вид» ----------
+    ELEM_POS = {"standings": ("x", "y"), "relative": ("rel_x", "rel_y"), "pedals": ("ped_x", "ped_y"), "trackmap": ("map_x", "map_y"),
+                "radar": ("radar_x", "radar_y"), "weather": ("wx_x", "wx_y"), "lights": ("lights_x", "lights_y"),
+                "limiter": ("lim_x", "lim_y"), "fuel": ("fuel_x", "fuel_y"), "delta": ("delta_x", "delta_y"),
+                "alerts": ("alerts_x", "alerts_y"), "tyres": ("tyres_x", "tyres_y"), "pitplan": ("pitplan_x", "pitplan_y"),
+                "gaps": ("gaps_x", "gaps_y"), "engine": ("engine_x", "engine_y"), "sesstime": ("sesstime_x", "sesstime_y"),
+                "clock": ("clock_x", "clock_y"), "speedo": ("speedo_x", "speedo_y"), "laplog": ("laplog_x", "laplog_y"),
+                "micro": ("micro_x", "micro_y")}
+    SCALE_KEY = {"trackmap": "map_scale", "radar": "radar_scale", "fuel": "fuel_scale"}
+
+    def ed_elems(self):
+        """Окна, которые можно двигать: (элемент, подпись, функция рисования, натуральный размер ш×в)."""
+        n = max(4, min(14, int(self.num("rows", 12))))
+        ra, rb = int(self.num("rel_ahead", 3)), int(self.num("rel_behind", 3))
+        nat = {"standings": (330, 34 + n * 20), "relative": (220, 30 + (ra + 1 + rb) * 16), "pedals": (260, 66),
+               "trackmap": (190, 190), "radar": (150, 150), "weather": (180, 150), "lights": (220, 54), "limiter": (170, 40),
+               "fuel": (140, 200), "delta": (230, 100), "micro": (230, 26), "alerts": (240, 120),
+               "tyres": {"compact": (150, 190), "wear": (260, 92)}.get(self.mode_val("tyres_view"), (200, 160)), "pitplan": (260, 168),
+               "gaps": (270, 130), "engine": {"compact": (360, 34), "gauges": (170, 200)}.get(self.mode_val("engine_view"), (230, 200)),
+               "sesstime": (190, 52), "clock": (170, 52), "speedo": self.speedo_size(), "laplog": self.laplog_size(True)}
+        fns = {"standings": self.d_standings, "relative": self.d_relative, "pedals": self.d_pedals, "trackmap": self.d_map,
+               "radar": self.d_radar, "weather": self.d_weather, "lights": self.d_lights, "limiter": self.d_limiter,
+               "fuel": self.d_fuel, "delta": self.d_delta, "micro": self.d_micro, "alerts": self.d_alerts, "tyres": self.d_tyres,
+               "pitplan": self.d_pitplan, "gaps": self.d_gaps, "engine": self.d_engine, "sesstime": self.d_sesstime,
+               "clock": self.d_clock, "speedo": self.d_speedo, "laplog": self.d_laplog}
+        names = {e: t for _, t, e in self.pages() if e}
+        out = []
+        for e in self.ELEM_POS:
+            if e not in names or e not in self.v or (self.game == "lmu" and e == "lights"):
+                continue
+            out.append((e, names[e], fns[e], nat[e]))
+        return out
+
+    def ed_state(self):
+        st = read_json(os.path.splitext(profile_path(self.game))[0] + ".state")
+        fresh = isinstance(st.get("ts"), (int, float)) and time.time() - st["ts"] < 5 and self.app.runner.running() \
+            and self.app.runner.game == self.game
+        return st if fresh else {}
+
+    def ed_screens(self):
+        """Наборы мониторов, на которых уже запускался оверлей: [(подпись набора, (x0, y0, ш, в))]; текущий — первым."""
+        data = read_json(profile_path(self.game))
+        sl = data.get("screen_layouts") if isinstance(data.get("screen_layouts"), dict) else {}
+        out = []
+        st = self.ed_state()
+        if st.get("sig") and isinstance(st.get("b"), list) and len(st["b"]) == 4:
+            out.append((st["sig"], tuple(st["b"])))
+        last = data.get("screen_last")
+        for sig in sorted(sl, key=lambda s: s != last):
+            b = sl[sig].get("b") if isinstance(sl[sig], dict) else None
+            if isinstance(b, list) and len(b) == 4 and b[2] > 0 and b[3] > 0 and sig not in [s for s, _ in out]:
+                out.append((sig, tuple(b)))
+        if not out:
+            sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+            out.append((f"{sw}x{sh}@0,0,{sw}x{sh}", (0, 0, sw, sh)))
+        return out
+
+    @staticmethod
+    def aspect_name(w, h):
+        r = w / float(h or 1)
+        for name, v in (("32:9", 32 / 9), ("21:9", 21 / 9), ("16:10", 16 / 10), ("16:9", 16 / 9), ("4:3", 4 / 3)):
+            if abs(r - v) < 0.06:
+                return name
+        return f"{r:.2f}:1"
+
+    def ed_screen(self):
+        scr = self.ed_screens()
+        cur = getattr(self, "_ed_sig", None)
+        return next((s for s in scr if s[0] == cur), scr[0])
+
+    def ed_rects(self):
+        """Прямоугольники окон в пикселях экрана: {элемент: [x, y, ш, в]} с учётом несохранённых правок."""
+        sig, b = self.ed_screen()
+        data = read_json(profile_path(self.game))
+        ent = (data.get("screen_layouts") or {}).get(sig) or {}
+        vals = dict(data) if sig == data.get("screen_last") else {}
+        vals.update(ent.get("v") or {})
+        st = self.ed_state()
+        sizes = dict(ent.get("wh") or {})
+        if st.get("sig") == sig and isinstance(st.get("wins"), dict):
+            sizes.update(st["wins"])
+        edits = getattr(self, "_ed_edits", {}).get(sig, {})
+        k_ = b[3] / 1080.0
+        out, fx, fy = {}, b[0] + b[2] * 0.3, b[1] + b[3] * 0.1
+        for e, _, _, (dw, dh) in self.ed_elems():
+            xk, yk = self.ELEM_POS[e]
+            live = sizes.get(e)
+            if isinstance(live, list) and len(live) == 4:
+                x, y, w, h = live
+            else:
+                sc = self.num(self.SCALE_KEY.get(e, "scale_" + e), 1.0) if (self.SCALE_KEY.get(e, "scale_" + e) in self.v) else 1.0
+                w, h = dw * sc * k_ * float(vals.get("sx_" + e, 1.0) or 1.0), dh * sc * k_ * float(vals.get("sy_" + e, 1.0) or 1.0)
+                x, y = vals.get(xk), vals.get(yk)
+                if not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
+                    x, y = fx, fy                           # окно ещё ни разу не ставили: раскладываем лесенкой
+                    fy += h + 16
+                    if fy > b[1] + b[3] * 0.8:
+                        fx, fy = fx + 300 * k_, b[1] + b[3] * 0.1
+            if xk in edits:
+                x = edits[xk]
+            if yk in edits:
+                y = edits[yk]
+            if ("sx_" + e) in edits and isinstance(live, list):
+                w = live[2] * edits["sx_" + e] / float(vals.get("sx_" + e, 1.0) or 1.0)
+                h = live[3] * edits["sy_" + e] / float(vals.get("sy_" + e, 1.0) or 1.0)
+            elif ("ew_" + e) in edits:
+                w, h = edits["ew_" + e], edits["eh_" + e]
+            out[e] = [float(x), float(y), float(w), float(h)]
+        return out
+
+    def ed_geom(self):
+        """Куда на холсте ложится экран: (ox, oy, k, b)."""
+        _, b = self.ed_screen()
+        c = self.canvas
+        cw, ch = self.PW, int(float(c.cget("height")))
+        fw = cw - 24
+        fh = fw * b[3] / float(b[2])
+        if fh > ch - 40:
+            fh = ch - 40
+            fw = fh * b[2] / float(b[3])
+        return (cw - fw) / 2, (ch - 26 - fh) / 2, fw / float(b[2]), b
+
+    def draw_editor(self):
+        c = self.canvas
+        ox, oy, k, b = self.ed_geom()
+        fw, fh = b[2] * k, b[3] * k
+        before = set(c.find_all())
+        draw_scene(c, int(fw), int(fh), "track", self.pv_light(), tag="edscene")
+        c.move("edscene", ox, oy)
+        c.create_rectangle(ox - 1, oy - 1, ox + fw + 1, oy + fh + 1, outline=mix(UI_BORDER, UI_DIM, 0.4), width=2)
+        rects = self.ed_rects()
+        self._ed_cache = (ox, oy, k, b, rects)
+        sel = getattr(self, "_ed_sel", None)
+        for e, label, fn, (dw, dh) in self.ed_elems():
+            x, y, w, h = rects[e]
+            X, Y, W, H = ox + (x - b[0]) * k, oy + (y - b[1]) * k, max(8, w * k), max(6, h * k)
+            on = bool(self.v[e].get())
+            if not on and e != sel:
+                c.create_rectangle(X, Y, X + W, Y + H, outline=self.ph_col(0), dash=(3, 3), tags=("w_" + e,))
+                self.hits.append((e, X, Y, X + W, Y + H))
+                continue
+            self.compute_theme(e)
+            sx, sy = W / float(dw), H / float(dh)
+            if min(sx, sy) < 0.6 and on:                     # мелко — рисуем окно упрощённо: подложка, метка, название, главное число
+                self.ed_box(e, label, X, Y, W, H)
+                self.hits.append((e, X, Y, X + W, Y + H))
+                continue
+            self.make_fonts(min(sx, sy))
+            self._pk = min(sx, sy)
+            pre = set(c.find_all())
+            if on:
+                fn(0, 0, dw, dh)
+            else:
+                c.create_rectangle(0, 0, dw, dh, outline=self.ph_col(0), dash=(4, 4))
+                c.create_text(dw / 2, dh / 2, text=tr(label), fill=self.ph_col(1), font=self.f_t)
+            for it in [i for i in c.find_all() if i not in pre]:
+                c.scale(it, 0, 0, sx, sy)
+                c.move(it, X, Y)
+                c.addtag_withtag("w_" + e, it)
+            self.hits.append((e, X, Y, X + W, Y + H))
+        self.make_fonts(1.0)
+        self.ed_draw_sel()
+        c.create_text(ox + fw / 2, oy + fh + 14, anchor="center", fill=self.ph_col(1), font=("Segoe UI", 9),
+                      text=tr("клик — выбрать · тащи — двигать · угол — размер · Shift — без магнита · двойной клик — настройки окна"))
+
+    def ed_box(self, e, label, X, Y, W, H):
+        c, th = self.canvas, self.th
+        tg = ("w_" + e,)
+        r = min(6, W / 6, H / 4)
+        pts = [X + r, Y, X + W - r, Y, X + W, Y, X + W, Y + r, X + W, Y + H - r, X + W, Y + H, X + W - r, Y + H, X + r, Y + H,
+               X, Y + H, X, Y + H - r, X, Y + r, X, Y]
+        c.create_polygon(pts, smooth=True, fill=th["panel"], outline=th["border"], tags=tg)
+        if H > 14:
+            c.create_rectangle(X + 4, Y + 4, X + 6, Y + min(14, H - 4), fill=th["accent"], outline="", tags=tg)
+        if W > 30 and H > 14:
+            ft = getattr(self, "_ed_font", None) or tkfont.Font(family="Segoe UI", size=7, weight="bold")
+            self._ed_font = ft
+            t = tr(label).upper()
+            while len(t) > 2 and ft.measure(t) > W - 14:
+                t = t[:-2] + "…" if not t.endswith("…") else t[:-2] + "…"
+            c.create_text(X + 10, Y + 9, text=t, anchor="w", fill=th["dim"], font=ft, tags=tg)
+        lv = getattr(self, "live", None) or {}
+        num = lambda k, f, d: f.format(lv[k]) if isinstance(lv.get(k), (int, float)) else d
+        val = {"fuel": num("fuel", "{:.1f} л", "47.3 л"), "delta": num("delta", "{:+.2f}", "+0.35"),
+               "speedo": num("spd", "{:.0f}", "247"), "standings": ("P" + str(lv["place"])) if lv.get("place") else "P4",
+               "relative": "±3", "sesstime": "1:12:40", "clock": time.strftime("%H:%M")}.get(e)
+        if val and H > 30 and W > 40:
+            col = th["text"]
+            if e == "delta":
+                col = "#2ee26d" if val.startswith("-") else "#ff5a4f"
+            fs = int(max(8, min(22, H * 0.32, W / max(3, len(val)) * 1.4)))
+            c.create_text(X + 10, Y + H * 0.62, text=val, anchor="w", fill=col, font=("Segoe UI", fs, "bold"), tags=tg)
+
+    def ed_draw_sel(self):
+        c = self.canvas
+        c.delete("edsel")
+        e = getattr(self, "_ed_sel", None)
+        hit = next((h for h in self.hits if h[0] == e), None)
+        if not hit:
+            return
+        _, x0, y0, x1, y1 = hit
+        acc = UI_ACCENT
+        c.create_rectangle(x0 - 3, y0 - 3, x1 + 3, y1 + 3, outline=acc, width=2, tags="edsel")
+        for hx, hy in ((x0, y0), (x1, y0), (x0, y1)):
+            c.create_rectangle(hx - 4, hy - 4, hx + 4, hy + 4, fill="#eceef2", outline="", tags="edsel")
+        c.create_rectangle(x1 - 6, y1 - 6, x1 + 6, y1 + 6, fill=acc, outline="#eceef2", width=2, tags=("edsel", "edgrip"))
+        name = next((t for k, t, el in self.pages() if el == e), e)
+        ox, oy, k, b, rects = self._ed_cache
+        x, y = rects[e][0], rects[e][1]
+        txt = f"{tr(name)} · {(x - b[0]) / b[2] * 100:.1f}% · {(y - b[1]) / b[3] * 100:.1f}%"
+        f = ("Segoe UI", 9, "bold")
+        tw = tkfont.Font(family="Segoe UI", size=9, weight="bold").measure(txt) + 14
+        ty = y0 - 24 if y0 - 24 > 2 else y1 + 6
+        lx = max(2, min(x0, self.PW - tw - 4))
+        c.create_rectangle(lx, ty, lx + tw, ty + 18, fill=acc, outline="", tags="edsel")
+        c.create_text(lx + 7, ty + 9, text=txt, anchor="w", fill=UI_ACCENT_FG, font=f, tags="edsel")
+
+    # --- мышь ---
+    def ed_hit(self, x, y):
+        for key, x0, y0, x1, y1 in reversed(self.hits):
+            if x0 - 2 <= x <= x1 + 2 and y0 - 2 <= y <= y1 + 2:
+                return key
+        return None
+
+    def ed_press(self, e):
+        c = self.canvas
+        sel = getattr(self, "_ed_sel", None)
+        grip = c.find_withtag("edgrip")
+        if sel and grip:
+            gx0, gy0, gx1, gy1 = c.coords(grip[0])
+            if gx0 - 3 <= e.x <= gx1 + 3 and gy0 - 3 <= e.y <= gy1 + 3:
+                self._ed_drag = {"e": sel, "mode": "size", "x": e.x, "y": e.y, "r": list(self._ed_cache[4][sel])}
+                return
+        key = self.ed_hit(e.x, e.y)
+        if key != sel:
+            self._ed_sel = key
+            self.ed_inspect()
+        self.ed_draw_sel()
+        if key:
+            self._ed_drag = {"e": key, "mode": "move", "x": e.x, "y": e.y, "r": list(self._ed_cache[4][key]), "dx": 0, "dy": 0}
+
+    def ed_snap(self, e_, x, y, w, h, free):
+        """Магнит: к краям экрана и других окон (8 px на экране), иначе — сетка 1% экрана."""
+        ox, oy, k, b, rects = self._ed_cache
+        if free:
+            return x, y
+        lim = 8 / max(k, 1e-6)
+        xs = [b[0], b[0] + b[2]] + [v for o, r in rects.items() if o != e_ and self.v[o].get() for v in (r[0], r[0] + r[2])]
+        ys = [b[1], b[1] + b[3]] + [v for o, r in rects.items() if o != e_ and self.v[o].get() for v in (r[1], r[1] + r[3])]
+
+        def best(p, size, lines, step, base):
+            for edge, off in ((p, 0), (p + size, size)):
+                for ln in lines:
+                    if abs(edge - ln) <= lim:
+                        return ln - off
+            return base + round((p - base) / step) * step
+        return best(x, w, xs, b[2] / 100.0, b[0]), best(y, h, ys, b[3] / 100.0, b[1])
+
+    def ed_motion(self, e):
+        d = getattr(self, "_ed_drag", None)
+        if not d:
+            return self.on_hover(e)
+        ox, oy, k, b, rects = self._ed_cache
+        x0, y0, w0, h0 = d["r"]
+        free = bool(e.state & 0x0001)
+        if d["mode"] == "move":
+            nx = min(b[0] + b[2] - w0, max(b[0], x0 + (e.x - d["x"]) / k))
+            ny = min(b[1] + b[3] - h0, max(b[1], y0 + (e.y - d["y"]) / k))
+            nx, ny = self.ed_snap(d["e"], nx, ny, w0, h0, free)
+            mdx, mdy = (nx - x0) * k - d["dx"], (ny - y0) * k - d["dy"]
+            self.canvas.move("w_" + d["e"], mdx, mdy)
+            d["dx"], d["dy"] = d["dx"] + mdx, d["dy"] + mdy
+            rects[d["e"]] = [nx, ny, w0, h0]
+            self.hits = [(h_[0], h_[1] + mdx, h_[2] + mdy, h_[3] + mdx, h_[4] + mdy) if h_[0] == d["e"] else h_ for h_ in self.hits]
+            d["new"] = (nx, ny)
+        else:
+            nw = max(40, w0 + (e.x - d["x"]) / k)
+            nh = nw * h0 / float(h0 and w0 or 1) if not free else max(20, h0 + (e.y - d["y"]) / k)
+            if not free:
+                nh = h0 * nw / w0                         # без Shift — пропорционально, как растягивание за угол в оверлее
+            rects[d["e"]] = [x0, y0, nw, nh]
+            X, Y = ox + (x0 - b[0]) * k, oy + (y0 - b[1]) * k
+            self.hits = [(h_[0], X, Y, X + nw * k, Y + nh * k) if h_[0] == d["e"] else h_ for h_ in self.hits]
+            d["new"] = (nw, nh)
+        self.ed_draw_sel()
+
+    def ed_release(self, e=None):
+        d = getattr(self, "_ed_drag", None)
+        self._ed_drag = None
+        if not d or "new" not in d:
+            return
+        sig, b = self.ed_screen()
+        ed = self.__dict__.setdefault("_ed_edits", {}).setdefault(sig, {})
+        el = d["e"]
+        if d["mode"] == "move":
+            xk, yk = self.ELEM_POS[el]
+            ed[xk], ed[yk] = int(round(d["new"][0])), int(round(d["new"][1]))
+        else:
+            data = read_json(profile_path(self.game))
+            ent = (data.get("screen_layouts") or {}).get(sig) or {}
+            vals = dict(data) if sig == data.get("screen_last") else {}
+            vals.update(ent.get("v") or {})
+            sx0, sy0 = float(vals.get("sx_" + el, 1.0) or 1.0), float(vals.get("sy_" + el, 1.0) or 1.0)
+            w0, h0 = d["r"][2], d["r"][3]
+            ed["sx_" + el] = round(max(0.3, min(4.0, sx0 * d["new"][0] / w0)), 3)
+            ed["sy_" + el] = round(max(0.3, min(4.0, sy0 * d["new"][1] / h0)), 3)
+            ed["ew_" + el], ed["eh_" + el] = d["new"]
+        self.set_dirty(True)
+        self.draw_preview()
+        self.ed_inspect()
+
+    def ed_double(self, e):
+        key = self.ed_hit(e.x, e.y)
+        pg = next((k for k, _, el in self.pages() if el == key), None)
+        if pg:
+            self._ed_drag = None
+            self.show_page(pg)
+
+    def ed_pick_screen(self, sig):
+        self._ed_sig = sig
+        self.ed_bar_sync()
+        try:
+            self.canvas.config(height=self.gen_h())
+        except tk.TclError:
+            pass
+        self.draw_preview()
+        self.ed_inspect()
+
+    def ed_bar_sync(self):
+        """Кнопки мониторов и чип «живые данные» над редактором."""
+        bar = getattr(self, "ed_bar", None)
+        if bar is None:
+            return
+        for w in bar.winfo_children():
+            w.destroy()
+        cur = self.ed_screen()[0]
+        scr = self.ed_screens()
+        for sig, b in scr:
+            on = sig == cur
+            lb = tk.Label(bar, text=f"{self.aspect_name(b[2], b[3])} · {b[2]}×{b[3]}", bg=UI_FIELD if on else UI_PANEL,
+                          fg=UI_FG if on else UI_DIM, font=("Segoe UI Semibold", 9), padx=10, pady=4, cursor="hand2",
+                          highlightthickness=1, highlightbackground=UI_ACCENT if on else UI_BORDER)
+            lb.pack(side="left", padx=(0, 6))
+            lb.bind("<Button-1>", lambda ev, s=sig: self.ed_pick_screen(s))
+        if len(scr) == 1:
+            tk.Label(bar, text=tr("второй монитор появится здесь, когда оверлей запустится на нём"), bg=UI_BG, fg=UI_DIM,
+                     font=("Segoe UI", 9)).pack(side="left", padx=(4, 0))
+        live = bool(self.ed_state().get("live"))
+        tk.Label(bar, text=("● " + tr("Живые данные")) if live else tr("Демо — игра не запущена"), bg=UI_BG,
+                 fg=UI_GREEN if live else UI_DIM, font=("Segoe UI Semibold", 9)).pack(side="right")
+
+    def ed_live_tick(self):
+        """Раз в секунду: пока оверлей шлёт живые числа или окна, обновляем редактор (если не тащим окно)."""
+        try:
+            if not self.winfo_exists():
+                return
+            if self.winfo_ismapped() and self.page == "general" and not getattr(self, "_ed_drag", None):
+                st = self.ed_state()
+                key = (st.get("ts") and json.dumps([st.get("live"), st.get("wins"), st.get("sig")], sort_keys=True))
+                if key != getattr(self, "_ed_live_key", None):
+                    self._ed_live_key = key
+                    self.live = st.get("live") or None
+                    self.ed_bar_sync()
+                    self.draw_preview()
+            self.after(1000, self.ed_live_tick)
+        except tk.TclError:
+            pass
+
+    # --- инспектор выбранного окна ---
+    def ed_inspect(self):
+        f = getattr(self, "ed_card", None)
+        if f is None:
+            return
+        try:
+            if not f.winfo_exists():
+                return
+        except tk.TclError:
+            return
+        for w in f.winfo_children():
+            w.destroy()
+        f._r = 0
+        e = getattr(self, "_ed_sel", None)
+        if not e or e not in self.v:
+            ttk.Label(f, text=tr("Кликни окно на превью: здесь появятся его быстрые настройки. Двойной клик — все настройки окна."),
+                      style="Dim.TLabel", wraplength=330, justify="left").grid(row=0, column=0, columnspan=3, sticky="w", pady=4)
+            return
+        name = next((t for k, t, el in self.pages() if el == e), e)
+        r = self.nr(f, None)
+        ttk.Label(f, text=tr(name), style="Head.TLabel").grid(row=r, column=0, columnspan=3, sticky="w", pady=(0, 4))
+        self.tg(f, None, "Показывать это окно", self.v[e])
+        if ("op_" + e) in self.v:
+            self.slider(f, None, "Непрозрачность", self.v["op_" + e], 0.2, 1.0, lambda x: f"{x * 100:.0f}%")
+        sk = self.SCALE_KEY.get(e, "scale_" + e)
+        if sk in self.v:
+            self.slider(f, None, "Размер", self.v[sk], 0.5, 3.0, lambda x: f"{x:.2f}×")
+        if ("hg_" + e) in self.v:
+            self.tg(f, None, "Скрывать, когда машина в гараже", self.v["hg_" + e])
+        ox, oy, k, b, rects = getattr(self, "_ed_cache", (0, 0, 1, (0, 0, 1, 1), {}))
+        if e in rects:
+            x, y = rects[e][0], rects[e][1]
+            r = self.nr(f, None)
+            ttk.Label(f, text=f"X {(x - b[0]) / b[2] * 100:.1f}%   Y {(y - b[1]) / b[3] * 100:.1f}%   ·   {int(x)}, {int(y)} px",
+                      style="Dim.TLabel").grid(row=r, column=0, columnspan=3, sticky="w", pady=(4, 2))
+        r = self.nr(f, None)
+        bx = ttk.Frame(f)
+        bx.grid(row=r, column=0, columnspan=3, sticky="w", pady=(8, 2))
+        pg = next((k_ for k_, _, el in self.pages() if el == e), None)
+        if pg:
+            ttk.Button(bx, text="Все настройки окна →", command=lambda: self.show_page(pg)).pack(side="left")
+        sig = self.ed_screen()[0]
+        if any(k_ in getattr(self, "_ed_edits", {}).get(sig, {}) for k_ in self.ELEM_POS[e] + ("sx_" + e,)):
+            ttk.Button(bx, text="Вернуть как было", style="Ghost.TButton", command=lambda: self.ed_revert(e)).pack(side="left", padx=(8, 0))
+        translate_tree(f)
+
+    def ed_revert(self, e):
+        sig = self.ed_screen()[0]
+        ed = getattr(self, "_ed_edits", {}).get(sig, {})
+        for k_ in self.ELEM_POS[e] + ("sx_" + e, "sy_" + e, "ew_" + e, "eh_" + e):
+            ed.pop(k_, None)
+        self.draw_preview()
+        self.ed_inspect()
+
+    def ed_write(self):
+        """При сохранении: положения и размеры, которые двигали в редакторе, — в профиль (раскладка этого набора мониторов,
+        общие ключи, если это последний набор, и все раскладки по классам и сессиям — чтобы окно не прыгало назад)."""
+        edits = getattr(self, "_ed_edits", {})
+        if not any(edits.values()):
+            return
+        data = read_json(profile_path(self.game))
+        sl = data.setdefault("screen_layouts", {}) if isinstance(data.get("screen_layouts"), dict) else data.setdefault("screen_layouts", {})
+        scr = dict(self.ed_screens())
+        for sig, ed in edits.items():
+            vals = {k_: v for k_, v in ed.items() if not k_.startswith(("ew_", "eh_"))}
+            if not vals:
+                continue
+            ent = sl.get(sig) if isinstance(sl.get(sig), dict) else {"b": list(scr.get(sig, (0, 0, 1920, 1080))), "v": {}}
+            ent.setdefault("v", {}).update(vals)
+            sl[sig] = ent
+            if sig == data.get("screen_last") or not data.get("screen_last"):
+                data.update(vals)
+                for lay in (data.get("layouts") or {}).values():
+                    if isinstance(lay, dict):
+                        lay.update(vals)
+        write_json(profile_path(self.game), data)
+        self._ed_edits = {}
 
     def stand_cols(self):
         """Колонки таблицы в порядке оверлея: (ключ, ширина) только включённые."""
@@ -5903,7 +6396,8 @@ class ProfilePanel(ttk.Frame):
         if self.mode_val("delta_theme") not in ("full", "bar", "sectors"):
             return self.d_delta_theme(x, y, w, h, self.mode_val("delta_theme"))
         self.panel(x, y, w, h)
-        dv = math.sin(self.at() * 1.3) * 0.8
+        lv = getattr(self, "live", None) or {}
+        dv = lv["delta"] if isinstance(lv.get("delta"), (int, float)) else math.sin(self.at() * 1.3) * 0.8
         dcol = "#2ee26d" if dv <= 0 else "#ff5a4f"
         dtxt = f"{dv:+.2f}"
         dfrac = min(1.0, abs(dv) / 1.0)
@@ -6267,7 +6761,9 @@ class ProfilePanel(ttk.Frame):
         if reserve:
             c.create_text(x + w - 8, y + 12, text=f"+{reserve:g} кр.", fill=th["dim"], anchor="e", font=self.f_t)
         avg = int(self.num("fuel_avg", 5, int))
-        c.create_text(x + 8, y + 36, text="47.3 л", fill=th["text"], anchor="w", font=self.f_b)
+        lv = getattr(self, "live", None) or {}
+        c.create_text(x + 8, y + 36, text=f"{lv['fuel']:.1f} л" if isinstance(lv.get("fuel"), (int, float)) else "47.3 л",
+                      fill=th["text"], anchor="w", font=self.f_b)
         c.create_rectangle(x + 8, y + 52, x + w - 8, y + 58, fill="#262d38", outline="")
         c.create_rectangle(x + 8, y + 52, x + 8 + (w - 16) * 0.55, y + 58, fill="#2ee26d", outline="")
         add = 12 + reserve * 2.8
