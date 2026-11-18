@@ -71,7 +71,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.7.2"
+APP_VERSION = "3.7.3"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -1488,7 +1488,7 @@ EN.update({
     "Устанавливаю…": "Installing…", "Не удалось открыть": "Could not open", "Настройки лаунчера": "Launcher settings",
     "Сам определять игру и запускать оверлей с её профилем": "Detect the game and start the overlay with its profile",
     "Лаунчер не запустился": "The launcher failed to start", "ПАНЕЛИ ОВЕРЛЕЯ": "OVERLAY PANELS", "Сохранить": "Save",
-    "Сохранить и перезапустить оверлей": "Save and restart the overlay", "Не сохранено": "Not saved", "Трипл": "Triple", "Весь трипл": "Whole triple", "Только центр": "Centre only", "план": "plan", "Два монитора": "Two monitors", "Трипл-скрин": "Triple screen",
+    "Сохранить и перезапустить оверлей": "Save and restart the overlay", "Не сохранено": "Not saved", "Трипл": "Triple", "1 монитор": "1 monitor", "Весь трипл": "Whole triple", "Только центр": "Centre only", "план": "plan", "Два монитора": "Two monitors", "Трипл-скрин": "Triple screen",
     "Подготовить раскладку для трёх мониторов заранее: оверлей возьмёт её, когда запустится на трипл-скрине.": "Prepare a layout for three monitors in advance: the overlay picks it up when it starts on a triple screen.",
     "Главная": "Home", "Оверлей": "Overlay", "Сетапы": "Setups", "Статистика": "Statistics", "Программы": "Programs",
     "Версия": "Version", "Запущена": "Running", "Найдена · Steam": "Found · Steam", "Не найдена в Steam": "Not found in Steam",
@@ -5255,36 +5255,53 @@ class ProfilePanel(ttk.Frame):
         pr = self.ed_primary(sig, b)
         if pr:
             return f"{self.aspect_name(pr[2], pr[3])} · {pr[2]}×{pr[3]}"
-        return f"{self.aspect_name(b[2], b[3])} · {b[2]}×{b[3]}"
+        return f"{self.aspect_name(b[2], b[3])} · {b[2]}×{b[3]}" + (f" ({tr('план')})" if sig.startswith("plan:") else "")
 
     TRIPLE_PRESETS = [(1920, 1080), (2560, 1440), (3440, 1440)]
 
-    def ed_add_triple(self, w, h):
-        """План раскладки для трипл-скрина 3×(w×h): окна текущего экрана переносятся на центральный монитор.
+    def ed_add_plan(self, n, w, h):
+        """План раскладки заранее: n мониторов (1 или 3) по w×h. Окна текущего экрана переносятся на (центральный) монитор.
         Оверлей возьмёт план, когда впервые запустится на рабочем столе такого размера."""
-        sig = f"plan:3x{w}x{h}"
+        sig = f"plan:{n}x{w}x{h}"
         data = read_json(profile_path(self.game))
         sl = data.setdefault("screen_layouts", {})
         if not isinstance(sl, dict):
             sl = data["screen_layouts"] = {}
         if sig not in sl:
             src = self.ed_rects()
-            _, b = self.ed_screen()
-            kx, ky = w / float(b[2]), h / float(b[3])
+            cs, b = self.ed_screen()
+            base = self.ed_primary(cs, b) or b
+            kx, ky = w / float(base[2]), h / float(base[3])
+            off = w if n == 3 else 0
             vals = {}
             for e, r in src.items():
                 xk, yk = self.ELEM_POS[e]
-                vals[xk] = int(w + (r[0] - b[0]) * kx)
-                vals[yk] = int((r[1] - b[1]) * ky)
-            sl[sig] = {"b": [0, 0, 3 * w, h], "v": vals, "m": [[i * w, 0, (i + 1) * w, h] for i in range(3)]}
+                vals[xk] = int(off + (r[0] - base[0]) * kx)
+                vals[yk] = int((r[1] - base[1]) * ky)
+            sl[sig] = {"b": [0, 0, n * w, h], "v": vals, "m": [[i * w, 0, (i + 1) * w, h] for i in range(n)]}
             write_json(profile_path(self.game), data)
         self.ed_pick_screen(sig)
+
+    def ed_add_triple(self, w, h):
+        self.ed_add_plan(3, w, h)
+
+    SINGLE_PRESETS = [(1920, 1080), (2560, 1440), (3440, 1440)]
+
+    def ed_single_menu(self, widget):
+        m = tk.Menu(widget, tearoff=0, bg=UI_PANEL, fg=UI_FG, activebackground=UI_ACCENT, activeforeground=UI_ACCENT_FG, bd=0,
+                    font=("Segoe UI", 10))
+        for w, h in self.SINGLE_PRESETS:
+            m.add_command(label=f"{self.aspect_name(w, h)} · {w}×{h}", command=lambda w=w, h=h: self.ed_add_plan(1, w, h))
+        try:
+            m.tk_popup(widget.winfo_rootx(), widget.winfo_rooty() + widget.winfo_height())
+        finally:
+            m.grab_release()
 
     def ed_triple_menu(self, widget):
         m = tk.Menu(widget, tearoff=0, bg=UI_PANEL, fg=UI_FG, activebackground=UI_ACCENT, activeforeground=UI_ACCENT_FG, bd=0,
                     font=("Segoe UI", 10))
         for w, h in self.TRIPLE_PRESETS:
-            m.add_command(label=f"{tr('Трипл')} 3 × {w}×{h}  ({3 * w}×{h})", command=lambda w=w, h=h: self.ed_add_triple(w, h))
+            m.add_command(label=f"{tr('Трипл')} 3 × {w}×{h}  ({3 * w}×{h})", command=lambda w=w, h=h: self.ed_add_plan(3, w, h))
         try:
             m.tk_popup(widget.winfo_rootx(), widget.winfo_rooty() + widget.winfo_height())
         finally:
@@ -5680,6 +5697,11 @@ class ProfilePanel(ttk.Frame):
                           highlightbackground=UI_BORDER)
             zb.pack(side="left", padx=(0, 6))
             zb.bind("<Button-1>", lambda ev: self.ed_toggle_center())
+        sb = tk.Label(bar, text="+ " + tr("1 монитор"), bg=UI_BG, fg=UI_DIM, font=("Segoe UI Semibold", 9), padx=8, pady=4,
+                      cursor="hand2", highlightthickness=1, highlightbackground=UI_BORDER)
+        sb.pack(side="left", padx=(0, 6))
+        sb.bind("<Button-1>", lambda ev, w_=sb: self.ed_single_menu(w_))
+        Tip(sb, "Подготовить раскладку для одного монитора другого размера (например, 16:9 1920×1080) заранее.")
         if not any(len(self.ed_mons(s_)) >= 3 for s_, _ in scr):
             tb = tk.Label(bar, text="+ " + tr("Трипл-скрин"), bg=UI_BG, fg=UI_DIM, font=("Segoe UI Semibold", 9), padx=8, pady=4,
                           cursor="hand2", highlightthickness=1, highlightbackground=UI_BORDER)
