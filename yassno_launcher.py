@@ -67,7 +67,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.1.0"
+APP_VERSION = "3.2.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -1484,7 +1484,9 @@ EN.update({
     "Устанавливаю…": "Installing…", "Не удалось открыть": "Could not open", "Настройки лаунчера": "Launcher settings",
     "Сам определять игру и запускать оверлей с её профилем": "Detect the game and start the overlay with its profile",
     "Лаунчер не запустился": "The launcher failed to start", "ПАНЕЛИ ОВЕРЛЕЯ": "OVERLAY PANELS", "Сохранить": "Save",
-    "Сохранить и перезапустить оверлей": "Save and restart the overlay", "Не сохранено": "Not saved", "Главная": "Home", "Оверлей": "Overlay", "Сетапы": "Setups", "Статистика": "Statistics", "Программы": "Programs",
+    "Сохранить и перезапустить оверлей": "Save and restart the overlay", "Не сохранено": "Not saved", "Трипл": "Triple", "Весь трипл": "Whole triple", "Только центр": "Centre only", "план": "plan", "Два монитора": "Two monitors", "Трипл-скрин": "Triple screen",
+    "Подготовить раскладку для трёх мониторов заранее: оверлей возьмёт её, когда запустится на трипл-скрине.": "Prepare a layout for three monitors in advance: the overlay picks it up when it starts on a triple screen.",
+    "Главная": "Home", "Оверлей": "Overlay", "Сетапы": "Setups", "Статистика": "Statistics", "Программы": "Programs",
     "Версия": "Version", "Запущена": "Running", "Найдена · Steam": "Found · Steam", "Не найдена в Steam": "Not found in Steam",
     "Найдена · плагин включён": "Found · plugin on", "Найдена · плагин выключен": "Found · plugin off", "Готова к запуску": "Ready",
     "Скоро": "Soon", "Тестовая версия": "Test build", "включено": "on", "панелей из": "panels of", "раскладок": "layouts",
@@ -3951,6 +3953,10 @@ class ProfilePanel(ttk.Frame):
         self.scroll.yview_moveto(0)
         self.title.config(text=tr(next(t for k, t, _ in PAGES if k == key)))
         try:
+            self.app.update_tabs()
+        except Exception:                                # noqa: BLE001
+            pass
+        try:
             if key == "general" and getattr(self, "editor_on", True):
                 self.note.grid_remove()
                 self.ed_bar.grid(row=1, column=0, sticky="ew", pady=(4, 10))
@@ -5130,8 +5136,8 @@ class ProfilePanel(ttk.Frame):
         full = int(max(330, min(self.GH, wh - 250)))
         if getattr(self, "editor_on", True):
             try:
-                b = self.ed_screen()[1]
-                return int(max(260, min(full, (self.PW - 24) * b[3] / float(b[2]) + 52)))     # 3.1: по форме экрана, без пустоты
+                v = self.ed_view()
+                return int(max(260, min(full, (self.PW - 24) * v[3] / float(v[2]) + 52)))     # 3.1: по форме экрана, без пустоты
             except Exception:                            # noqa: BLE001
                 return full
         return full
@@ -5250,6 +5256,57 @@ class ProfilePanel(ttk.Frame):
             and self.app.runner.game == self.game
         return st if fresh else {}
 
+    def ed_mons(self, sig):
+        """Мониторы набора (x0, y0, x1, y1): из оверлея, из сохранённой раскладки или из плана трипл-скрина."""
+        st = self.ed_state()
+        if st.get("sig") == sig and isinstance(st.get("mons"), list) and st["mons"]:
+            return [tuple(m) for m in st["mons"]]
+        ent = (read_json(profile_path(self.game)).get("screen_layouts") or {}).get(sig) or {}
+        m = ent.get("m") if isinstance(ent, dict) else None
+        return [tuple(r) for r in m] if isinstance(m, list) and m else []
+
+    def ed_screen_label(self, sig, b):
+        mons = self.ed_mons(sig)
+        if len(mons) >= 3:
+            w0 = mons[0][2] - mons[0][0]
+            return f"{tr('Трипл')} · 3×{w0}×{b[3]}" + (f" ({tr('план')})" if sig.startswith("plan:") else "")
+        if len(mons) == 2:
+            return f"{tr('Два монитора')} · {b[2]}×{b[3]}"
+        return f"{self.aspect_name(b[2], b[3])} · {b[2]}×{b[3]}"
+
+    TRIPLE_PRESETS = [(1920, 1080), (2560, 1440), (3440, 1440)]
+
+    def ed_add_triple(self, w, h):
+        """План раскладки для трипл-скрина 3×(w×h): окна текущего экрана переносятся на центральный монитор.
+        Оверлей возьмёт план, когда впервые запустится на рабочем столе такого размера."""
+        sig = f"plan:3x{w}x{h}"
+        data = read_json(profile_path(self.game))
+        sl = data.setdefault("screen_layouts", {})
+        if not isinstance(sl, dict):
+            sl = data["screen_layouts"] = {}
+        if sig not in sl:
+            src = self.ed_rects()
+            _, b = self.ed_screen()
+            kx, ky = w / float(b[2]), h / float(b[3])
+            vals = {}
+            for e, r in src.items():
+                xk, yk = self.ELEM_POS[e]
+                vals[xk] = int(w + (r[0] - b[0]) * kx)
+                vals[yk] = int((r[1] - b[1]) * ky)
+            sl[sig] = {"b": [0, 0, 3 * w, h], "v": vals, "m": [[i * w, 0, (i + 1) * w, h] for i in range(3)]}
+            write_json(profile_path(self.game), data)
+        self.ed_pick_screen(sig)
+
+    def ed_triple_menu(self, widget):
+        m = tk.Menu(widget, tearoff=0, bg=UI_PANEL, fg=UI_FG, activebackground=UI_ACCENT, activeforeground=UI_ACCENT_FG, bd=0,
+                    font=("Segoe UI", 10))
+        for w, h in self.TRIPLE_PRESETS:
+            m.add_command(label=f"{tr('Трипл')} 3 × {w}×{h}  ({3 * w}×{h})", command=lambda w=w, h=h: self.ed_add_triple(w, h))
+        try:
+            m.tk_popup(widget.winfo_rootx(), widget.winfo_rooty() + widget.winfo_height())
+        finally:
+            m.grab_release()
+
     def ed_screens(self):
         """Наборы мониторов, на которых уже запускался оверлей: [(подпись набора, (x0, y0, ш, в))]; текущий — первым."""
         data = read_json(profile_path(self.game))
@@ -5271,7 +5328,7 @@ class ProfilePanel(ttk.Frame):
     @staticmethod
     def aspect_name(w, h):
         r = w / float(h or 1)
-        for name, v in (("32:9", 32 / 9), ("21:9", 21 / 9), ("16:10", 16 / 10), ("16:9", 16 / 9), ("4:3", 4 / 3)):
+        for name, v in (("48:9", 48 / 9), ("32:9", 32 / 9), ("21:9", 21 / 9), ("16:10", 16 / 10), ("16:9", 16 / 9), ("4:3", 4 / 3)):
             if abs(r - v) < 0.06:
                 return name
         return f"{r:.2f}:1"
@@ -5321,28 +5378,52 @@ class ProfilePanel(ttk.Frame):
             out[e] = [float(x), float(y), float(w), float(h)]
         return out
 
+    def ed_view(self):
+        """Что показываем: весь рабочий стол или (на трипл-скрине) центральный монитор с краями боковых."""
+        sig, b = self.ed_screen()
+        mons = self.ed_mons(sig)
+        if len(mons) >= 3 and getattr(self, "_ed_center", True):
+            ms = sorted(mons)
+            cx0, cy0, cx1, cy1 = ms[len(ms) // 2]
+            pad = (cx1 - cx0) * 0.3
+            vx0, vx1 = max(b[0], cx0 - pad), min(b[0] + b[2], cx1 + pad)
+            return (vx0, cy0, vx1 - vx0, cy1 - cy0)
+        return tuple(b)
+
     def ed_geom(self):
-        """Куда на холсте ложится экран: (ox, oy, k, b)."""
+        """Куда на холсте ложится экран: (ox, oy, k, b). ox/oy — где на холсте точка b0, b1 (видимая часть может быть уже)."""
         _, b = self.ed_screen()
+        v = self.ed_view()
         c = self.canvas
         cw, ch = self.PW, int(float(c.cget("height")))
         fw = cw - 24
-        fh = fw * b[3] / float(b[2])
+        fh = fw * v[3] / float(v[2])
         if fh > ch - 40:
             fh = ch - 40
-            fw = fh * b[2] / float(b[3])
-        return (cw - fw) / 2, (ch - 26 - fh) / 2, fw / float(b[2]), b
+            fw = fh * v[2] / float(v[3])
+        k = fw / float(v[2])
+        fx, fy = (cw - fw) / 2, (ch - 26 - fh) / 2
+        return fx - (v[0] - b[0]) * k, fy - (v[1] - b[1]) * k, k, b
 
     def draw_editor(self):
         c = self.canvas
         ox, oy, k, b = self.ed_geom()
-        fw, fh = b[2] * k, b[3] * k
-        before = set(c.find_all())
+        v = self.ed_view()
+        vx, vy = ox + (v[0] - b[0]) * k, oy + (v[1] - b[1]) * k        # видимая часть на холсте
+        fw, fh = v[2] * k, v[3] * k
         draw_scene(c, int(fw), int(fh), "track", self.pv_light(), tag="edscene")
-        c.move("edscene", ox, oy)
-        c.create_rectangle(ox - 1, oy - 1, ox + fw + 1, oy + fh + 1, outline=mix(UI_BORDER, UI_DIM, 0.4), width=2)
+        c.move("edscene", vx, vy)
+        sig = self.ed_screen()[0]
+        mons = self.ed_mons(sig)
+        if len(mons) > 1:                                    # рамки между мониторами — видно, где центральный экран
+            for (mx0, my0, mx1, my1) in mons:
+                X0, Y0 = ox + (mx0 - b[0]) * k, oy + (my0 - b[1]) * k
+                X1, Y1 = ox + (mx1 - b[0]) * k, oy + (my1 - b[1]) * k
+                c.create_rectangle(X0, Y0, X1, Y1, outline="#05060a", width=4)
+                c.create_rectangle(X0 + 2, Y0 + 2, X1 - 2, Y1 - 2, outline=mix(UI_BORDER, UI_DIM, 0.25), width=1)
         rects = self.ed_rects()
         self._ed_cache = (ox, oy, k, b, rects)
+        self._ed_frame = (vx, vy, fw, fh)
         sel = getattr(self, "_ed_sel", None)
         for e, label, fn, (dw, dh) in self.ed_elems():
             x, y, w, h = rects[e]
@@ -5372,8 +5453,15 @@ class ProfilePanel(ttk.Frame):
                 c.addtag_withtag("w_" + e, it)
             self.hits.append((e, X, Y, X + W, Y + H))
         self.make_fonts(1.0)
+        self.hits = [h_ for h_ in self.hits if h_[3] > vx and h_[1] < vx + fw and h_[4] > vy and h_[2] < vy + fh]   # за краем — не кликается
+        cw, chh = self.PW, int(float(c.cget("height")))
+        bg = str(c.cget("bg"))
+        for x0_, y0_, x1_, y1_ in ((0, 0, vx, chh), (vx + fw, 0, cw, chh), (0, 0, cw, vy), (0, vy + fh, cw, chh)):
+            if x1_ > x0_ and y1_ > y0_:                    # окна за краем видимой части не вылезают на рамку
+                c.create_rectangle(x0_, y0_, x1_, y1_, fill=bg, outline=bg)
+        c.create_rectangle(vx - 1, vy - 1, vx + fw + 1, vy + fh + 1, outline=mix(UI_BORDER, UI_DIM, 0.4), width=2)
         self.ed_draw_sel()
-        c.create_text(ox + fw / 2, oy + fh + 14, anchor="center", fill=self.ph_col(1), font=("Segoe UI", 9),
+        c.create_text(vx + fw / 2, vy + fh + 14, anchor="center", fill=self.ph_col(1), font=("Segoe UI", 9),
                       text=tr("клик — выбрать · тащи — двигать · угол — размер · Shift — без магнита · двойной клик — настройки окна"))
 
     def ed_box(self, e, label, X, Y, W, H):
@@ -5458,8 +5546,11 @@ class ProfilePanel(ttk.Frame):
         if free:
             return x, y
         lim = 8 / max(k, 1e-6)
-        xs = [b[0], b[0] + b[2]] + [v for o, r in rects.items() if o != e_ and self.v[o].get() for v in (r[0], r[0] + r[2])]
-        ys = [b[1], b[1] + b[3]] + [v for o, r in rects.items() if o != e_ and self.v[o].get() for v in (r[1], r[1] + r[3])]
+        mons = self.ed_mons(self.ed_screen()[0])
+        xs = [b[0], b[0] + b[2]] + [v for m in mons for v in (m[0], m[2])] + \
+            [v for o, r in rects.items() if o != e_ and self.v[o].get() for v in (r[0], r[0] + r[2])]
+        ys = [b[1], b[1] + b[3]] + [v for m in mons for v in (m[1], m[3])] + \
+            [v for o, r in rects.items() if o != e_ and self.v[o].get() for v in (r[1], r[1] + r[3])]
 
         def best(p, size, lines, step, base):
             for edge, off in ((p, 0), (p + size, size)):
@@ -5539,6 +5630,15 @@ class ProfilePanel(ttk.Frame):
         self.draw_preview()
         self.ed_inspect()
 
+    def ed_toggle_center(self):
+        self._ed_center = not getattr(self, "_ed_center", True)
+        self.ed_bar_sync()
+        try:
+            self.canvas.config(height=self.gen_h())
+        except tk.TclError:
+            pass
+        self.draw_preview()
+
     def ed_bar_sync(self):
         """Кнопки мониторов и чип «живые данные» над редактором."""
         bar = getattr(self, "ed_bar", None)
@@ -5550,14 +5650,24 @@ class ProfilePanel(ttk.Frame):
         scr = self.ed_screens()
         for sig, b in scr:
             on = sig == cur
-            lb = tk.Label(bar, text=f"{self.aspect_name(b[2], b[3])} · {b[2]}×{b[3]}", bg=UI_FIELD if on else UI_PANEL,
+            lb = tk.Label(bar, text=self.ed_screen_label(sig, b), bg=UI_FIELD if on else UI_PANEL,
                           fg=UI_FG if on else UI_DIM, font=("Segoe UI Semibold", 9), padx=10, pady=4, cursor="hand2",
                           highlightthickness=1, highlightbackground=UI_ACCENT if on else UI_BORDER)
             lb.pack(side="left", padx=(0, 6))
             lb.bind("<Button-1>", lambda ev, s=sig: self.ed_pick_screen(s))
-        if len(scr) == 1:
-            tk.Label(bar, text=tr("второй монитор появится здесь, когда оверлей запустится на нём"), bg=UI_BG, fg=UI_DIM,
-                     font=("Segoe UI", 9)).pack(side="left", padx=(4, 0))
+        if len(self.ed_mons(cur)) >= 3:
+            cen = getattr(self, "_ed_center", True)
+            zb = tk.Label(bar, text=tr("Весь трипл") if cen else tr("Только центр"), bg=UI_BG, fg=UI_DIM,
+                          font=("Segoe UI Semibold", 9), padx=8, pady=4, cursor="hand2", highlightthickness=1,
+                          highlightbackground=UI_BORDER)
+            zb.pack(side="left", padx=(0, 6))
+            zb.bind("<Button-1>", lambda ev: self.ed_toggle_center())
+        if not any(len(self.ed_mons(s_)) >= 3 for s_, _ in scr):
+            tb = tk.Label(bar, text="+ " + tr("Трипл-скрин"), bg=UI_BG, fg=UI_DIM, font=("Segoe UI Semibold", 9), padx=8, pady=4,
+                          cursor="hand2", highlightthickness=1, highlightbackground=UI_BORDER)
+            tb.pack(side="left", padx=(0, 6))
+            tb.bind("<Button-1>", lambda ev, w_=tb: self.ed_triple_menu(w_))
+            Tip(tb, "Подготовить раскладку для трёх мониторов заранее: оверлей возьмёт её, когда запустится на трипл-скрине.")
         live = bool(self.ed_state().get("live"))
         tk.Label(bar, text=("● " + tr("Живые данные")) if live else tr("Демо — игра не запущена"), bg=UI_BG,
                  fg=UI_GREEN if live else UI_DIM, font=("Segoe UI Semibold", 9)).pack(side="right")
@@ -5649,7 +5759,7 @@ class ProfilePanel(ttk.Frame):
             ent = sl.get(sig) if isinstance(sl.get(sig), dict) else {"b": list(scr.get(sig, (0, 0, 1920, 1080))), "v": {}}
             ent.setdefault("v", {}).update(vals)
             sl[sig] = ent
-            if sig == data.get("screen_last") or not data.get("screen_last"):
+            if not sig.startswith("plan:") and (sig == data.get("screen_last") or not data.get("screen_last")):
                 data.update(vals)
                 for lay in (data.get("layouts") or {}).values():
                     if isinstance(lay, dict):
@@ -8954,34 +9064,7 @@ class HomePage(tk.Frame):
         self._tick, self._hero_img, self._hero_key = None, None, None
         self._found = None
         pad = 22
-        # --- заголовок: логотип, вкладки, версия и настройки ---
-        top = tk.Frame(self, bg=UI_BG)
-        top.pack(fill="x", padx=pad, pady=(14, 0))
-        Brand(top).pack(side="left", padx=(0, 30))
-        self.tabs = []
-        for text, cmd in (("Главная", None), ("Оверлей", lambda: self.app.select_game(self.app.selected)),
-                          ("Сетапы", lambda: self.open_panel("general", "Сетапы")), ("Статистика", self.app.show_stats),
-                          ("Программы", lambda: self.open_panel("apps"))):
-            col = tk.Frame(top, bg=UI_BG)
-            col.pack(side="left", padx=(0, 6))
-            lb = tk.Label(col, text=tr(text), bg=UI_BG, fg=UI_FG if cmd is None else UI_DIM, font=("Segoe UI Semibold", 11),
-                          padx=10, pady=8, cursor="arrow" if cmd is None else "hand2")
-            lb.pack()
-            line = tk.Frame(col, bg=UI_ACCENT if cmd is None else UI_BG, height=2)
-            line.pack(fill="x")
-            if cmd is not None:
-                lb.bind("<Button-1>", lambda e, c=cmd: c())
-                lb.bind("<Enter>", lambda e, l=lb: l.config(fg=UI_FG))
-                lb.bind("<Leave>", lambda e, l=lb: l.config(fg=UI_DIM))
-        gear = tk.Label(top, text="⚙", bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI Symbol", 13), width=3, pady=4, cursor="hand2",
-                        highlightthickness=1, highlightbackground=UI_BORDER)
-        gear.pack(side="right")
-        gear.bind("<Button-1>", lambda e: self.app.show_settings())
-        Tip(gear, "Настройки лаунчера")
-        self.ver = StatusChip(top)
-        self.ver.pack(side="right", padx=(0, 10))
-        tk.Frame(self, bg=UI_BORDER, height=1).pack(fill="x", pady=(0, 0))
-
+        # 3.1: логотип и вкладки — в общей шапке лаунчера
         main = tk.Frame(self, bg=UI_BG)
         main.pack(fill="both", expand=True, padx=pad, pady=(18, 16))
         main.columnconfigure(0, weight=1)
@@ -9123,7 +9206,6 @@ class HomePage(tk.Frame):
             self.fill_session()
             self.fill_setups()
             self.fill_apps()
-            self.ver.set(f"{tr('Версия')} {APP_VERSION}", "off")
         except tk.TclError:
             return
         self._tick = self.after(1500, self.tick)
@@ -9508,57 +9590,79 @@ class App:
             w.destroy()
         setup_style(self.root)
         self.panels = {}
-        tiles = ttk.Frame(self.root, padding=(16, 12, 16, 0))
-        tiles.pack(fill="x")
+        # 3.1: одна шапка на всех страницах — логотип, вкладки, статус оверлея, игры, запуск и настройки
+        tiles = tk.Frame(self.root, bg=UI_BG)
+        tiles.pack(fill="x", padx=16, pady=(0, 0))
         lead = Brand(tiles)
-        lead.pack(side="left", padx=(0, 22))
+        lead.pack(side="left", padx=(0, 18), pady=10)
         for w in [lead] + list(lead.winfo_children()) + [c for ch in lead.winfo_children() for c in ch.winfo_children()]:
             w.bind("<Button-1>", lambda e: self.show_home())
             w.configure(cursor="hand2")
+        self.tabs = {}
+        for key, text in (("home", "Главная"), ("overlay", "Оверлей"), ("setups", "Сетапы"), ("stats", "Статистика"), ("apps", "Программы")):
+            col = tk.Frame(tiles, bg=UI_BG)
+            col.pack(side="left")
+            lb = tk.Label(col, text=tr(text), bg=UI_BG, fg=UI_DIM, font=("Segoe UI Semibold", 11), padx=10, pady=17, cursor="hand2")
+            lb.pack()
+            line = tk.Frame(col, bg=UI_BG, height=2)
+            line.pack(fill="x")
+            lb.bind("<Button-1>", lambda e, k=key: self.open_tab(k))
+            lb.bind("<Enter>", lambda e, l=lb, k=key: l.config(fg=UI_FG))
+            lb.bind("<Leave>", lambda e, k=key: self.update_tabs())
+            self.tabs[key] = (lb, line)
         self.tiles = {}
-
-        def _fit_tiles(e=None, st={"on": True}):             # на узком окне логотип убирается — переключателю игр хватает места
-            need = 1180
-            if e is not None and e.widget is tiles:
-                want = e.width >= need
-                if want != st["on"]:
-                    st["on"] = want
-                    if want:
-                        lead.pack(side="left", padx=(0, 22), before=tiles.pack_slaves()[0])
-                    else:
-                        lead.pack_forget()
-        tiles.bind("<Configure>", _fit_tiles)
-        seg = RoundBox(tiles, radius=12, fill=UI_PANEL, border=UI_BORDER, outer=UI_BG, m=0)
-        seg.pack(side="left")
+        gear = tk.Label(tiles, text="⚙", bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI Symbol", 13), width=3, pady=3, cursor="hand2",
+                        highlightthickness=1, highlightbackground=UI_BORDER)
+        gear.pack(side="right", padx=(10, 0))
+        gear.bind("<Button-1>", lambda e: self.show_settings())
+        Tip(gear, "Настройки лаунчера")
+        self.gear = gear
+        hl = ttk.Button(tiles, text="▶  Запустить игру", style="Launch.TButton", command=lambda: self.launch_game())
+        hl.pack(side="right")
+        seg = RoundBox(tiles, radius=11, fill=UI_PANEL, border=UI_BORDER, outer=UI_BG, m=0)
+        seg.pack(side="right", padx=(0, 12))
+        self._hdr_play = (hl, seg)                          # на «Главной» свои карточки игр и кнопка запуска — эти прячем
         segi = seg.inner
+        short = {"lmu": "LMU", "rf2": "rF2", "iracing": "iRacing"}
         for game, name in GAMES.items():
-            t = GameTile(segi, name, lambda g=game: self.pick_game(g), game=game)
+            t = GameTile(segi, short.get(game, name), lambda g=game: self.pick_game(g), game=game)
             t.pack(side="left", padx=(0, 2))
+            Tip(t, name)
             self.tiles[game] = t
-        t = GameTile(segi, "Assetto Corsa", self.show_ac, game="ac")
+        t = GameTile(segi, "AC", self.show_ac, game="ac")
         t.pack(side="left", padx=(0, 2))
+        Tip(t, "Assetto Corsa")
         self.tiles["ac"] = t
         if ETS2 is not None:
-            t = GameTile(segi, "ETS 2", self.show_ets2, game="ets2")
+            t = GameTile(segi, "ETS2", self.show_ets2, game="ets2")
             t.pack(side="left")
+            Tip(t, "Euro Truck Simulator 2")
             self.tiles["ets2"] = t
-        ttk.Button(tiles, text="▶  Запустить игру", style="Launch.TButton", command=lambda: self.launch_game()).pack(side="right")
-
-        head = ttk.Frame(self.root, padding=(14, 8, 14, 2))
-        head.pack(fill="x")
-        chips = tk.Frame(head, bg=UI_BG)                    # живой статус: игра, оверлей, телеметрия
-        chips.pack(side="left")
-        self.chip_game, self.chip_ov, self.chip_tel = StatusChip(chips), StatusChip(chips), StatusChip(chips)
-        self.chip_game.pack(side="left", padx=(0, 8))
-        self.chip_ov.pack(side="left", padx=(0, 8))
+        chips = tk.Frame(tiles, bg=UI_BG)                   # живой статус оверлея (и телеметрии, пока он работает)
+        chips.pack(side="right", padx=(0, 12))
+        hid = tk.Frame(tiles, bg=UI_BG)                     # чип «игра» живёт в карточке статуса на «Главной»
+        self.chip_game, self.chip_ov, self.chip_tel = StatusChip(hid), StatusChip(chips), StatusChip(chips)
+        self.chip_ov.pack(side="left", padx=(0, 6))
         self._status_key = None
         if not getattr(self, "_pulse_on", False):
             self._pulse_on = True
             self.root.after(400, self.pulse_tick)
 
-        ttk.Button(head, text="Процессы игр…", command=self.edit_procs).pack(side="right")
-        Toggle(head, "Закрывать оверлей вместе с игрой", self.close_var, command=self.save_cfg).pack(side="right", padx=(0, 22))
-        Toggle(head, "Сам определять игру и запускать оверлей с её профилем", self.auto_var, command=self.save_cfg).pack(side="right", padx=(0, 22))
+        def _fit_tiles(e=None, st={"lead": True, "chips": True}):     # узкое окно: сначала прячем статус, потом логотип
+            if e is None or e.widget is not tiles:
+                return
+            for key, w_, need, kw in (("chips", chips, 1500, dict(side="right", padx=(0, 12), before=seg)),
+                                      ("lead", lead, 1250, dict(side="left", padx=(0, 18), pady=10, before=tiles.pack_slaves()[0]))):
+                want = e.width >= need
+                if want != st[key]:
+                    st[key] = want
+                    if want:
+                        w_.pack(**kw)
+                    else:
+                        w_.pack_forget()
+        tiles.bind("<Configure>", _fit_tiles)
+        head = tk.Frame(self.root, bg=UI_BORDER, height=1)      # тонкая линия под шапкой
+        head.pack(fill="x")
 
         body = ttk.Frame(self.root)
         body.pack(fill="both", expand=True, padx=14, pady=(2, 10))
@@ -9768,18 +9872,69 @@ class App:
         tiles, head, body = ch
         home = self.view == "home"
         try:
-            if home and tiles.winfo_manager():
-                tiles.pack_forget()
-                head.pack_forget()
+            hl, seg = self._hdr_play
+            if home and hl.winfo_manager():
+                hl.pack_forget()
+                seg.pack_forget()
+            elif not home and not hl.winfo_manager():
+                hl.pack(side="right", after=self.gear)
+                seg.pack(side="right", padx=(0, 12), after=hl)
+        except (tk.TclError, AttributeError):
+            pass
+        try:
+            if home and self.navhost.winfo_manager():
                 self.navhost.grid_remove()
                 body.pack_configure(padx=0, pady=0)
-            elif not home and not tiles.winfo_manager():
-                tiles.pack(fill="x", before=body)
-                head.pack(fill="x", before=body)
+            elif not home and not self.navhost.winfo_manager():
                 self.navhost.grid()
                 body.pack_configure(padx=14, pady=(2, 10))
         except tk.TclError:
             pass
+        self.update_tabs()
+
+    def active_tab(self):
+        v = self.view
+        if v == "home":
+            return "home"
+        if v == "stats":
+            return "stats"
+        if v in GAMES or v in ("ac", "ets2"):
+            pg = getattr(self.panels.get(self.selected), "page", "") if v in GAMES else ""
+            return "apps" if pg == "apps" else "overlay"
+        return ""
+
+    def update_tabs(self):
+        act = self.active_tab()
+        for k, (lb, line) in getattr(self, "tabs", {}).items():
+            try:
+                lb.config(fg=UI_FG if k == act else UI_DIM)
+                line.config(bg=UI_ACCENT if k == act else UI_BG)
+            except tk.TclError:
+                pass
+        try:
+            self.gear.config(fg=UI_ACCENT if self.view == "settings" else UI_DIM)
+        except (tk.TclError, AttributeError):
+            pass
+
+    def open_tab(self, key):
+        """Вкладки шапки: Главная, Оверлей (раскладка выбранной игры), Сетапы, Статистика, Программы."""
+        if key == "home":
+            return self.show_home()
+        if key == "stats":
+            return self.show_stats()
+        g = self.selected
+        self.select_game(g)
+        p = self.panels.get(g)
+        try:
+            if key == "overlay":
+                p.show_page("general")
+            elif key == "apps":
+                p.show_page("apps")
+            elif key == "setups":
+                self.home_page.open_panel("general", "Сетапы")
+        except Exception:                                # noqa: BLE001
+            pass
+        self.update_tabs()
 
     # ---------- настройки лаунчера ----------
     def on_paths_changed(self):

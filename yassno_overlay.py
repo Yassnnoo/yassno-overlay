@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "3.1.0"
+APP_VERSION = "3.2.0"
 import argparse
 import bisect
 import collections
@@ -1187,7 +1187,28 @@ def load_screen_layout(cfg, sig, bounds):
     if not isinstance(sl, dict):
         sl = cfg["screen_layouts"] = {}
     cur = sl.get(sig)
-    if isinstance(cur, dict) and isinstance(cur.get("v"), dict):
+    plan = None
+    if not (isinstance(cur, dict) and isinstance(cur.get("v"), dict)):
+        # 3.1: раскладка, заранее подготовленная в лаунчере для такого же размера рабочего стола (например, трипл-скрин)
+        for k, ent in sl.items():
+            if str(k).startswith("plan:") and isinstance(ent, dict) and isinstance(ent.get("b"), list) and len(ent["b"]) == 4 \
+                    and isinstance(ent.get("v"), dict) and int(ent["b"][2]) == int(bounds[2]) and int(ent["b"][3]) == int(bounds[3]):
+                plan = ent
+                break
+    if plan is not None:
+        dx, dy = int(bounds[0]) - int(plan["b"][0]), int(bounds[1]) - int(plan["b"][1])
+        vals = {}
+        for k, v in plan["v"].items():
+            if k not in SCREEN_KEYS:
+                continue
+            if isinstance(v, (int, float)) and (k == "x" or k.endswith("_x")):
+                v = int(v + dx)
+            elif isinstance(v, (int, float)) and (k == "y" or k.endswith("_y")):
+                v = int(v + dy)
+            vals[k] = v
+        cfg.update(vals)
+        sl[sig] = {"b": list(bounds), "v": vals}
+    elif isinstance(cur, dict) and isinstance(cur.get("v"), dict):
         cfg.update({k: v for k, v in cur["v"].items() if k in SCREEN_KEYS})
     else:
         prev = sl.get(cfg.get("screen_last"))
@@ -6122,7 +6143,7 @@ class Overlay:
             self._state_conn = bool(state["ok"])
             data = {"locked": bool(self.locked), "pid": os.getpid(), "ts": time.time(), "connected": self._state_conn,
                     "sig": getattr(self, "screen_sig", ""), "b": list(getattr(self, "screen_b", ()) or ()),
-                    "wins": self.win_rects(), "live": self.live_snapshot()}
+                    "wins": self.win_rects(), "live": self.live_snapshot(), "mons": [list(r) for r in monitor_rects(self.root)]}
             tmp = os.path.splitext(CFG_PATH)[0] + ".state.tmp"
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(data, f)
@@ -6538,7 +6559,8 @@ class Overlay:
             self.cfg[w.POS[0]], self.cfg[w.POS[1]] = w.top.winfo_x(), w.top.winfo_y()
         self.capture_layout()
         self.cfg.setdefault("screen_layouts", {})[self.screen_sig] = {
-            "b": list(self.screen_b), "v": {k: self.cfg[k] for k in SCREEN_KEYS if k in self.cfg}, "wh": self.win_rects()}
+            "b": list(self.screen_b), "v": {k: self.cfg[k] for k in SCREEN_KEYS if k in self.cfg}, "wh": self.win_rects(),
+            "m": [list(r) for r in monitor_rects(self.root)]}
         self.cfg["screen_last"] = self.screen_sig
         try:
             with open(CFG_PATH, "w", encoding="utf-8") as f:
