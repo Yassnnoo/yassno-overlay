@@ -71,7 +71,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.7.1"
+APP_VERSION = "3.7.2"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -5252,8 +5252,9 @@ class ProfilePanel(ttk.Frame):
         if len(mons) >= 3:
             w0 = mons[0][2] - mons[0][0]
             return f"{tr('Трипл')} · 3×{w0}×{b[3]}" + (f" ({tr('план')})" if sig.startswith("plan:") else "")
-        if len(mons) == 2:
-            return f"{tr('Два монитора')} · {b[2]}×{b[3]}"
+        pr = self.ed_primary(sig, b)
+        if pr:
+            return f"{self.aspect_name(pr[2], pr[3])} · {pr[2]}×{pr[3]}"
         return f"{self.aspect_name(b[2], b[3])} · {b[2]}×{b[3]}"
 
     TRIPLE_PRESETS = [(1920, 1080), (2560, 1440), (3440, 1440)]
@@ -5360,10 +5361,29 @@ class ProfilePanel(ttk.Frame):
             out[e] = [float(x), float(y), float(w), float(h)]
         return out
 
+    def ed_primary(self, sig, b):
+        """Основной монитор набора (x, y, ш, в) или None, если рабочий стол — один экран / трипл. Второй монитор в редакторе не нужен."""
+        mons = self.ed_mons(sig)
+        if len(mons) >= 3 or sig.startswith("plan:"):
+            return None
+        if len(mons) == 2:
+            for m_ in mons:
+                if m_[0] <= 0 < m_[2] and m_[1] <= 0 < m_[3]:
+                    return (m_[0], m_[1], m_[2] - m_[0], m_[3] - m_[1])
+        mm = re.match(r"^(\d+)x(\d+)@(-?\d+),(-?\d+),(\d+)x(\d+)$", str(sig))
+        if mm:
+            w, h = int(mm.group(1)), int(mm.group(2))
+            if (w, h) != (b[2], b[3]) and b[0] <= 0 < b[0] + b[2] and b[1] <= 0 < b[1] + b[3] and w <= b[2] and h <= b[3]:
+                return (0, 0, w, h)                          # сигнатура начинается с размера основного монитора, он стоит в (0, 0)
+        return None
+
     def ed_view(self):
-        """Что показываем: весь рабочий стол или (на трипл-скрине) центральный монитор с краями боковых."""
+        """Что показываем: один экран; на трипл-скрине — центральный монитор с краями боковых; второй монитор отбрасываем."""
         sig, b = self.ed_screen()
         mons = self.ed_mons(sig)
+        pr = self.ed_primary(sig, b)
+        if pr:
+            return tuple(pr)
         if len(mons) >= 3 and getattr(self, "_ed_center", True):
             ms = sorted(mons)
             cx0, cy0, cx1, cy1 = ms[len(ms) // 2]
@@ -5397,7 +5417,7 @@ class ProfilePanel(ttk.Frame):
         c.move("edscene", vx, vy)
         sig = self.ed_screen()[0]
         mons = self.ed_mons(sig)
-        if len(mons) > 1:                                    # рамки между мониторами — видно, где центральный экран
+        if len(mons) >= 3:                                   # рамки между мониторами — видно, где центральный экран
             for (mx0, my0, mx1, my1) in mons:
                 X0, Y0 = ox + (mx0 - b[0]) * k, oy + (my0 - b[1]) * k
                 X1, Y1 = ox + (mx1 - b[0]) * k, oy + (my1 - b[1]) * k

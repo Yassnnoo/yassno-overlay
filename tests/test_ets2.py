@@ -704,6 +704,11 @@ class LauncherLook(unittest.TestCase):
                 txt = " ".join(w.cget("text") for r in hp.c_set.winfo_children() for w in r.winfo_children() if w.winfo_class() == "Label")
                 self.assertIn("46 206 100 ₽", txt)
                 del hp.currency, hp.eur_rate
+            pp = app.panels.get("lmu")
+            if pp is not None:
+                self.assertEqual(pp.ed_primary("3440x1440@0,-1440,3440x2880", (0, -1440, 3440, 2880)), (0, 0, 3440, 1440))
+                self.assertIsNone(pp.ed_primary("1920x1080@0,0,1920x1080", (0, 0, 1920, 1080)))
+                self.assertIn("3440×1440", pp.ed_screen_label("3440x1440@0,-1440,3440x2880", (0, -1440, 3440, 2880)))
             app.upd_info = {"newer": True, "version": "9.9.9", "notes": "", "files": []}
             app.set_version_chip()
             self.assertIn("9.9.9", app.topbar.ver.text)
