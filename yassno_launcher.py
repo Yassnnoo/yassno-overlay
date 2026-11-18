@@ -3953,10 +3953,6 @@ class ProfilePanel(ttk.Frame):
         self.scroll.yview_moveto(0)
         self.title.config(text=tr(next(t for k, t, _ in PAGES if k == key)))
         try:
-            self.app.update_tabs()
-        except Exception:                                # noqa: BLE001
-            pass
-        try:
             if key == "general" and getattr(self, "editor_on", True):
                 self.note.grid_remove()
                 self.ed_bar.grid(row=1, column=0, sticky="ew", pady=(4, 10))
@@ -9064,7 +9060,34 @@ class HomePage(tk.Frame):
         self._tick, self._hero_img, self._hero_key = None, None, None
         self._found = None
         pad = 22
-        # 3.1: логотип и вкладки — в общей шапке лаунчера
+        # --- заголовок: логотип, вкладки, версия и настройки ---
+        top = tk.Frame(self, bg=UI_BG)
+        top.pack(fill="x", padx=pad, pady=(14, 0))
+        Brand(top).pack(side="left", padx=(0, 30))
+        self.tabs = []
+        for text, cmd in (("Главная", None), ("Оверлей", lambda: self.app.select_game(self.app.selected)),
+                          ("Сетапы", lambda: self.open_panel("general", "Сетапы")), ("Статистика", self.app.show_stats),
+                          ("Программы", lambda: self.open_panel("apps"))):
+            col = tk.Frame(top, bg=UI_BG)
+            col.pack(side="left", padx=(0, 6))
+            lb = tk.Label(col, text=tr(text), bg=UI_BG, fg=UI_FG if cmd is None else UI_DIM, font=("Segoe UI Semibold", 11),
+                          padx=10, pady=8, cursor="arrow" if cmd is None else "hand2")
+            lb.pack()
+            line = tk.Frame(col, bg=UI_ACCENT if cmd is None else UI_BG, height=2)
+            line.pack(fill="x")
+            if cmd is not None:
+                lb.bind("<Button-1>", lambda e, c=cmd: c())
+                lb.bind("<Enter>", lambda e, l=lb: l.config(fg=UI_FG))
+                lb.bind("<Leave>", lambda e, l=lb: l.config(fg=UI_DIM))
+        gear = tk.Label(top, text="⚙", bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI Symbol", 13), width=3, pady=4, cursor="hand2",
+                        highlightthickness=1, highlightbackground=UI_BORDER)
+        gear.pack(side="right")
+        gear.bind("<Button-1>", lambda e: self.app.show_settings())
+        Tip(gear, "Настройки лаунчера")
+        self.ver = StatusChip(top)
+        self.ver.pack(side="right", padx=(0, 10))
+        tk.Frame(self, bg=UI_BORDER, height=1).pack(fill="x", pady=(0, 0))
+
         main = tk.Frame(self, bg=UI_BG)
         main.pack(fill="both", expand=True, padx=pad, pady=(18, 16))
         main.columnconfigure(0, weight=1)
@@ -9206,6 +9229,7 @@ class HomePage(tk.Frame):
             self.fill_session()
             self.fill_setups()
             self.fill_apps()
+            self.ver.set(f"{tr('Версия')} {APP_VERSION}", "off")
         except tk.TclError:
             return
         self._tick = self.after(1500, self.tick)
@@ -9590,79 +9614,57 @@ class App:
             w.destroy()
         setup_style(self.root)
         self.panels = {}
-        # 3.1: одна шапка на всех страницах — логотип, вкладки, статус оверлея, игры, запуск и настройки
-        tiles = tk.Frame(self.root, bg=UI_BG)
-        tiles.pack(fill="x", padx=16, pady=(0, 0))
+        tiles = ttk.Frame(self.root, padding=(16, 12, 16, 0))
+        tiles.pack(fill="x")
         lead = Brand(tiles)
-        lead.pack(side="left", padx=(0, 18), pady=10)
+        lead.pack(side="left", padx=(0, 22))
         for w in [lead] + list(lead.winfo_children()) + [c for ch in lead.winfo_children() for c in ch.winfo_children()]:
             w.bind("<Button-1>", lambda e: self.show_home())
             w.configure(cursor="hand2")
-        self.tabs = {}
-        for key, text in (("home", "Главная"), ("overlay", "Оверлей"), ("setups", "Сетапы"), ("stats", "Статистика"), ("apps", "Программы")):
-            col = tk.Frame(tiles, bg=UI_BG)
-            col.pack(side="left")
-            lb = tk.Label(col, text=tr(text), bg=UI_BG, fg=UI_DIM, font=("Segoe UI Semibold", 11), padx=10, pady=17, cursor="hand2")
-            lb.pack()
-            line = tk.Frame(col, bg=UI_BG, height=2)
-            line.pack(fill="x")
-            lb.bind("<Button-1>", lambda e, k=key: self.open_tab(k))
-            lb.bind("<Enter>", lambda e, l=lb, k=key: l.config(fg=UI_FG))
-            lb.bind("<Leave>", lambda e, k=key: self.update_tabs())
-            self.tabs[key] = (lb, line)
         self.tiles = {}
-        gear = tk.Label(tiles, text="⚙", bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI Symbol", 13), width=3, pady=3, cursor="hand2",
-                        highlightthickness=1, highlightbackground=UI_BORDER)
-        gear.pack(side="right", padx=(10, 0))
-        gear.bind("<Button-1>", lambda e: self.show_settings())
-        Tip(gear, "Настройки лаунчера")
-        self.gear = gear
-        hl = ttk.Button(tiles, text="▶  Запустить игру", style="Launch.TButton", command=lambda: self.launch_game())
-        hl.pack(side="right")
-        seg = RoundBox(tiles, radius=11, fill=UI_PANEL, border=UI_BORDER, outer=UI_BG, m=0)
-        seg.pack(side="right", padx=(0, 12))
-        self._hdr_play = (hl, seg)                          # на «Главной» свои карточки игр и кнопка запуска — эти прячем
+
+        def _fit_tiles(e=None, st={"on": True}):             # на узком окне логотип убирается — переключателю игр хватает места
+            need = 1180
+            if e is not None and e.widget is tiles:
+                want = e.width >= need
+                if want != st["on"]:
+                    st["on"] = want
+                    if want:
+                        lead.pack(side="left", padx=(0, 22), before=tiles.pack_slaves()[0])
+                    else:
+                        lead.pack_forget()
+        tiles.bind("<Configure>", _fit_tiles)
+        seg = RoundBox(tiles, radius=12, fill=UI_PANEL, border=UI_BORDER, outer=UI_BG, m=0)
+        seg.pack(side="left")
         segi = seg.inner
-        short = {"lmu": "LMU", "rf2": "rF2", "iracing": "iRacing"}
         for game, name in GAMES.items():
-            t = GameTile(segi, short.get(game, name), lambda g=game: self.pick_game(g), game=game)
+            t = GameTile(segi, name, lambda g=game: self.pick_game(g), game=game)
             t.pack(side="left", padx=(0, 2))
-            Tip(t, name)
             self.tiles[game] = t
-        t = GameTile(segi, "AC", self.show_ac, game="ac")
+        t = GameTile(segi, "Assetto Corsa", self.show_ac, game="ac")
         t.pack(side="left", padx=(0, 2))
-        Tip(t, "Assetto Corsa")
         self.tiles["ac"] = t
         if ETS2 is not None:
-            t = GameTile(segi, "ETS2", self.show_ets2, game="ets2")
+            t = GameTile(segi, "ETS 2", self.show_ets2, game="ets2")
             t.pack(side="left")
-            Tip(t, "Euro Truck Simulator 2")
             self.tiles["ets2"] = t
-        chips = tk.Frame(tiles, bg=UI_BG)                   # живой статус оверлея (и телеметрии, пока он работает)
-        chips.pack(side="right", padx=(0, 12))
-        hid = tk.Frame(tiles, bg=UI_BG)                     # чип «игра» живёт в карточке статуса на «Главной»
-        self.chip_game, self.chip_ov, self.chip_tel = StatusChip(hid), StatusChip(chips), StatusChip(chips)
-        self.chip_ov.pack(side="left", padx=(0, 6))
+        ttk.Button(tiles, text="▶  Запустить игру", style="Launch.TButton", command=lambda: self.launch_game()).pack(side="right")
+
+        head = ttk.Frame(self.root, padding=(14, 8, 14, 2))
+        head.pack(fill="x")
+        chips = tk.Frame(head, bg=UI_BG)                    # живой статус: игра, оверлей, телеметрия
+        chips.pack(side="left")
+        self.chip_game, self.chip_ov, self.chip_tel = StatusChip(chips), StatusChip(chips), StatusChip(chips)
+        self.chip_game.pack(side="left", padx=(0, 8))
+        self.chip_ov.pack(side="left", padx=(0, 8))
         self._status_key = None
         if not getattr(self, "_pulse_on", False):
             self._pulse_on = True
             self.root.after(400, self.pulse_tick)
 
-        def _fit_tiles(e=None, st={"lead": True, "chips": True}):     # узкое окно: сначала прячем статус, потом логотип
-            if e is None or e.widget is not tiles:
-                return
-            for key, w_, need, kw in (("chips", chips, 1500, dict(side="right", padx=(0, 12), before=seg)),
-                                      ("lead", lead, 1250, dict(side="left", padx=(0, 18), pady=10, before=tiles.pack_slaves()[0]))):
-                want = e.width >= need
-                if want != st[key]:
-                    st[key] = want
-                    if want:
-                        w_.pack(**kw)
-                    else:
-                        w_.pack_forget()
-        tiles.bind("<Configure>", _fit_tiles)
-        head = tk.Frame(self.root, bg=UI_BORDER, height=1)      # тонкая линия под шапкой
-        head.pack(fill="x")
+        ttk.Button(head, text="Процессы игр…", command=self.edit_procs).pack(side="right")
+        Toggle(head, "Закрывать оверлей вместе с игрой", self.close_var, command=self.save_cfg).pack(side="right", padx=(0, 22))
+        Toggle(head, "Сам определять игру и запускать оверлей с её профилем", self.auto_var, command=self.save_cfg).pack(side="right", padx=(0, 22))
 
         body = ttk.Frame(self.root)
         body.pack(fill="both", expand=True, padx=14, pady=(2, 10))
@@ -9872,69 +9874,18 @@ class App:
         tiles, head, body = ch
         home = self.view == "home"
         try:
-            hl, seg = self._hdr_play
-            if home and hl.winfo_manager():
-                hl.pack_forget()
-                seg.pack_forget()
-            elif not home and not hl.winfo_manager():
-                hl.pack(side="right", after=self.gear)
-                seg.pack(side="right", padx=(0, 12), after=hl)
-        except (tk.TclError, AttributeError):
-            pass
-        try:
-            if home and self.navhost.winfo_manager():
+            if home and tiles.winfo_manager():
+                tiles.pack_forget()
+                head.pack_forget()
                 self.navhost.grid_remove()
                 body.pack_configure(padx=0, pady=0)
-            elif not home and not self.navhost.winfo_manager():
+            elif not home and not tiles.winfo_manager():
+                tiles.pack(fill="x", before=body)
+                head.pack(fill="x", before=body)
                 self.navhost.grid()
                 body.pack_configure(padx=14, pady=(2, 10))
         except tk.TclError:
             pass
-        self.update_tabs()
-
-    def active_tab(self):
-        v = self.view
-        if v == "home":
-            return "home"
-        if v == "stats":
-            return "stats"
-        if v in GAMES or v in ("ac", "ets2"):
-            pg = getattr(self.panels.get(self.selected), "page", "") if v in GAMES else ""
-            return "apps" if pg == "apps" else "overlay"
-        return ""
-
-    def update_tabs(self):
-        act = self.active_tab()
-        for k, (lb, line) in getattr(self, "tabs", {}).items():
-            try:
-                lb.config(fg=UI_FG if k == act else UI_DIM)
-                line.config(bg=UI_ACCENT if k == act else UI_BG)
-            except tk.TclError:
-                pass
-        try:
-            self.gear.config(fg=UI_ACCENT if self.view == "settings" else UI_DIM)
-        except (tk.TclError, AttributeError):
-            pass
-
-    def open_tab(self, key):
-        """Вкладки шапки: Главная, Оверлей (раскладка выбранной игры), Сетапы, Статистика, Программы."""
-        if key == "home":
-            return self.show_home()
-        if key == "stats":
-            return self.show_stats()
-        g = self.selected
-        self.select_game(g)
-        p = self.panels.get(g)
-        try:
-            if key == "overlay":
-                p.show_page("general")
-            elif key == "apps":
-                p.show_page("apps")
-            elif key == "setups":
-                self.home_page.open_panel("general", "Сетапы")
-        except Exception:                                # noqa: BLE001
-            pass
-        self.update_tabs()
 
     # ---------- настройки лаунчера ----------
     def on_paths_changed(self):
