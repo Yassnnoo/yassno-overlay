@@ -71,7 +71,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.7.0"
+APP_VERSION = "3.7.1"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -5302,9 +5302,9 @@ class ProfilePanel(ttk.Frame):
             b = sl[sig].get("b") if isinstance(sl[sig], dict) else None
             if isinstance(b, list) and len(b) == 4 and b[2] > 0 and b[3] > 0 and sig not in [s for s, _ in out]:
                 out.append((sig, tuple(b)))
-        if not out:
+        if not any(not s.startswith("plan:") for s, _ in out):     # настоящий экран всегда в списке — с него можно вернуться от плана трипл-скрина
             sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
-            out.append((f"{sw}x{sh}@0,0,{sw}x{sh}", (0, 0, sw, sh)))
+            out.insert(0, (f"{sw}x{sh}@0,0,{sw}x{sh}", (0, 0, sw, sh)))
         return out
 
     @staticmethod
@@ -5612,6 +5612,16 @@ class ProfilePanel(ttk.Frame):
         self.draw_preview()
         self.ed_inspect()
 
+    def ed_del_plan(self, sig):
+        data = read_json(profile_path(self.game))
+        sl = data.get("screen_layouts")
+        if isinstance(sl, dict) and sig in sl:
+            del sl[sig]
+            write_json(profile_path(self.game), data)
+        if getattr(self, "_ed_sig", None) == sig:
+            self._ed_sig = None
+        self.ed_pick_screen(self.ed_screen()[0])
+
     def ed_toggle_center(self):
         self._ed_center = not getattr(self, "_ed_center", True)
         self.ed_bar_sync()
@@ -5637,6 +5647,12 @@ class ProfilePanel(ttk.Frame):
                           highlightthickness=1, highlightbackground=UI_ACCENT if on else UI_BORDER)
             lb.pack(side="left", padx=(0, 6))
             lb.bind("<Button-1>", lambda ev, s=sig: self.ed_pick_screen(s))
+            if sig.startswith("plan:"):                       # заготовку трипл-скрина можно убрать
+                xb = tk.Label(bar, text="✕", bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 9), padx=6, pady=4, cursor="hand2",
+                              highlightthickness=1, highlightbackground=UI_BORDER)
+                xb.pack(side="left", padx=(0, 6))
+                xb.bind("<Button-1>", lambda ev, s=sig: self.ed_del_plan(s))
+                Tip(xb, "Убрать заготовку трипл-скрина")
         if len(self.ed_mons(cur)) >= 3:
             cen = getattr(self, "_ed_center", True)
             zb = tk.Label(bar, text=tr("Весь трипл") if cen else tr("Только центр"), bg=UI_BG, fg=UI_DIM,
@@ -9109,7 +9125,6 @@ class SetupsPage(ScrollPage):
         p.setup_info = ttk.Label(sc, text="", style="Dim.TLabel", justify="left", wraplength=800)
         p.setup_info.pack(anchor="w", padx=6, pady=(6, 6))
         p.show_setups_dir()
-        ttk.Label(body, text="HYMO и P1Doks — бесплатные сетапы, авторы разрешили их раздавать.", style="Dim.TLabel").pack(anchor="w")
 
 
 class AppsPage(ScrollPage):
@@ -9799,8 +9814,6 @@ class HomePage(tk.Frame):
         b.pack(fill="x", pady=(12, 0))
         ttk.Button(b, text="Подобрать сетап в игру", style="Accent.TButton" if fresh else "TButton",
                    command=self.find_setups).pack(side="left")
-        tk.Label(body, text=tr("HYMO и P1Doks — бесплатные сетапы, авторы разрешили их раздавать."), bg=UI_PANEL, fg=UI_DIM,
-                 font=("Segoe UI", 9), justify="left", anchor="w", wraplength=320).pack(fill="x", pady=(10, 0))
 
     def find_setups(self):
         self.app.show_setups()
