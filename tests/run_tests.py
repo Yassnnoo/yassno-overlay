@@ -418,6 +418,19 @@ class SetupsTests(unittest.TestCase):
             r2 = self.S.download_pack(d, "Sebring", "McLaren 720S GT3 Evo", tree_fn=lambda u: (_ for _ in ()).throw(OSError("x")), get_fn=lambda u: body)
             self.assertEqual((len(r2["saved"]), len(r2["skipped"])), (0, 7))
 
+    def test_pack_fuji(self):
+        import tempfile
+        body = b'VehicleClassSetting="GT3 Lamborghini_Huracan_GT3_Evo2 WEC2024"\n'
+        off = lambda u: (_ for _ in ()).throw(OSError("x"))
+        want = {"Lamborghini Huracan GT3 Evo2": 5, "Mercedes-AMG GT3 Evo": 8, "Ferrari 296 GT3": 12}
+        with tempfile.TemporaryDirectory() as d:
+            r = self.S.download_pack(d, "Fuji Speedway", "Lamborghini Huracan GT3 Evo2", tree_fn=off, get_fn=lambda u: body)
+            self.assertEqual(len(r["saved"]), 5)
+            r = self.S.download_pack(d, "Fuji Speedway", "Mercedes-AMG GT3 Evo", tree_fn=off, get_fn=lambda u: body)
+            self.assertEqual(len(r["saved"]), 8)
+            r = self.S.download_pack(d, "Fuji Speedway", "Ferrari 296 GT3", tree_fn=off, get_fn=lambda u: body)
+            self.assertEqual(len(r["saved"]), 13)     # 12 из набора + 1 с ultimatesetuphub
+
     def test_local_folder(self):
         import tempfile
         S = self.S
