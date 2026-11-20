@@ -71,7 +71,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.7.3"
+APP_VERSION = "3.7.4"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -436,6 +436,22 @@ def check_online_update():
             "newer": ver_tuple(ver) > ver_tuple(APP_VERSION) and not ETS2_TEST_BUILD}, None
 
 
+def prune_backups(keep=3):
+    """Оставляет только последние keep папок backup (по имени — это дата и время); возвращает, сколько удалено."""
+    removed = 0
+    try:
+        dirs = sorted(d for d in os.listdir(BACKUP_DIR) if os.path.isdir(os.path.join(BACKUP_DIR, d)))
+    except OSError:
+        return 0
+    for d in dirs[:-keep] if keep > 0 else []:
+        try:
+            shutil.rmtree(os.path.join(BACKUP_DIR, d))
+            removed += 1
+        except OSError:
+            pass
+    return removed
+
+
 def apply_online_update(info):
     """Скачивает все файлы, проверяет, сохраняет копию старых в backup и заменяет. Возвращает текст ошибки или None."""
     got = {}
@@ -464,6 +480,7 @@ def apply_online_update(info):
             os.replace(dst + ".new", dst)
     except OSError as e:
         return f"{e}"
+    prune_backups()                                          # старые копии не копятся (раньше папка росла до сотен МБ)
     return None
 
 HOTKEYS = [("lock", "Режим перемещения окон"), ("reset", "Вернуть окна на экран"), ("quit", "Выйти из оверлея"),
@@ -9966,6 +9983,7 @@ class App:
             self.root.after(400, self.start_hidden)
         if self.cfg.get("auto_update", True):
             self.root.after(4000, self.auto_check)
+        threading.Thread(target=prune_backups, daemon=True).start()     # разовая уборка накопившихся копий
         if os.name == "nt" and "--minimized" not in sys.argv and not self.cfg.get("shortcut_asked"):
             self.root.after(2500, self.offer_shortcut)
 

@@ -444,6 +444,24 @@ class MfdMapTab(unittest.TestCase):
             root.destroy()
 
 
+class BackupPruneTests(unittest.TestCase):
+    def test_keeps_last_three(self):
+        import tempfile
+        import yassno_launcher as L
+        old = L.BACKUP_DIR
+        with tempfile.TemporaryDirectory() as d:
+            L.BACKUP_DIR = d
+            try:
+                for n in ("20261101-000000", "20261102-000000", "20261103-000000", "20261104-000000", "20261105-000000"):
+                    os.makedirs(os.path.join(d, n))
+                    open(os.path.join(d, n, "a.txt"), "w").write("x")
+                self.assertEqual(L.prune_backups(3), 2)
+                self.assertEqual(sorted(os.listdir(d)), ["20261103-000000", "20261104-000000", "20261105-000000"])
+                self.assertEqual(L.prune_backups(3), 0)
+            finally:
+                L.BACKUP_DIR = old
+
+
 class Ets2SaveTests(unittest.TestCase):
     def test_aes_vector_and_text_save(self):
         import tempfile
