@@ -75,7 +75,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.10.2"
+APP_VERSION = "3.10.3"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -7177,6 +7177,45 @@ def tel_files(session_path):
 
 
 _ROAD_LAPS = {}
+SEC_COLORS = ("#ffffff", "#f5b921", "#5fd37a")
+
+
+def lap_sector_dists(fp, lap=None):
+    """Дистанции границ S1|S2 и S2|S3 для круга: время секторов из записи сессии переводим в метры по телеметрии. None — секторов нет."""
+    lap = lap or load_tlap(fp)
+    if not lap or lap.n < 10 or not fp:
+        return None
+    try:
+        data = read_json(os.path.join(STATS_DIR, os.path.basename(os.path.dirname(fp)) + ".json"))
+    except Exception:
+        return None
+    rec = next((x for x in data.get("laps", []) if x.get("lap") == lap.lap), None)
+    if not rec or not rec.get("s1") or not rec.get("s2"):
+        return None
+    ts, m = [], 0.0
+    for v in lap.c["t"]:
+        m = max(m, v)
+        ts.append(m)
+    ds = lap.c["d"]
+
+    def d_at(t):
+        i = bisect.bisect_right(ts, t)
+        if i <= 0 or i >= len(ts):
+            return None
+        t0, t1 = ts[i - 1], ts[i]
+        return ds[i - 1] + (ds[i] - ds[i - 1]) * ((t - t0) / (t1 - t0) if t1 > t0 else 0.0)
+    d1, d2 = d_at(rec["s1"]), d_at(rec["s1"] + rec["s2"])
+    if d1 is None or d2 is None or not (0 < d1 < d2 < lap.length):
+        return None
+    return d1, d2
+
+
+def sector_marks(sec):
+    """Отметки на карте: (дистанция, подпись, цвет); старт/финиш всегда, границы секторов — если известны."""
+    out = [(0.0, "S/F", SEC_COLORS[0])]
+    if sec:
+        out += [(sec[0], "S1|S2", SEC_COLORS[1]), (sec[1], "S2|S3", SEC_COLORS[2])]
+    return out
 
 
 def session_short(d, path=""):
@@ -7851,9 +7890,13 @@ class TrackPanel(ttk.Frame):
         base = next((self.data[k] for k in ("A", "B") if self.data[k] and self.data[k]["ok"]), None)
         self.rib = None
         self._rib_new = None
+        self.sec = []
         if base:
             self.rib = self.build_ribbon(base["lap"])
             self.road_more(base["lap"])
+            fp = self.tv.A if (self.data["A"] and self.data["A"]["ok"]) else self.tv.B
+            sd = lap_sector_dists(fp, base["lap"])
+            self.sec = list(sd) if sd else []
         self.tmax = max([v["end"] for v in self.data.values() if v] or [1.0])
         self.sl.configure(to=max(1.0, self.tmax))
         if self.follow.get() == "A" and not self.data["A"] and self.data["B"]:
@@ -8169,12 +8212,31 @@ class TrackPanel(ttk.Frame):
             if on[i]:
                 c.create_line(*Lp[i], *Lp[i + 1], fill="#cfd3da" if (i // 2) % 2 else "#d93a32", width=lw)
                 c.create_line(*Rp[i], *Rp[i + 1], fill="#cfd3da" if (i // 2) % 2 else "#d93a32", width=lw)
+        self.marks_top(xf, W, H)
         for key in ("A", "B"):
             dd = self.data.get(key)
             if dd and dd["ok"]:
                 self.trail_top(dd, xf, COL_A if key == "A" else COL_B, W, H, 2 if k > 3 else 1)
         for car in cars:
             self.car_top(car, k, xf)
+
+    def mark_pos(self, d):
+        rib = self.rib
+        j = max(0, min(len(rib["d"]) - 2, bisect.bisect_left(rib["d"], d)))
+        return j
+
+    def marks_top(self, xf, W, H):
+        rib = self.rib
+        for d, label, col in sector_marks(getattr(self, "sec", [])):
+            j = self.mark_pos(d)
+            a, b = xf(*rib["L"][j]), xf(*rib["R"][j])
+            if max(a[0], b[0]) < -30 or min(a[0], b[0]) > W + 30 or max(a[1], b[1]) < -30 or min(a[1], b[1]) > H + 30:
+                continue
+            self.cv.create_line(*a, *b, fill=col, width=4)
+            vx, vy = b[0] - a[0], b[1] - a[1]
+            h = math.hypot(vx, vy) or 1.0
+            tx, ty = b[0] + vx / h * 22, b[1] + vy / h * 12
+            self.cv.create_text(tx, ty, text=label, fill=col, font=("Segoe UI Semibold", 10))
 
     def trail_top(self, dd, xf, col, W=10**6, H=10**6, width=1):
         step = max(1, dd["n"] // (1500 if width > 1 else 500))
@@ -8296,8 +8358,32 @@ class TrackPanel(ttk.Frame):
                 s = cam.line((xs[i], 0.03, zs[i]), (xs[i + st], 0.03, zs[i + st]))
                 if s:
                     c.create_line(*s[0], fill="#ff3b30" if br[i] > 0.1 else col, width=3 if (mode == "chase" or self._cs < 1.9) else 2)
+        self.marks_3d(cam, mode)
         for car in sorted(cars, key=lambda x: -cam.to(x["x"], 0, x["z"])[2]):
             self.car_3d(cam, car, mode)
+
+    def marks_3d(self, cam, mode):
+        """Ворота на границах секторов: полоса поперёк дороги, две стойки и перекладина с подписью."""
+        c, rib = self.cv, self.rib
+        hgt = 6.0 if mode == "chase" else 6.0 * self._cs
+        for d, label, col in sector_marks(getattr(self, "sec", [])):
+            j = self.mark_pos(d)
+            Lj, Rj = rib["L"][j], rib["R"][j]
+            Lk, Rk = rib["L"][j + 1], rib["R"][j + 1]
+            q = cam.poly([(Lj[0], 0.02, Lj[1]), (Rj[0], 0.02, Rj[1]), (Rk[0], 0.02, Rk[1]), (Lk[0], 0.02, Lk[1])])
+            if q:
+                c.create_polygon(*q[0], fill=col, outline=col)
+            for E in (Lj, Rj):
+                s_ = cam.line((E[0], 0.0, E[1]), (E[0], hgt, E[1]))
+                if s_:
+                    c.create_line(*s_[0], fill=col, width=3)
+            s_ = cam.line((Lj[0], hgt, Lj[1]), (Rj[0], hgt, Rj[1]))
+            if s_:
+                c.create_line(*s_[0], fill=col, width=4)
+            mid = cam.to((Lj[0] + Rj[0]) / 2, hgt, (Lj[1] + Rj[1]) / 2)
+            if mid[2] > cam.NEAR:
+                sx, sy = cam.scr(mid)
+                c.create_text(sx, sy - 10, text=label, fill=col, font=("Segoe UI Semibold", 11))
 
     def model_kind(self):
         v = self.model.get()
@@ -8748,6 +8834,16 @@ class TelemetryView(ttk.Frame):
             ax, ay = self.mapxf(p[0], p[1])
             bx, by = self.mapxf(q[0], q[1])
             m.create_line(ax, ay, bx, by, fill=speed_color(p[2], vlo, vhi), width=3, capstyle="round")
+        sd = lap_sector_dists(self.A, a)
+        for d, label, col in sector_marks(sd):
+            x1, z1 = a.at("x", d - 6), a.at("z", d - 6)
+            x2, z2 = a.at("x", d + 6), a.at("z", d + 6)
+            px_, py_ = self.mapxf(a.at("x", d), a.at("z", d))
+            u, v = self.mapxf(x2, z2)[0] - self.mapxf(x1, z1)[0], self.mapxf(x2, z2)[1] - self.mapxf(x1, z1)[1]
+            h = math.hypot(u, v) or 1.0
+            nx, ny = -v / h, u / h
+            m.create_line(px_ - nx * 7, py_ - ny * 7, px_ + nx * 7, py_ + ny * 7, fill=col, width=3)
+            m.create_text(px_ + nx * 17, py_ + ny * 17, text=label, fill=col, font=("Segoe UI", 8, "bold"))
 
     # ---- график
     def active_strips(self):

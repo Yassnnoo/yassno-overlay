@@ -983,3 +983,31 @@ class TrackPanelTests(unittest.TestCase):
         finally:
             L.STATS_DIR, L.TEL_DIR = old
             L._SESS_CACHE.clear()
+
+
+    def test_sector_marks(self):
+        import gzip, json, tempfile
+        L = yassno_launcher
+        d = tempfile.mkdtemp()
+        old = (L.STATS_DIR, L.TEL_DIR)
+        L.STATS_DIR, L.TEL_DIR = os.path.join(d, "stats"), os.path.join(d, "tel")
+        try:
+            os.makedirs(L.STATS_DIR)
+            os.makedirs(os.path.join(L.TEL_DIR, "s1"))
+            with open(os.path.join(L.STATS_DIR, "s1.json"), "w", encoding="utf-8") as f:
+                json.dump({"game": "lmu", "track": "Fuji", "laps": [{"lap": 1, "time": 90.0, "s1": 30.0, "s2": 30.0, "s3": 30.0},
+                                                                   {"lap": 2, "time": 90.0}]}, f)
+            fp = os.path.join(L.TEL_DIR, "s1", "lap1.json.gz")
+            with gzip.open(fp, "wt") as f:
+                json.dump(self.lap_raw(0.0, 90.0, 1), f)
+            fp2 = os.path.join(L.TEL_DIR, "s1", "lap2.json.gz")
+            with gzip.open(fp2, "wt") as f:
+                json.dump(self.lap_raw(0.0, 90.0, 2), f)
+            sd = L.lap_sector_dists(fp)
+            self.assertAlmostEqual(sd[0], 1000, delta=10)      # 30 с из 90 — треть круга в 3000 м
+            self.assertAlmostEqual(sd[1], 2000, delta=10)
+            self.assertIsNone(L.lap_sector_dists(fp2))         # у круга нет времён секторов — отметок нет
+            self.assertEqual([m[1] for m in L.sector_marks(sd)], ["S/F", "S1|S2", "S2|S3"])
+            self.assertEqual([m[1] for m in L.sector_marks(None)], ["S/F"])
+        finally:
+            L.STATS_DIR, L.TEL_DIR = old
