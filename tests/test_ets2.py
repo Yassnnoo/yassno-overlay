@@ -876,6 +876,7 @@ class TrackPanelTests(unittest.TestCase):
             self.assertAlmostEqual(tw.tmax, 91.5, delta=0.1)
             for m in ("top", "chase", "orbit"):
                 tw.mode.set(m)
+                tw.model.set("Квадрат" if m == "orbit" else "Авто")
                 for t in (0.0, 45.0, 91.5):
                     tw.t = t
                     tw.draw()

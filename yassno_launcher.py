@@ -71,7 +71,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.8.4"
+APP_VERSION = "3.8.5"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -7704,7 +7704,7 @@ class TrackPanel(ttk.Frame):
         self.fol.bind("<<ComboboxSelected>>", lambda e: self.draw())
         ttk.Label(top, text=tr("Модель:"), style="Dim.TLabel").pack(side="left", padx=(10, 4))
         self.model = tk.StringVar(value=tv.app.cfg.get("tel_track_model", "Авто"))
-        mc = ttk.Combobox(top, width=5, state="readonly", values=("Авто", "GT3", "F1"), textvariable=self.model)
+        mc = ttk.Combobox(top, width=5, state="readonly", values=("Авто", "GT3", "F1", "Квадрат"), textvariable=self.model)
         mc.pack(side="left")
         mc.bind("<<ComboboxSelected>>", lambda e: (tv.app.cfg.__setitem__("tel_track_model", self.model.get()), tv.app.save_cfg(), self.draw()))
         self.cv = tk.Canvas(self, bg="#14191f", highlightthickness=1, highlightbackground=UI_BORDER, width=560, height=400)
@@ -8202,6 +8202,8 @@ class TrackPanel(ttk.Frame):
         v = self.model.get()
         if v in ("F1", "GT3"):
             return v
+        if v == "Квадрат":
+            return "BOX"
         try:
             g = read_json(self.tv.session).get("game") if self.tv.session else None
         except Exception:
@@ -8224,6 +8226,8 @@ class TrackPanel(ttk.Frame):
     def parts(cls, kind):
         """Модели из сечений: (l — вдоль машины, w — полуширина по плечу, h_низ, h_плечо, h_крыша, w_крыши). Цвет None — цвет круга."""
         D, W, G = "#262a31", "#3b414c", "#1c2430"
+        if kind == "BOX":
+            return [cls.box(-2.3, 2.3, 0.95, 0.95, 0.15, 0.7, 0.7), cls.box(-1.0, 0.6, 0.6, 0.6, 0.7, 1.15, 1.15, G)]
         if kind == "F1":
             out = [
                 {"secs": [(-2.2, .10, .38, .52, .60, .08), (-1.5, .22, .22, .55, .88, .12), (-0.8, .30, .14, .50, .62, .16), (-0.2, .34, .12, .46, .56, .20),
