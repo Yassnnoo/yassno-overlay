@@ -71,7 +71,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.8.0"
+APP_VERSION = "3.8.1"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -7654,6 +7654,11 @@ class TrackWindow(tk.Toplevel):
         self.fol = ttk.Combobox(top, width=3, state="readonly", values=("A", "B"), textvariable=self.follow)
         self.fol.pack(side="left")
         self.fol.bind("<<ComboboxSelected>>", lambda e: self.draw())
+        ttk.Label(top, text=tr("Модель:"), style="Dim.TLabel").pack(side="left", padx=(10, 4))
+        self.model = tk.StringVar(value=tv.app.cfg.get("tel_track_model", "Авто"))
+        mc = ttk.Combobox(top, width=5, state="readonly", values=("Авто", "GT3", "F1"), textvariable=self.model)
+        mc.pack(side="left")
+        mc.bind("<<ComboboxSelected>>", lambda e: (tv.app.cfg.__setitem__("tel_track_model", self.model.get()), tv.app.save_cfg(), self.draw()))
         self.cv = tk.Canvas(self, bg="#14191f", highlightthickness=1, highlightbackground=UI_BORDER)
         self.cv.pack(fill="both", expand=True, padx=8)
         self.cv.bind("<Configure>", lambda e: self.draw())
@@ -7946,7 +7951,7 @@ class TrackWindow(tk.Toplevel):
                 fx, fz = tgt["hx"], tgt["hz"]
             n = math.hypot(fx, fz) or 1.0
             fx, fz = fx / n, fz / n
-            return Cam3(tgt["x"] - fx * 14.0, 4.6, tgt["z"] - fz * 14.0, fx, fz, 0.2, W, H, W * 0.95)
+            return Cam3(tgt["x"] - fx * 15.0, 5.0, tgt["z"] - fz * 15.0, fx, fz, 0.2, W, H, W * 0.95)
         xs = [p[0] for p in self.rib["c"]]
         zs = [p[1] for p in self.rib["c"]]
         cx, cz = (min(xs) + max(xs)) / 2, (min(zs) + max(zs)) / 2
@@ -8030,6 +8035,44 @@ class TrackWindow(tk.Toplevel):
         for car in sorted(cars, key=lambda x: -cam.to(x["x"], 0, x["z"])[2]):
             self.car_3d(cam, car, mode)
 
+    def model_kind(self):
+        v = self.model.get()
+        if v in ("F1", "GT3"):
+            return v
+        try:
+            g = read_json(self.tv.session).get("game") if self.tv.session else None
+        except Exception:
+            g = None
+        return "F1" if g == "rf2" else "GT3"
+
+    @staticmethod
+    def parts(kind):
+        """Простые модели из призм: (l0, l1, w0, w1, h0, h1_зад, h1_перед, цвет, сдвиг_вбок, тип). Цвет: None — цвет круга."""
+        D, W = "#262a31", "#3b414c"
+        if kind == "F1":
+            out = [(-1.6, 2.1, 0.32, 0.30, 0.12, 0.5, 0.45, None, 0.0, "body"),     # монокок
+                   (2.1, 3.2, 0.30, 0.12, 0.30, 0.45, 0.22, None, 0.0, "body"),       # нос
+                   (-1.3, 0.9, 0.42, 0.42, 0.12, 0.5, 0.45, None, 0.0, "body"),       # днище/пончоны
+                   (-0.5, 0.35, 0.22, 0.22, 0.5, 0.78, 0.62, W, 0.0, "body"),         # кокпит
+                   (-0.25, 0.1, 0.13, 0.13, 0.7, 0.95, 0.85, "#f2f2f2", 0.0, "body"), # шлем
+                   (-2.2, -0.5, 0.28, 0.3, 0.45, 0.88, 0.52, None, 0.0, "body"),      # воздухозаборник/кожух
+                   (2.75, 3.15, 1.05, 1.05, 0.1, 0.17, 0.17, W, 0.0, "body"),         # переднее крыло
+                   (-2.75, -2.25, 0.85, 0.85, 0.85, 1.12, 1.12, W, 0.0, "body")]      # заднее крыло
+            for lf, lw in ((2.05, 0.3), (-1.6, 0.36)):
+                for sd in (-1, 1):
+                    out.append((lf - 0.36, lf + 0.36, lw, lw, 0.0, 0.72, 0.72, D, sd * (1.0 - lw + 0.1), "wheel"))
+            return out
+        out = [(-2.3, 2.3, 0.97, 0.9, 0.18, 0.62, 0.58, None, 0.0, "body"),          # кузов
+               (0.55, 2.3, 0.92, 0.82, 0.58, 0.72, 0.62, None, 0.0, "body"),         # капот
+               (-1.0, 0.75, 0.74, 0.62, 0.62, 1.18, 0.74, "#1c2430", 0.0, "body"),   # кабина (лобовое скошено)
+               (2.3, 2.55, 0.95, 0.95, 0.1, 0.2, 0.2, D, 0.0, "body"),               # сплиттер
+               (-2.45, -2.0, 0.95, 0.95, 1.02, 1.08, 1.08, D, 0.0, "body")]          # антикрыло
+        for sd in (-1, 1):
+            out.append((-2.4, -2.1, 0.03, 0.03, 0.6, 1.02, 1.02, D, sd * 0.7, "body"))  # стойки крыла
+            for lf in (1.45, -1.4):
+                out.append((lf - 0.38, lf + 0.38, 0.17, 0.17, 0.0, 0.72, 0.72, D, sd * 0.93, "wheel"))
+        return out
+
     def car_3d(self, cam, car, mode):
         c = self.cv
         fx, fz = car["hx"], car["hz"]
@@ -8037,29 +8080,34 @@ class TrackWindow(tk.Toplevel):
         s = 1.0 if mode == "chase" else 3.0   # на обзорном виде машины крупнее, иначе их не видно
         col = car["col"]
         braking = car["brk"] > 0.1
+        groups = []
+        for l0, l1, w0, w1, h0, hb, hf, pc, off, typ in self.parts(self.model_kind()):
+            base = pc or col
 
-        def box(l0, l1, w, h0, h1, back, top):
-            def pt(lf, lr, h):
-                return (car["x"] + (fx * lf + rx * lr * w) * s, h * s, car["z"] + (fz * lf + rz * lr * w) * s)
-            return [
-                ([pt(l0, -1, h0), pt(l0, 1, h0), pt(l0, 1, h1), pt(l0, -1, h1)], back),
-                ([pt(l1, -1, h0), pt(l1, 1, h0), pt(l1, 1, h1), pt(l1, -1, h1)], _shade(col, 0.9)),
-                ([pt(l0, -1, h0), pt(l1, -1, h0), pt(l1, -1, h1), pt(l0, -1, h1)], _shade(col, 0.68)),
-                ([pt(l0, 1, h0), pt(l1, 1, h0), pt(l1, 1, h1), pt(l0, 1, h1)], _shade(col, 0.68)),
-                ([pt(l0, -1, h1), pt(l0, 1, h1), pt(l1, 1, h1), pt(l1, -1, h1)], top),
+            def pt(lf, lr, h, w, _o=off):
+                return (car["x"] + (fx * lf + rx * (lr * w + _o)) * s, h * s, car["z"] + (fz * lf + rz * (lr * w + _o)) * s)
+
+            back = "#ff2b2b" if (braking and typ == "body" and pc is None and l0 < -1.0) else _shade(base, 0.5)
+            faces = [
+                ([pt(l0, -1, h0, w0), pt(l0, 1, h0, w0), pt(l0, 1, hb, w0), pt(l0, -1, hb, w0)], back),
+                ([pt(l1, -1, h0, w1), pt(l1, 1, h0, w1), pt(l1, 1, hf, w1), pt(l1, -1, hf, w1)], _shade(base, 0.9)),
+                ([pt(l0, -1, h0, w0), pt(l1, -1, h0, w1), pt(l1, -1, hf, w1), pt(l0, -1, hb, w0)], _shade(base, 0.66)),
+                ([pt(l0, 1, h0, w0), pt(l1, 1, h0, w1), pt(l1, 1, hf, w1), pt(l0, 1, hb, w0)], _shade(base, 0.66)),
+                ([pt(l0, -1, hb, w0), pt(l0, 1, hb, w0), pt(l1, 1, hf, w1), pt(l1, -1, hf, w1)], base),
             ]
-
-        faces = box(-2.3, 2.3, 0.95, 0.15, 0.7, "#ff2b2b" if braking else _shade(col, 0.5), col)
-        faces += box(-1.0, 0.6, 0.6, 0.7, 1.15, _shade(col, 0.5), "#1c2430")
-        out = []
-        for pts, fill in faces:
-            q = cam.poly(pts)
-            if q:
-                out.append((q[1], q[0], fill))
-        out.sort(key=lambda x: -x[0])
-        for dep, flat, fill in out:
-            c.create_polygon(*flat, fill=fill, outline="#0e1116")
-        top = cam.to(car["x"], 1.15 * s + 0.9, car["z"])
+            cd = cam.to(*pt((l0 + l1) / 2, 0, (h0 + hb) / 2, 0))[2]
+            out = []
+            for pts, fill in faces:
+                q = cam.poly(pts)
+                if q:
+                    out.append((q[1], q[0], fill))
+            out.sort(key=lambda x: -x[0])
+            groups.append((cd, out))
+        groups.sort(key=lambda g: -g[0])
+        for cd, out in groups:
+            for dep, flat, fill in out:
+                c.create_polygon(*flat, fill=fill, outline=_shade(fill, 0.55))
+        top = cam.to(car["x"], 1.3 * s + 0.9, car["z"])
         if top[2] > cam.NEAR:
             sx, sy = cam.scr(top)
             c.create_text(sx, sy - 6, text=car["key"], fill=col, font=("Segoe UI Semibold", 11))

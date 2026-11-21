@@ -1,6 +1,6 @@
 {
-  "version": "3.8.0",
-  "notes": "Телеметрия: окно «Трасса» с тремя видами",
+  "version": "3.8.1",
+  "notes": "Трасса: модели машин F1 и GT3",
   "files": [
     "README.txt",
     "diagnose.cmd",
