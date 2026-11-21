@@ -75,7 +75,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.11.1"
+APP_VERSION = "3.11.2"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -5489,6 +5489,8 @@ class ProfilePanel(ttk.Frame):
             on = bool(self.v[e].get())
             if not on and e != sel:
                 c.create_rectangle(X, Y, X + W, Y + H, outline=self.ph_col(0), dash=(3, 3), tags=("w_" + e,))
+                if W > 56 and H > 16:                        # подпись в пунктирной рамке выключенного окна, чтобы было понятно, что это
+                    c.create_text(X + W / 2, Y + H / 2, text=tr(label), fill=self.ph_col(1), font=("Segoe UI", 8), width=W - 6, justify="center", tags=("w_" + e,))
                 self.hits.append((e, X, Y, X + W, Y + H))
                 continue
             self.compute_theme(e)
