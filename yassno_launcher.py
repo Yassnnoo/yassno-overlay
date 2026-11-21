@@ -75,7 +75,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.10.0"
+APP_VERSION = "3.10.1"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -10108,7 +10108,48 @@ class Ets2StatsPage(ScrollPage):
         self.snap = {"sessions": [], "jobs": [], "sig": None}
         self._sig, self._t_render = None, 0.0
         self.sel = {"jobs": 0, "sess": 0}
+        self.sv, self._sv_busy, self._sv_t = None, False, 0.0
+        self.load_save()
         self.render()
+
+    def load_save(self):
+        """Общая статистика профиля из сохранений игры (за всё время, в т.ч. до плагина): читается в фоне, дальше кэш."""
+        if ETS2SAVE is None or self._sv_busy or time.time() - self._sv_t < 60:
+            return
+        self._sv_busy, self._sv_t = True, time.time()
+
+        def work():
+            try:
+                self.sv = ETS2SAVE.load_stats()
+            except Exception as e:                           # noqa: BLE001
+                log_error(f"Статистика ETS 2: сохранения: {e}")
+            self._sv_busy = False
+            try:
+                self.after(0, self.sv_ready)
+            except Exception:                                # noqa: BLE001
+                pass
+        threading.Thread(target=work, daemon=True).start()
+
+    def sv_ready(self):
+        try:
+            if self.winfo_exists() and self.tab == "over":
+                self.render()
+        except tk.TclError:
+            pass
+
+    def save_card(self, g, row, col, span=1):
+        sv = self.sv
+        if not sv:
+            return
+        body = self.card(g, "За всё время (из сохранений)", row, col, span, sub=tr("весь профиль"))
+        rows = [("Всего за рулём", f"{self.n0(sv.get('km') or 0)} {tr('км')}"), ("Опыт", f"{self.n0(sv.get('xp') or 0)} XP"),
+                ("Баланс", self.money(sv.get("money") or 0) + (f" · {tr('кредиты')} {self.money(sv['debt'])}" if sv.get("debt") else "")),
+                ("Городов посещено", str(sv.get("cities") or 0)),
+                ("Отменено рейсов", str(sv["cancelled"]) if sv.get("cancelled") is not None else ""),
+                ("Топлива всего", f"{self.n0(sv['fuel'])} {tr('л')}" if sv.get("fuel") else "")]
+        if sv.get("mtime"):
+            rows.append(("Сохранение", f"{sv.get('save') or ''} · {self.when(sv['mtime'])}" + (" · .bak" if sv.get("stale") else "")))
+        self.kv(body, rows)
 
     # ---- данные
     def data(self):
@@ -10136,6 +10177,7 @@ class Ets2StatsPage(ScrollPage):
             snap = ETS2STATS.snapshot()
         except Exception:                                # noqa: BLE001
             return
+        self.load_save()
         live = ETS2STATS.live_session(snap["sessions"])
         if snap["sig"] != self._sig or (live and time.time() - self._t_render > 5):
             self.render()
@@ -10291,6 +10333,8 @@ class Ets2StatsPage(ScrollPage):
         for c in range(3):
             grid.columnconfigure(c, weight=1, uniform="es")
         if not allss and not self.snap["jobs"]:
+            if self.tab == "over":
+                self.save_card(grid, 0, 0)
             return
         {"over": self.tab_over, "jobs": self.tab_jobs, "sess": self.tab_sess, "drive": self.tab_drive, "ev": self.tab_events}[self.tab](grid, ss, js)
 
@@ -10341,6 +10385,7 @@ class Ets2StatsPage(ScrollPage):
         self.kv(self.card(g, "Любимое", 0, 2), top)
         self.hist_card(g, a, 1, 0, 2)
         self.gears_card(g, a, 1, 2)
+        self.save_card(g, 2, 0)
 
     def hist_card(self, g, a, row, col, span):
         body = self.card(g, "Скорость: время на каждой", row, col, span, sub=tr("шаг 10 км/ч"))
