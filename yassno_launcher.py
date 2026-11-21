@@ -71,7 +71,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.8.1"
+APP_VERSION = "3.8.2"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -452,11 +452,14 @@ def prune_backups(keep=3):
     return removed
 
 
-def apply_online_update(info):
+def apply_online_update(info, progress=None):
     """Скачивает все файлы, проверяет, сохраняет копию старых в backup и заменяет. Возвращает текст ошибки или None."""
     got = {}
     try:
-        for rel in info["files"]:
+        total = len(info["files"])
+        for n, rel in enumerate(info["files"]):
+            if progress:
+                progress(n, total)
             body = http_get(raw_url(rel, info.get("ref")) + "?t=%d" % time.time())
             if not body:
                 return f"пустой файл {rel}"
@@ -465,6 +468,8 @@ def apply_online_update(info):
             got[rel] = body
     except Exception as e:
         return f"{e}"
+    if progress:
+        progress(total, total)
     try:
         bdir = os.path.join(BACKUP_DIR, time.strftime("%Y%m%d-%H%M%S"))
         os.makedirs(bdir, exist_ok=True)
@@ -7626,31 +7631,36 @@ class Cam3:
         return self.scr(vs[0]) + self.scr(vs[1]), min(vs[0][2], vs[1][2])
 
 
-class TrackWindow(tk.Toplevel):
+class TrackPanel(ttk.Frame):
+    """Панель трассы: встраивается в страницу статистики на место списка сессий."""
     MODES = (("top", "Сверху"), ("chase", "От третьего лица"), ("orbit", "Обзор 3D"))
     SPEEDS = ("0.25", "0.5", "1", "2", "4")
     ROAD = 13.0
 
-    def __init__(self, tv):
-        super().__init__(tv)
+    def __init__(self, parent, tv):
+        super().__init__(parent)
         self.tv = tv
-        self.title(tr("Трасса — телеметрия"))
-        self.configure(bg=UI_BG)
-        self.geometry("1040x680")
-        self.minsize(640, 420)
         self.mode = tk.StringVar(value=tv.app.cfg.get("tel_track_mode", "chase"))
         self.follow = tk.StringVar(value="A")
         self.spd = tk.StringVar(value="1")
         self.t, self.tmax, self.playing, self._last, self._job = 0.0, 1.0, False, 0.0, None
         self.oy, self.op, self.od = -math.pi / 2, 0.7, 0.85
-        self._drag = None
+        self._drag = self._pan = None
+        self.pan = [0.0, 0.0]
+        self._wpp = 1.0
         self.data = {}
         self.rib = None
+        head = ttk.Frame(self)
+        head.pack(fill="x", pady=(0, 2))
+        ttk.Label(head, text=tr("Трасса"), style="Head.TLabel").pack(side="left")
+        ttk.Button(head, text=tr("← Сессии"), command=tv.close_track).pack(side="right")
         top = ttk.Frame(self)
-        top.pack(fill="x", padx=8, pady=(8, 4))
+        top.pack(fill="x", pady=(2, 2))
         for k, name in self.MODES:
             ttk.Radiobutton(top, text=tr(name), value=k, variable=self.mode, command=self.on_mode).pack(side="left", padx=(0, 10))
-        ttk.Label(top, text=tr("Камера за:"), style="Dim.TLabel").pack(side="left", padx=(10, 4))
+        top = ttk.Frame(self)
+        top.pack(fill="x", pady=(0, 4))
+        ttk.Label(top, text=tr("Камера за:"), style="Dim.TLabel").pack(side="left", padx=(0, 4))
         self.fol = ttk.Combobox(top, width=3, state="readonly", values=("A", "B"), textvariable=self.follow)
         self.fol.pack(side="left")
         self.fol.bind("<<ComboboxSelected>>", lambda e: self.draw())
@@ -7659,27 +7669,31 @@ class TrackWindow(tk.Toplevel):
         mc = ttk.Combobox(top, width=5, state="readonly", values=("Авто", "GT3", "F1"), textvariable=self.model)
         mc.pack(side="left")
         mc.bind("<<ComboboxSelected>>", lambda e: (tv.app.cfg.__setitem__("tel_track_model", self.model.get()), tv.app.save_cfg(), self.draw()))
-        self.cv = tk.Canvas(self, bg="#14191f", highlightthickness=1, highlightbackground=UI_BORDER)
-        self.cv.pack(fill="both", expand=True, padx=8)
+        self.cv = tk.Canvas(self, bg="#14191f", highlightthickness=1, highlightbackground=UI_BORDER, width=560, height=400)
+        self.cv.pack(fill="both", expand=True)
         self.cv.bind("<Configure>", lambda e: self.draw())
         self.cv.bind("<ButtonPress-1>", self.on_press)
         self.cv.bind("<B1-Motion>", self.on_drag)
+        self.cv.bind("<ButtonPress-3>", self.on_pan_press)
+        self.cv.bind("<B3-Motion>", self.on_pan)
+        self.cv.bind("<Double-Button-1>", self.reset_view)
+        ttk.Label(self, text=tr("Обзор 3D: левая кнопка — вращать, правая — двигать вид, колесо — масштаб, двойной щелчок — сброс"),
+                  style="Dim.TLabel", wraplength=560, justify="left").pack(anchor="w", pady=(3, 0))
         self.cv.bind("<MouseWheel>", lambda e: self.on_wheel(1 if e.delta > 0 else -1))
         self.cv.bind("<Button-4>", lambda e: self.on_wheel(1))
         self.cv.bind("<Button-5>", lambda e: self.on_wheel(-1))
         bot = ttk.Frame(self)
-        bot.pack(fill="x", padx=8, pady=8)
+        bot.pack(fill="x", pady=(6, 0))
         self.btn = ttk.Button(bot, text="▶", width=3, command=self.toggle)
         self.btn.pack(side="left")
         ttk.Button(bot, text="⏮", width=3, command=lambda: self.seek(0.0)).pack(side="left", padx=(4, 8))
         self.sl = ttk.Scale(bot, from_=0.0, to=1.0, orient="horizontal", command=self.on_slider)
         self.sl.pack(side="left", fill="x", expand=True)
-        self.lbl = ttk.Label(bot, text="0.0 с", width=18, anchor="e")
+        self.lbl = ttk.Label(bot, text="0.0 с", width=15, anchor="e")
         self.lbl.pack(side="left", padx=8)
         ttk.Label(bot, text=tr("Скорость ×"), style="Dim.TLabel").pack(side="left")
         cb = ttk.Combobox(bot, width=5, state="readonly", values=self.SPEEDS, textvariable=self.spd)
         cb.pack(side="left", padx=(4, 0))
-        self.protocol("WM_DELETE_WINDOW", self.close)
         self.reload()
 
     # ---- данные
@@ -7711,6 +7725,7 @@ class TrackWindow(tk.Toplevel):
         self.draw()
 
     def build_ribbon(self, lap):
+        """Дорога: осевая по кругу-основе, ширина и сдвиг — по тому, где реально ездили все круги сессии."""
         ds, xs, zs, vs = lap.c["d"], lap.c["x"], lap.c["z"], lap.c["spd"]
         idx, last = [], -1e9
         for i in range(lap.n):
@@ -7720,17 +7735,37 @@ class TrackWindow(tk.Toplevel):
         if len(idx) < 8:
             return
         c = [(xs[i], zs[i]) for i in idx]
-        n, hw = len(c), self.ROAD / 2
-        L, R = [], []
+        n = len(c)
+        rn = []
         for j in range(n):
             p, q = c[max(0, j - 1)], c[min(n - 1, j + 1)]
             fx, fz = q[0] - p[0], q[1] - p[1]
             h = math.hypot(fx, fz) or 1.0
-            rx, rz = -fz / h, fx / h
-            L.append((c[j][0] - rx * hw, c[j][1] - rz * hw))
-            R.append((c[j][0] + rx * hw, c[j][1] + rz * hw))
+            rn.append((-fz / h, fx / h))
+        rd = [ds[i] for i in idx]
+        lo, hi = [1e9] * n, [-1e9] * n
+        others = [l for _, _, l in getattr(self.tv, "items", []) if l and not l.partial and l.n >= 10 and l.length > 50][:14]
+        for lp in [lap] + [l for l in others if l is not lap]:
+            sc = lp.length / lap.length if lap.length > 50 else 1.0
+            for j in range(n):
+                dd = rd[j] * sc
+                x, z = lp.at("x", dd), lp.at("z", dd)
+                if not (x or z):
+                    continue
+                o = (x - c[j][0]) * rn[j][0] + (z - c[j][1]) * rn[j][1]
+                if abs(o) < 40:
+                    lo[j], hi[j] = min(lo[j], o), max(hi[j], o)
+        mid = [(a + b) / 2 if b >= a else 0.0 for a, b in zip(lo, hi)]
+        hw = [max(self.ROAD / 2, (b - a) / 2 + 3.0) if b >= a else self.ROAD / 2 for a, b in zip(lo, hi)]
+
+        def smooth(v, k=5):
+            return [sum(v[max(0, i - k):i + k + 1]) / len(v[max(0, i - k):i + k + 1]) for i in range(len(v))]
+        mid, hw = smooth(mid), smooth(hw)
+        cc = [(c[j][0] + rn[j][0] * mid[j], c[j][1] + rn[j][1] * mid[j]) for j in range(n)]
+        L = [(cc[j][0] - rn[j][0] * hw[j], cc[j][1] - rn[j][1] * hw[j]) for j in range(n)]
+        R = [(cc[j][0] + rn[j][0] * hw[j], cc[j][1] + rn[j][1] * hw[j]) for j in range(n)]
         sp = [vs[i] for i in idx]
-        self.rib = {"d": [ds[i] for i in idx], "c": c, "L": L, "R": R, "v": sp, "vlo": min(sp), "vhi": max(sp)}
+        self.rib = {"d": rd, "c": cc, "L": L, "R": R, "v": sp, "vlo": min(sp), "vhi": max(sp)}
 
     def car(self, key):
         dd = self.data.get(key)
@@ -7837,12 +7872,31 @@ class TrackWindow(tk.Toplevel):
         self.od = max(0.35, min(3.0, self.od * (0.88 if k > 0 else 1.14)))
         self.draw()
 
-    def close(self):
+    def shutdown(self):
         self.playing = False
         if self._job:
-            self.after_cancel(self._job)
-        self.tv.track = None
-        self.destroy()
+            try:
+                self.after_cancel(self._job)
+            except tk.TclError:
+                pass
+            self._job = None
+
+    def on_pan_press(self, e):
+        self._pan = (e.x, e.y, self.pan[0], self.pan[1])
+
+    def on_pan(self, e):
+        if not self._pan or self.mode.get() != "orbit":
+            return
+        x0, y0, px, py = self._pan
+        k = self._wpp
+        self.pan[0] = px - (e.x - x0) * k                         # вдоль экрана (влево/вправо)
+        self.pan[1] = py + (e.y - y0) * k / max(0.35, math.sin(self.op))   # вглубь
+        self.draw()
+
+    def reset_view(self, e=None):
+        if self.mode.get() == "orbit":
+            self.oy, self.op, self.od, self.pan = -math.pi / 2, 0.7, 0.85, [0.0, 0.0]
+            self.draw()
 
     # ---- рисование
     def draw(self):
@@ -7904,12 +7958,12 @@ class TrackWindow(tk.Toplevel):
         c, rib = self.cv, self.rib
         k, xf = self.fit_top(W, H)
         n = len(rib["c"])
-        lw = max(4, self.ROAD * k)
         pts = [xf(*p) for p in rib["c"]]
+        Lp, Rp = [xf(*p) for p in rib["L"]], [xf(*p) for p in rib["R"]]
         for i in range(n - 1):
-            c.create_line(*pts[i], *pts[i + 1], fill="#2b2f36", width=lw, capstyle="round")
+            c.create_polygon(*Lp[i], *Rp[i], *Rp[i + 1], *Lp[i + 1], fill="#2b2f36", outline="#2b2f36")
         for i in range(n - 1):
-            c.create_line(*pts[i], *pts[i + 1], fill=speed_color(rib["v"][i], rib["vlo"], rib["vhi"]), width=2)
+            c.create_line(*pts[i], *pts[i + 1], fill=speed_color(rib["v"][i], rib["vlo"], rib["vhi"]), width=1)
         for key in ("A", "B"):
             dd = self.data.get(key)
             if dd and dd["ok"]:
@@ -7957,7 +8011,9 @@ class TrackWindow(tk.Toplevel):
         cx, cz = (min(xs) + max(xs)) / 2, (min(zs) + max(zs)) / 2
         R = max(max(xs) - min(xs), max(zs) - min(zs), 200.0) * self.od
         fx, fz = math.cos(self.oy), math.sin(self.oy)
+        cx, cz = cx - fz * self.pan[0] + fx * self.pan[1], cz + fx * self.pan[0] + fz * self.pan[1]
         dist = R * 1.25
+        self._wpp = dist / (min(W, H * 1.4) * 0.95)
         hz_ = dist * math.cos(self.op)
         return Cam3(cx - fx * hz_, dist * math.sin(self.op), cz - fz * hz_, fx, fz, self.op, W, H, min(W, H * 1.4) * 0.95)
 
@@ -8163,7 +8219,9 @@ class TelemetryView(ttk.Frame):
             self.strip_vars[k] = v
             menu.add_checkbutton(label=tr(", ".join(name.split(", ")[:-1]) or name), variable=v, command=self.strips_changed)
         mb.pack(side="left")
-        ttk.Button(bar, text=tr("Трасса 3D ▸"), command=self.open_track).pack(side="left", padx=(8, 0))
+        self.track = None
+        self.track_btn = ttk.Button(bar, text=tr("Трасса 3D ▸"), command=self.open_track)
+        self.track_btn.pack(side="left", padx=(8, 0))
         self.legend = ttk.Label(bar, text=tr("Колесо — масштаб, перетаскивание — сдвиг, двойной щелчок — весь круг"), style="Dim.TLabel")
         self.legend.pack(side="left", padx=12)
         self.cv = tk.Canvas(right, bg=UI_FIELD, highlightthickness=1, highlightbackground=UI_BORDER, height=420)
@@ -8288,15 +8346,24 @@ class TelemetryView(ttk.Frame):
             self.track.reload()
 
     def open_track(self):
-        tw = getattr(self, "track", None)
-        if tw is not None:
-            try:
-                tw.deiconify()
-                tw.lift()
-                return
-            except tk.TclError:
-                pass
-        self.track = TrackWindow(self)
+        if getattr(self, "track", None) is not None:
+            self.close_track()
+            return
+        host = self.stats.track_host
+        self.track = TrackPanel(host, self)
+        self.track.pack(fill="both", expand=True)
+        self.stats.show_track(True)
+        self.track_btn.configure(text=tr("◂ Сессии"))
+
+    def close_track(self):
+        tp = getattr(self, "track", None)
+        if tp is None:
+            return
+        self.track = None
+        tp.shutdown()
+        tp.destroy()
+        self.stats.show_track(False)
+        self.track_btn.configure(text=tr("Трасса 3D ▸"))
 
     def strips_changed(self):
         self.on = [k for k, _, _, _ in STRIPS if self.strip_vars[k].get()] or ["spd"]
@@ -8670,8 +8737,9 @@ class StatsPage(ttk.Frame):
         self.subject, self.shown, self._rrows = None, None, []
         self.columnconfigure(1, weight=1)
         self.rowconfigure(0, weight=1)
-        left = ttk.Frame(self)
+        left = self.left = ttk.Frame(self)
         left.grid(row=0, column=0, sticky="ns", padx=(0, 14))
+        self.track_host = ttk.Frame(self)
         ttk.Label(left, text="Сессии", style="Head.TLabel").pack(anchor="w")
         lbox = RoundBox(left, radius=12, fill=UI_BG, border=mix(UI_BORDER, UI_DIM, 0.35), fillh=True)
         lbox.pack(fill="both", expand=True, pady=(4, 8))
@@ -8775,6 +8843,15 @@ class StatsPage(ttk.Frame):
                 ("laps", "Круги", 50, "center"), ("best", "Лучший", 78, "e"), ("last", "Последний", 78, "e"),
                 ("state", "Статус", 70, "w")]
 
+    def show_track(self, on):
+        """Панель трассы занимает место списка сессий; список возвращается при закрытии панели."""
+        if on:
+            self.left.grid_remove()
+            self.track_host.grid(row=0, column=0, sticky="ns", padx=(0, 14))
+        else:
+            self.track_host.grid_remove()
+            self.left.grid(row=0, column=0, sticky="ns", padx=(0, 14))
+
     def set_view(self, k):
         self.vmode = k
         self.apply_view()
@@ -8791,6 +8868,7 @@ class StatsPage(ttk.Frame):
             else:
                 self.tel.set_session(None, None)
         else:
+            self.tel.close_track()
             self.tel.grid_remove()
             for w in (self.wrap, self.cards, self.tabs, self.chart):
                 w.grid()
@@ -9812,14 +9890,34 @@ class TopBar(tk.Frame):
         gear.pack(side="right")
         gear.bind("<Button-1>", lambda e: app.show_settings())
         Tip(gear, "Настройки лаунчера")
-        self.ver = StatusChip(top)
-        self.ver.pack(side="right", padx=(0, 10))
+        vbox = tk.Frame(top, bg=UI_BG)
+        vbox.pack(side="right", padx=(0, 10))
+        self.ver = StatusChip(vbox)
+        self.ver.pack(side="top", anchor="e")
+        self.prog = tk.Canvas(vbox, height=6, width=10, bg=UI_BG, highlightthickness=0, borderwidth=0)
+        self.prog.pack(side="top", fill="x", pady=(3, 0))
+        self.prog.bind("<Configure>", lambda e: self.show_progress(self._pf))
+        self._pf = None
         self.ver.set(f"{tr('Версия')} {APP_VERSION}", "off")
         self.ver.configure(cursor="hand2")
         self.ver.bind("<Button-1>", lambda e: app.on_version_click())
         Tip(self.ver, "Нажмите, чтобы проверить обновления")
         tk.Frame(self, bg=UI_BORDER, height=1).pack(fill="x")
         self.cur = None
+
+    def show_progress(self, frac):
+        """Строка скачивания обновления под чипом версии: frac от 0 до 1, None — убрать."""
+        self._pf = frac
+        try:
+            c = self.prog
+            c.delete("all")
+            if frac is None:
+                return
+            w = max(10, c.winfo_width())
+            c.create_rectangle(0, 1, w, 5, fill=mix(UI_BG, UI_DIM, 0.25), outline="")
+            c.create_rectangle(0, 1, max(3, w * max(0.0, min(1.0, frac))), 5, fill="#f5b921", outline="")
+        except tk.TclError:
+            pass
 
     def hover(self, name, on):
         lb, _ = self.tabs[name]
@@ -11311,6 +11409,8 @@ class App:
                 if isinstance(cmd, tuple):                       # результат обновления из фонового потока
                     if cmd[0] == "upd_info":
                         self.on_update_info(*cmd[1:])
+                    elif cmd[0] == "upd_prog":
+                        self.on_upd_progress(*cmd[1:])
                     elif cmd[0] == "upd_done":
                         self.after_update(*cmd[1:])
                     elif cmd[0] == "ets2_msg":
@@ -11345,6 +11445,8 @@ class App:
 
     def set_version_chip(self):
         info = getattr(self, "upd_info", None)
+        if getattr(self, "upd_busy", False):
+            return
         try:
             if info and info.get("newer"):
                 self.topbar.ver.set(f"{tr('Доступна')} {info['version']} · {tr('Обновить')}", "wait")
@@ -11354,6 +11456,8 @@ class App:
             pass
 
     def on_version_click(self):
+        if getattr(self, "upd_busy", False):
+            return
         info = getattr(self, "upd_info", None)
         if info and info.get("newer"):
             self.ask_install(info)
@@ -11379,11 +11483,28 @@ class App:
                + (info["notes"] + "\n\n" if info["notes"] else "")
                + tr("Установить сейчас? Текущие файлы сохранятся в папке backup, настройки не меняются."))
         if messagebox.askyesno(tr("Обновление"), msg):
+            self.upd_busy = True
+            self.on_upd_progress(0, max(1, len(info["files"])))
+
             def work():
-                self.tray_q.put(("upd_done", info, apply_online_update(info)))
+                err = apply_online_update(info, lambda n, t: self.tray_q.put(("upd_prog", n, t)))
+                self.tray_q.put(("upd_done", info, err))
             threading.Thread(target=work, daemon=True).start()
 
+    def on_upd_progress(self, n, total):
+        try:
+            self.topbar.ver.set(f"{tr('Скачивание')} {n}/{total} · {int(100 * n / max(1, total))}%" if n < total else tr("Установка…"), "wait")
+            self.topbar.show_progress(n / max(1, total))
+        except (tk.TclError, AttributeError):
+            pass
+
     def after_update(self, info, err):
+        self.upd_busy = False
+        try:
+            self.topbar.show_progress(None)
+        except (tk.TclError, AttributeError):
+            pass
+        self.set_version_chip()
         if err:
             mb_error("Обновление", tr("Не удалось установить, файлы не изменены:") + "\n" + err)
             return

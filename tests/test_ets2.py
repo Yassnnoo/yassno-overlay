@@ -820,7 +820,7 @@ class LauncherLook(unittest.TestCase):
             root.destroy()
 
 
-class TrackWindowTests(unittest.TestCase):
+class TrackPanelTests(unittest.TestCase):
     """Окно «Трасса» в телеметрии: камера и три вида на синтетическом круге."""
 
     @staticmethod
@@ -866,8 +866,12 @@ class TrackWindowTests(unittest.TestCase):
             h = tk.Frame(root)
             h.A, h.B, h.lap, h.cur_d, h.track = fps[0], fps[1], L.load_tlap, None, None
             h.draw_cursor = lambda: None
+            h.items = [(1, fps[0], L.load_tlap(fps[0])), (2, fps[1], L.load_tlap(fps[1]))]
+            h.close_track = lambda: None
             h.app = type("A", (), {"cfg": {}, "save_cfg": lambda s: None})()
-            tw = L.TrackWindow(h)
+            tw = L.TrackPanel(root, h)
+            tw.pack(fill="both", expand=True)
+            root.geometry("700x600")
             tw.update()
             self.assertAlmostEqual(tw.tmax, 91.5, delta=0.1)
             for m in ("top", "chase", "orbit"):
@@ -881,6 +885,16 @@ class TrackWindowTests(unittest.TestCase):
             self.assertGreater(a["d"], b["d"])            # A быстрее: к 45 с уже дальше по трассе
             tw.on_chart(1500)
             self.assertAlmostEqual(tw.car("A")["d"], 1500, delta=30)
-            tw.close()
+            # дорога по всем кругам: шире минимальной там, где круги разъезжаются, и A не обязан быть по центру
+            self.assertGreater(max(abs(a - b) for a, b in zip(tw.rib["L"][50], tw.rib["R"][50])), 0)
+            tw.mode.set("orbit")
+            tw.draw()
+            before = tuple(tw.pan)
+            tw.on_pan_press(type("E", (), {"x": 100, "y": 100})())
+            tw.on_pan(type("E", (), {"x": 160, "y": 100})())     # правая кнопка: вид сдвигается вбок
+            self.assertNotEqual(before, tuple(tw.pan))
+            tw.reset_view()
+            self.assertEqual(tw.pan, [0.0, 0.0])
+            tw.shutdown()
         finally:
             root.destroy()
