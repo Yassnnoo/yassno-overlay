@@ -75,7 +75,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.11.4"
+APP_VERSION = "3.11.5"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -9770,32 +9770,13 @@ class SettingsPage(ttk.Frame):
         self.i2_var = tk.StringVar(value=str(cfg.get("i2_path", "")))
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
-        sc = tk.Canvas(self, bg=UI_BG, highlightthickness=0, borderwidth=0)
-        sbar = ttk.Scrollbar(self, orient="vertical", command=sc.yview)
-        sc.configure(yscrollcommand=sbar.set)
-        sc.grid(row=0, column=0, sticky="nsew")
-        sbar.grid(row=0, column=1, sticky="ns")
-        body = ttk.Frame(sc)
-        win = sc.create_window(0, 0, window=body, anchor="nw")
-        sc.bind("<Configure>", lambda e: sc.itemconfigure(win, width=e.width))
-        body.bind("<Configure>", lambda e: sc.configure(scrollregion=sc.bbox("all")))
-        self.sc = sc
         self.ver_foot = ttk.Label(self, text="", style="Dim.TLabel")
         self.ver_foot.grid(row=1, column=0, columnspan=2, sticky="w", pady=(6, 0))
-
-        enable_wheel(sc, self)
         self.theme_var = tk.StringVar(value=tr(dict(self.THEMES)[cfg["theme"]]))
         self.lang_var = tk.StringVar(value=dict(self.LANGS)[cfg["lang"]])
-        ttk.Label(body, text="Настройки лаунчера", style="Title.TLabel").grid(row=0, column=0, sticky="w", columnspan=3)
-        ttk.Label(body, text="Всё, что относится к самой программе. Настройки оверлея — на страницах игр.",
-                  style="Dim.TLabel").grid(row=1, column=0, sticky="w", columnspan=3, pady=(2, 10))
+        P = self.build_frame()                           # P[категория] — рамка, куда складываются разделы этой категории
 
-        col1, col2, col3 = ttk.Frame(body), ttk.Frame(body), ttk.Frame(body)
-        col1.grid(row=2, column=0, sticky="nw", padx=(0, 24))
-        col2.grid(row=2, column=1, sticky="nw", padx=(0, 24))
-        col3.grid(row=2, column=2, sticky="nw")
-
-        box = section(col1, "Внешний вид")
+        box = section(P["look"], "Тема и язык")
         box.pack(fill="x", pady=(0, 10))
         ttk.Label(box, text="Тема").grid(row=0, column=0, sticky="w", padx=(0, 12), pady=4)
         cb = ttk.Combobox(box, textvariable=self.theme_var, values=[tr(n) for _, n in self.THEMES], state="readonly", width=16)
@@ -9806,26 +9787,51 @@ class SettingsPage(ttk.Frame):
         cb2.grid(row=1, column=1, sticky="w")
         cb2.bind("<<ComboboxSelected>>", self.on_lang)
 
-        box = section(col1, "Запуск")
+        box = section(P["look"], "Анимации и оформление")
+        box.pack(fill="x", pady=(0, 10))
+        self.tg(box, 0, "Анимация заставки при запуске лаунчера", "intro_anim")
+        self.tg(box, 1, "Анимации интерфейса (плавные переходы, подсветка, статус)", "ui_anim")
+        self.tg(box, 2, "Цвет интерфейса под выбранную игру", "accent_by_game")
+        self.tg(box, 3, "Тени у карточек (со следующего запуска лаунчера)", "shadows")
+
+        box = section(P["start"], "Запуск")
         box.pack(fill="x", pady=(0, 10))
         self.tg(box, 0, "Запускать лаунчер вместе с Windows", "win_start")
         self.tg(box, 1, "Запускать свёрнутым", "start_min")
 
-        box = section(col1, "Свёрнутое окно")
+        box = section(P["start"], "Трей (значок у часов)")
         box.pack(fill="x", pady=(0, 10))
         self.tg(box, 0, "Сворачивать в трей (значок у часов)", "min_tray")
         self.tg(box, 1, "Крестик окна сворачивает в трей, а не закрывает", "close_tray")
-        self.tray_lbl = ttk.Label(box, text="", style="Dim.TLabel", wraplength=380, justify="left")
+        self.tray_lbl = ttk.Label(box, text="", style="Dim.TLabel", wraplength=480, justify="left")
         self.tray_lbl.grid(row=2, column=0, sticky="w", pady=(4, 0))
-        self.tg(box, 3, "Анимация заставки при запуске лаунчера", "intro_anim")
-        self.tg(box, 4, "Анимации интерфейса (плавные переходы, подсветка, статус)", "ui_anim")
-        self.tg(box, 5, "Цвет интерфейса под выбранную игру", "accent_by_game")
         self.tray_btn = ttk.Button(box, text="Установить поддержку трея", command=self.install_tray)
-        self.tray_btn.grid(row=6, column=0, sticky="w", pady=(6, 0))
-        self.tg(box, 7, "Замер скорости оверлея (после перезапуска пишет logs/perf-*.log)", "perf_log")
-        self.tg(box, 8, "Тени у карточек (со следующего запуска лаунчера)", "shadows")
+        self.tray_btn.grid(row=3, column=0, sticky="w", pady=(6, 0))
 
-        box = section(col3, "Горячие клавиши оверлея")
+        box = section(P["games"], "Оверлей и игра")
+        box.pack(fill="x", pady=(0, 10))
+        self.tg(box, 0, "Запускать оверлей вместе с игрой (кнопка «Запустить игру»)", "launch_with_game")
+        self.tg(box, 1, "Сам определять игру и запускать оверлей", "autostart")
+        self.tg(box, 2, "Закрывать оверлей вместе с игрой", "close_with_game")
+        self.tg(box, 3, "Останавливать оверлей при выходе из лаунчера", "stop_on_exit")
+        r = ttk.Frame(box)
+        r.grid(row=4, column=0, sticky="w", pady=(6, 0))
+        ttk.Label(r, text="Проверять запущенную игру каждые").pack(side="left")
+        ttk.Spinbox(r, from_=1, to=10, increment=1, textvariable=self.v["poll_sec"], width=4, command=self.on_poll).pack(side="left", padx=6)
+        ttk.Label(r, text="сек.").pack(side="left")
+        ttk.Button(box, text="Процессы игр…", command=app.edit_procs).grid(row=5, column=0, sticky="w", pady=(8, 0))
+        if os.name == "nt":
+            ttk.Button(box, text="Ярлык на рабочем столе", command=app.make_shortcut).grid(row=6, column=0, sticky="w", pady=(6, 0))
+
+        box = section(P["games"], "Запуск игр")
+        box.pack(fill="x", pady=(0, 10))
+        for i, (g, name) in enumerate(GAMES.items()):
+            ttk.Label(box, text=name).grid(row=i, column=0, sticky="w", padx=(0, 8), pady=3)
+            ttk.Entry(box, textvariable=app.game_vars[g], width=34).grid(row=i, column=1, pady=3)
+            ttk.Button(box, text="Обзор…", command=lambda g=g: app.browse_game(g)).grid(row=i, column=2, padx=(6, 0))
+        ttk.Label(box, text="Пусто — игра запускается через Steam.", style="Dim.TLabel").grid(row=len(GAMES), column=0, columnspan=3, sticky="w", pady=(4, 0))
+
+        box = section(P["keys"], "Горячие клавиши оверлея")
         box.pack(fill="x", pady=(0, 10))
         hk = read_json(profile_path("lmu")).get("hotkeys") if isinstance(read_json(profile_path("lmu")), dict) else None
         hk = hk if isinstance(hk, dict) else {}
@@ -9849,36 +9855,21 @@ class SettingsPage(ttk.Frame):
         self.hk_msg = ttk.Label(box, text="Применяются при следующем запуске оверлея.", style="Dim.TLabel")
         self.hk_msg.grid(row=len(HOTKEYS) + 1, column=0, columnspan=3, sticky="w", pady=(4, 0))
 
-        box = section(col2, "Оверлей и игра")
+        box = section(P["tele"], "Запись телеметрии")
         box.pack(fill="x", pady=(0, 10))
-        self.tg(box, 0, "Запускать оверлей вместе с игрой (кнопка «Запустить игру»)", "launch_with_game")
-        self.tg(box, 1, "Сам определять игру и запускать оверлей", "autostart")
-        self.tg(box, 2, "Закрывать оверлей вместе с игрой", "close_with_game")
-        self.tg(box, 3, "Останавливать оверлей при выходе из лаунчера", "stop_on_exit")
-        r = ttk.Frame(box)
-        r.grid(row=4, column=0, sticky="w", pady=(6, 0))
-        ttk.Label(r, text="Проверять запущенную игру каждые").pack(side="left")
-        ttk.Spinbox(r, from_=1, to=10, increment=1, textvariable=self.v["poll_sec"], width=4, command=self.on_poll).pack(side="left", padx=6)
-        ttk.Label(r, text="сек.").pack(side="left")
-        ttk.Button(box, text="Процессы игр…", command=app.edit_procs).grid(row=5, column=0, sticky="w", pady=(8, 0))
-        if os.name == "nt":
-            ttk.Button(box, text="Ярлык на рабочем столе", command=app.make_shortcut).grid(row=6, column=0, sticky="w", pady=(6, 0))
-
-        box = section(col2, "Запуск игр")
+        self.tg(box, 0, "Записывать телеметрию (скорость, педали, шины…)", "telemetry")
+        ttk.Label(box, text="20 записей в секунду, около 50 КБ на круг.\nЕсли оверлей нагружает компьютер — выключите.\nПрименяется сразу, перезапуск не нужен.",
+                  style="Dim.TLabel", justify="left").grid(row=1, column=0, columnspan=3, sticky="w", pady=(0, 6))
+        box = section(P["tele"], "MoTeC i2 Pro")
         box.pack(fill="x", pady=(0, 10))
-        for i, (g, name) in enumerate(GAMES.items()):
-            ttk.Label(box, text=name).grid(row=i, column=0, sticky="w", padx=(0, 8), pady=3)
-            ttk.Entry(box, textvariable=app.game_vars[g], width=34).grid(row=i, column=1, pady=3)
-            ttk.Button(box, text="Обзор…", command=lambda g=g: app.browse_game(g)).grid(row=i, column=2, padx=(6, 0))
-        ttk.Label(box, text="Пусто — игра запускается через Steam.", style="Dim.TLabel").grid(row=len(GAMES), column=0, columnspan=3, sticky="w", pady=(4, 0))
+        ttk.Label(box, text="Путь к i2.exe").grid(row=0, column=0, sticky="w")
+        r2 = ttk.Frame(box)
+        r2.grid(row=1, column=0, sticky="w", pady=(2, 0))
+        ttk.Entry(r2, textvariable=self.i2_var, width=40).pack(side="left")
+        ttk.Button(r2, text="Обзор…", command=self.browse_i2).pack(side="left", padx=(6, 0))
+        self.i2_var.trace_add("write", lambda *a: (self.app.cfg.__setitem__("i2_path", self.i2_var.get().strip()), self.app.save_cfg()))
 
-        box = section(col2, "Файлы")
-        box.pack(fill="x", pady=(0, 10))
-        for i, (name, path) in enumerate((("Открыть папку профилей", PROFILES), ("Открыть папку журналов", LOGS),
-                                          ("Открыть папку карт трасс", MAP_DIR), ("Открыть папку лаунчера", HERE))):
-            ttk.Button(box, text=name, command=lambda p=path: self.open_dir(p)).grid(row=i // 2, column=i % 2, sticky="w", padx=(0, 8), pady=3)
-
-        box = section(col1, "Обновление программы")
+        box = section(P["upd"], "Обновление программы")
         box.pack(fill="x", pady=(0, 10))
         self.ver_lbl = ttk.Label(box, text="", style="Dim.TLabel", justify="left")
         self.ver_lbl.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 4))
@@ -9888,39 +9879,125 @@ class SettingsPage(ttk.Frame):
         Toggle(box, "Проверять при запуске лаунчера", self.v["auto_update"]).grid(row=3, column=0, columnspan=2, sticky="w", pady=(6, 0))
         self.refresh_version()
 
-        box = section(col2, "Перенос настроек")
+        box = section(P["data"], "Папки")
+        box.pack(fill="x", pady=(0, 10))
+        for i, (name, path) in enumerate((("Открыть папку профилей", PROFILES), ("Открыть папку журналов", LOGS),
+                                          ("Открыть папку карт трасс", MAP_DIR), ("Открыть папку лаунчера", HERE))):
+            ttk.Button(box, text=name, command=lambda p=path: self.open_dir(p)).grid(row=i // 2, column=i % 2, sticky="w", padx=(0, 8), pady=3)
+
+        box = section(P["data"], "Перенос настроек")
         box.pack(fill="x", pady=(0, 10))
         ttk.Button(box, text="Экспорт настроек…", command=self.export_all).grid(row=0, column=0, sticky="w", padx=(0, 8), pady=3)
         ttk.Button(box, text="Импорт настроек…", command=self.import_all).grid(row=0, column=1, sticky="w", pady=3)
         ttk.Label(box, text="Один файл: профили LMU и rFactor 2 (раскладка окон, виды, цвета)\nи ваши программы. Удобно для копии или другого ПК.",
                   style="Dim.TLabel", justify="left").grid(row=1, column=0, columnspan=2, sticky="w", pady=(2, 0))
 
-        box = section(col3, "Диагностика")
+        box = section(P["data"], "Сброс")
+        box.pack(fill="x", pady=(0, 10))
+        ttk.Button(box, text="Сбросить настройки лаунчера", command=self.reset).pack(anchor="w")
+        ttk.Label(box, text="Профили оверлея (LMU и rFactor 2) не затрагиваются.", style="Dim.TLabel").pack(anchor="w", pady=(4, 0))
+
+        box = section(P["diag"], "Диагностика")
         box.pack(fill="x", pady=(0, 10))
         ttk.Button(box, text="Проверить систему…", command=self.diagnose).grid(row=0, column=0, sticky="w", pady=3)
         ttk.Label(box, text="Покажет, запущена ли игра, виден ли оверлею\nеё поток данных и что писал оверлей в журнал.",
                   style="Dim.TLabel", justify="left").grid(row=1, column=0, sticky="w", pady=(2, 0))
-
-        box = section(col3, "Телеметрия")
-        box.pack(fill="x", pady=(0, 10))
-        self.tg(box, 0, "Записывать телеметрию (скорость, педали, шины…)", "telemetry")
-        ttk.Label(box, text="20 записей в секунду, около 50 КБ на круг.\nЕсли оверлей нагружает компьютер — выключите.\nПрименяется сразу, перезапуск не нужен.",
-                  style="Dim.TLabel", justify="left").grid(row=1, column=0, columnspan=3, sticky="w", pady=(0, 6))
-        ttk.Label(box, text="MoTeC i2 Pro (i2.exe)").grid(row=2, column=0, sticky="w")
-        r2 = ttk.Frame(box)
-        r2.grid(row=3, column=0, sticky="w", pady=(2, 0))
-        ttk.Entry(r2, textvariable=self.i2_var, width=30).pack(side="left")
-        ttk.Button(r2, text="Обзор…", command=self.browse_i2).pack(side="left", padx=(6, 0))
-        self.i2_var.trace_add("write", lambda *a: (self.app.cfg.__setitem__("i2_path", self.i2_var.get().strip()), self.app.save_cfg()))
-
-        box = section(col3, "Сброс")
-        box.pack(fill="x")
-        ttk.Button(box, text="Сбросить настройки лаунчера", command=self.reset).pack(anchor="w")
-        ttk.Label(box, text="Профили оверлея (LMU и rFactor 2) не затрагиваются.", style="Dim.TLabel").pack(anchor="w", pady=(4, 0))
+        self.tg(box, 2, "Замер скорости оверлея (после перезапуска пишет logs/perf-*.log)", "perf_log")
 
         for key in ("win_start", "start_min", "min_tray", "close_tray", "stop_on_exit", "telemetry", "auto_update", "intro_anim", "ui_anim", "accent_by_game", "shadows", "perf_log"):
             self.v[key].trace_add("write", lambda *a: self.apply())
         self.refresh_tray()
+
+    CATS = [("look", "◐", "Внешний вид", "Тема, язык, анимации и оформление"),
+            ("start", "↗", "Запуск и трей", "Автозапуск с Windows и сворачивание в трей"),
+            ("games", "▶", "Игры и оверлей", "Как лаунчер запускает игры и оверлей"),
+            ("keys", "⌨", "Горячие клавиши", "Сочетания клавиш оверлея в игре"),
+            ("tele", "∿", "Телеметрия", "Запись данных и MoTeC i2 Pro"),
+            ("upd", "⟳", "Обновления", "Версия, проверка, откат"),
+            ("data", "▤", "Данные и сброс", "Папки, экспорт/импорт, сброс"),
+            ("diag", "✚", "Диагностика", "Проверка системы и замер скорости")]
+    MAXW = 780
+
+    def scroller(self, parent, maxw, center=True):
+        """Прокручиваемая область; содержимое по центру, шириной не больше maxw."""
+        sc = tk.Canvas(parent, bg=UI_BG, highlightthickness=0, borderwidth=0)
+        sbar = ttk.Scrollbar(parent, orient="vertical", command=sc.yview)
+        sc.configure(yscrollcommand=sbar.set)
+        body = ttk.Frame(sc)
+        win = sc.create_window(0, 0, window=body, anchor="nw")
+
+        def fit(e):
+            w = min(e.width, maxw)
+            sc.itemconfigure(win, width=w)
+            sc.coords(win, max(0, (e.width - w) // 2) if center else 0, 0)
+        sc.bind("<Configure>", fit)
+        body.bind("<Configure>", lambda e: sc.configure(scrollregion=sc.bbox("all")))
+        enable_wheel(sc, parent)
+        return sc, sbar, body
+
+    def build_frame(self):
+        """Каркас вкладки: список категорий слева, выбранная категория справа. Возвращает {категория: рамка для разделов}."""
+        self.cat_rows, self.cat_key = {}, "look"
+        wrap = ttk.Frame(self)
+        wrap.grid(row=0, column=0, sticky="nsew")
+        wrap.columnconfigure(1, weight=1)
+        wrap.rowconfigure(0, weight=1)
+        nav = tk.Frame(wrap, bg=UI_PANEL, width=250)
+        nav.grid(row=0, column=0, sticky="ns", padx=(0, 18))
+        nav.pack_propagate(False)
+        tk.Label(nav, text=tr("Настройки лаунчера"), bg=UI_PANEL, fg=UI_FG, font=("Segoe UI Semibold", 12), anchor="w",
+                 padx=20, pady=14).pack(fill="x")
+        for key, icon, title, desc in self.CATS:
+            row = tk.Frame(nav, bg=UI_PANEL, cursor="hand2")
+            row.pack(fill="x", padx=8, pady=1)
+            ic = tk.Label(row, text=icon, bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI Symbol", 12), width=2, anchor="center", cursor="hand2")
+            ic.pack(side="left", padx=(10, 0))
+            lb = tk.Label(row, text=tr(title), bg=UI_PANEL, fg=UI_FG, font=("Segoe UI", 11), anchor="w", padx=8, pady=9, cursor="hand2")
+            lb.pack(side="left", fill="x", expand=True)
+            row._icon = ic
+            self.cat_rows[key] = (row, lb, ic)
+            for w in (row, ic, lb):
+                w.bind("<Button-1>", lambda e, k=key: self.show_cat(k))
+                w.bind("<Enter>", lambda e, k=key: self.cat_hover(k, True), add="+")
+                w.bind("<Leave>", lambda e, k=key: self.cat_hover(k, False), add="+")
+        right = ttk.Frame(wrap)
+        right.grid(row=0, column=1, sticky="nsew")
+        right.columnconfigure(0, weight=1)
+        right.rowconfigure(0, weight=1)
+        self.sc, sbar, body = self.scroller(right, self.MAXW, center=False)
+        self.sc.grid(row=0, column=0, sticky="nsew")
+        sbar.grid(row=0, column=1, sticky="ns")
+        self.head_t = ttk.Label(body, text="", style="Title.TLabel")
+        self.head_t.pack(anchor="w", pady=(4, 0))
+        self.head_d = ttk.Label(body, text="", style="Dim.TLabel")
+        self.head_d.pack(anchor="w", pady=(2, 12))
+        self.P = {key: ttk.Frame(body) for key, *_ in self.CATS}
+        self.after_idle(lambda: self.show_cat("look"))
+        return self.P
+
+    def cat_hover(self, key, on):
+        row, lb, ic = self.cat_rows[key]
+        if key == self.cat_key:
+            return
+        bg = UI_ACTIVE if on else UI_PANEL
+        for w in (row, lb, ic):
+            w.config(bg=bg)
+
+    def show_cat(self, key):
+        self.cat_key = key
+        for k, fr in self.P.items():
+            fr.pack_forget()
+        self.P[key].pack(fill="x")
+        for k, icon, title, desc in self.CATS:
+            if k == key:
+                self.head_t.config(text=tr(title))
+                self.head_d.config(text=tr(desc))
+        for k, (row, lb, ic) in self.cat_rows.items():
+            sel = k == key
+            for w in (row, lb, ic):
+                w.config(bg=UI_FIELD if sel else UI_PANEL)
+            ic.config(fg=UI_ACCENT if sel else UI_DIM)
+        self.sc.yview_moveto(0)
 
     def tg(self, parent, r, text, key):
         Toggle(parent, text, self.v[key]).grid(row=r, column=0, sticky="w", pady=4)
