@@ -71,7 +71,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.8.2"
+APP_VERSION = "3.8.3"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -7579,7 +7579,7 @@ class Cam3:
 
     def __init__(self, px, py, pz, fx, fz, pitch, W, H, focal):
         n = math.hypot(fx, fz) or 1.0
-        self.p, self.f, self.r = (px, py, pz), (fx / n, fz / n), (-fz / n, fx / n)
+        self.p, self.f, self.r = (px, py, pz), (fx / n, fz / n), (fz / n, -fx / n)
         self.cp, self.sp = math.cos(pitch), math.sin(pitch)
         self.W, self.H, self.F = W, H, focal
         self.horizon = H / 2 - focal * math.tan(pitch)
@@ -7644,7 +7644,7 @@ class TrackPanel(ttk.Frame):
         self.follow = tk.StringVar(value="A")
         self.spd = tk.StringVar(value="1")
         self.t, self.tmax, self.playing, self._last, self._job = 0.0, 1.0, False, 0.0, None
-        self.oy, self.op, self.od = -math.pi / 2, 0.7, 0.85
+        self.oy, self.op, self.od = math.pi / 2, 0.7, 0.85
         self._drag = self._pan = None
         self.pan = [0.0, 0.0]
         self._wpp = 1.0
@@ -7700,15 +7700,63 @@ class TrackPanel(ttk.Frame):
     def laps(self):
         return self.tv.lap(self.tv.A), self.tv.lap(self.tv.B)
 
+    HZ = 30.0
+
     def prep(self, lap):
+        """Круг -> ряды с равным шагом по времени, сглаженные: машины не дёргаются от шума позиции и неровных отметок времени."""
         if not lap or lap.n < 10:
             return None
-        ts, m = [], 0.0
-        for v in lap.c["t"]:
-            m = max(m, v)
-            ts.append(m)
-        ok = any(x or z for x, z in zip(lap.c["x"], lap.c["z"]))
-        return {"lap": lap, "t": ts, "end": ts[-1] if ts else 0.0, "ok": ok}
+        T, X, Z = lap.c["t"], lap.c["x"], lap.c["z"]
+        idx, last = [], -1.0
+        for i in range(lap.n):
+            if T[i] > last + 1e-4 and (X[i] or Z[i]):
+                idx.append(i)
+                last = T[i]
+        if len(idx) < 10:
+            return {"lap": lap, "ok": False, "end": T[-1] if T else 0.0}
+        ts = [T[i] for i in idx]
+        dt = 1.0 / self.HZ
+        t0 = ts[0]
+        N = int((ts[-1] - t0) / dt) + 1
+        cols = {k: [lap.c[k][i] for i in idx] for k in ("x", "z", "d", "spd", "thr", "brk", "gear")}
+        out = {k: [] for k in cols}
+        j = 0
+        for n in range(N):
+            t = t0 + n * dt
+            while j < len(ts) - 2 and ts[j + 1] < t:
+                j += 1
+            u = 0.0 if ts[j + 1] <= ts[j] else min(1.0, max(0.0, (t - ts[j]) / (ts[j + 1] - ts[j])))
+            for k, v in cols.items():
+                out[k].append(v[j] if k == "gear" else v[j] + (v[j + 1] - v[j]) * u)
+
+        def sm(v, k):
+            pre = [0.0]
+            for a in v:
+                pre.append(pre[-1] + a)
+            return [(pre[min(len(v), i + k + 1)] - pre[max(0, i - k)]) / (min(len(v), i + k + 1) - max(0, i - k)) for i in range(len(v))]
+        X2, Z2 = sm(out["x"], 3), sm(out["z"], 3)
+        hx, hz, px, pz = [], [], 0.0, 1.0
+        for i in range(N):
+            a, b = min(N - 1, i + 4), max(0, i - 4)
+            dx, dz = X2[a] - X2[b], Z2[a] - Z2[b]
+            h = math.hypot(dx, dz)
+            if h > 0.2:
+                px, pz = dx / h, dz / h
+            hx.append(px)
+            hz.append(pz)
+        hx, hz = sm(hx, 5), sm(hz, 5)
+        cpre_x, cpre_z = [0.0], [0.0]
+        for i in range(N):
+            cpre_x.append(cpre_x[-1] + hx[i])
+            cpre_z.append(cpre_z[-1] + hz[i])
+        cx, cz = [], []
+        for i in range(N):                                   # курс камеры — средний курс на секунду вперёд: без рывков в поворотах
+            e = min(N, i + 31)
+            cx.append((cpre_x[e] - cpre_x[i]) / max(1, e - i))
+            cz.append((cpre_z[e] - cpre_z[i]) / max(1, e - i))
+        return {"lap": lap, "ok": True, "t0": t0, "dt": dt, "n": N, "end": t0 + (N - 1) * dt,
+                "X": X2, "Z": Z2, "HX": hx, "HZ": hz, "CX": cx, "CZ": cz, "D": out["d"], "V": out["spd"],
+                "THR": out["thr"], "BRK": out["brk"], "GEAR": out["gear"]}
 
     def reload(self):
         a, b = self.laps()
@@ -7771,28 +7819,22 @@ class TrackPanel(ttk.Frame):
         dd = self.data.get(key)
         if not dd or not dd["ok"]:
             return None
-        lap, ts, ds = dd["lap"], dd["t"], dd["lap"].c["d"]
-        i = bisect.bisect_right(ts, self.t)
-        if i <= 0:
-            d = ds[0]
-        elif i >= lap.n:
-            d = ds[-1]
-        else:
-            t0, t1 = ts[i - 1], ts[i]
-            k = (self.t - t0) / (t1 - t0) if t1 > t0 else 0.0
-            d = ds[i - 1] + (ds[i] - ds[i - 1]) * k
-        x, z = lap.at("x", d), lap.at("z", d)
-        x1, z1 = lap.at("x", d - 4), lap.at("z", d - 4)
-        x2, z2 = lap.at("x", d + 5), lap.at("z", d + 5)
-        hx, hz = x2 - x1, z2 - z1
-        h = math.hypot(hx, hz)
-        if h < 0.05:
-            hx, hz, h = getattr(self, "_h_" + key, (0.0, -1.0)) + (1.0,)
-        hx, hz = hx / h, hz / h
-        setattr(self, "_h_" + key, (hx, hz))
-        return {"key": key, "lap": lap, "d": d, "x": x, "z": z, "hx": hx, "hz": hz,
-                "spd": lap.at("spd", d) or 0.0, "thr": lap.at("thr", d) or 0.0, "brk": lap.at("brk", d) or 0.0,
-                "gear": int(round(lap.at("gear", d) or 0)), "col": COL_A if key == "A" else COL_B}
+        f = max(0.0, min(dd["n"] - 1.0, (self.t - dd["t0"]) / dd["dt"]))
+        i = min(dd["n"] - 2, int(f)) if dd["n"] > 1 else 0
+        u = f - i
+        j = min(dd["n"] - 1, i + 1)
+
+        def g(k):
+            return dd[k][i] + (dd[k][j] - dd[k][i]) * u
+
+        def unit(a, b):
+            h = math.hypot(a, b) or 1.0
+            return a / h, b / h
+        hx, hz = unit(g("HX"), g("HZ"))
+        cx, cz = unit(g("CX"), g("CZ"))
+        return {"key": key, "lap": dd["lap"], "d": g("D"), "x": g("X"), "z": g("Z"), "hx": hx, "hz": hz, "cx": cx, "cz": cz,
+                "spd": g("V"), "thr": g("THR"), "brk": g("BRK"), "gear": int(round(dd["GEAR"][i])),
+                "col": COL_A if key == "A" else COL_B}
 
     # ---- управление
     def on_mode(self):
@@ -7895,7 +7937,7 @@ class TrackPanel(ttk.Frame):
 
     def reset_view(self, e=None):
         if self.mode.get() == "orbit":
-            self.oy, self.op, self.od, self.pan = -math.pi / 2, 0.7, 0.85, [0.0, 0.0]
+            self.oy, self.op, self.od, self.pan = math.pi / 2, 0.7, 0.85, [0.0, 0.0]
             self.draw()
 
     # ---- рисование
@@ -7952,7 +7994,7 @@ class TrackPanel(ttk.Frame):
         pad = 50
         k = min((W - 2 * pad) / max(1.0, x1 - x0), (H - 2 * pad) / max(1.0, z1 - z0))
         ox, oy = (W - (x1 - x0) * k) / 2, (H - (z1 - z0) * k) / 2
-        return k, (lambda x, z: (ox + (x - x0) * k, oy + (z - z0) * k))
+        return k, (lambda x, z: (ox + (x - x0) * k, oy + (z1 - z) * k))
 
     def draw_top(self, W, H, cars):
         c, rib = self.cv, self.rib
@@ -7967,51 +8009,46 @@ class TrackPanel(ttk.Frame):
         for key in ("A", "B"):
             dd = self.data.get(key)
             if dd and dd["ok"]:
-                self.trail_top(dd["lap"], xf, COL_A if key == "A" else COL_B)
+                self.trail_top(dd, xf, COL_A if key == "A" else COL_B)
         for car in cars:
             self.car_top(car, k, xf)
 
-    def trail_top(self, lap, xf, col):
-        step = max(1, lap.n // 500)
-        xs, zs, br = lap.c["x"], lap.c["z"], lap.c["brk"]
-        for i in range(0, lap.n - step, step):
-            if not (xs[i] or zs[i]) or not (xs[i + step] or zs[i + step]):
-                continue
+    def trail_top(self, dd, xf, col):
+        step = max(1, dd["n"] // 500)
+        xs, zs, br = dd["X"], dd["Z"], dd["BRK"]
+        for i in range(0, dd["n"] - step, step):
             a, b = xf(xs[i], zs[i]), xf(xs[i + step], zs[i + step])
             self.cv.create_line(*a, *b, fill="#ff3b30" if br[i] > 0.1 else col, width=1)
 
     def car_top(self, car, k, xf):
         sx, sy = xf(car["x"], car["z"])
-        L, Wd = max(9.0, 4.6 * k), max(5.0, 1.9 * k)
-        fx, fz, rx, rz = car["hx"], car["hz"], -car["hz"], car["hx"]
-        pts = []
-        for lf, lr in ((1, -1), (1, 1), (-1, 1), (-1, -1)):
-            pts += [sx + fx * L / 2 * lf + rx * Wd / 2 * lr, sy + fz * L / 2 * lf + rz * Wd / 2 * lr]
-        self.cv.create_polygon(*pts, fill=car["col"], outline="#ffffff", width=2)
-        nx, ny = sx + fx * L * 0.85, sy + fz * L * 0.85
-        self.cv.create_line(sx, sy, nx, ny, fill="#ffffff", width=2)
-        self.cv.create_text(sx - fx * L, sy - fz * L, text=car["key"], fill=car["col"], font=("Segoe UI Semibold", 11))
+        fx, fz = car["hx"], -car["hz"]                       # мир (x, z вверх) -> экран (y вниз)
+        rx, rz = -fz, fx
+        ms = max(1.0, 24.0 / (4.8 * k))                      # на мелком масштабе машины не меньше ~24 px
+        for pt_ in sorted(self.parts(self.model_kind()), key=lambda q: max(q["secs"][i][4] for i in range(len(q["secs"])))):
+            sec = pt_["secs"]
+            left = [(q[0], pt_["off"] + q[1]) for q in sec]
+            right = [(q[0], pt_["off"] - q[1]) for q in reversed(sec)]
+            poly = []
+            for lf, lr in left + right:
+                lf, lr = lf * ms, lr * ms
+                poly += [sx + (fx * lf + rx * lr) * k, sy + (fz * lf + rz * lr) * k]
+            self.cv.create_polygon(*poly, fill=pt_["col"] or car["col"], outline="#0e1116")
+        self.cv.create_text(sx - fx * 4.5 * ms * k, sy - fz * 4.5 * ms * k, text=car["key"], fill=car["col"], font=("Segoe UI Semibold", 11))
 
     def make_cam(self, W, H, cars, mode):
         if mode == "chase":
             tgt = next((x for x in cars if x["key"] == self.follow.get()), None) or (cars[0] if cars else None)
             if not tgt:
                 return None
-            lap, d = tgt["lap"], tgt["d"]
-            x1, z1 = lap.at("x", d - 3), lap.at("z", d - 3)
-            x2, z2 = lap.at("x", d + 28), lap.at("z", d + 28)
-            fx, fz = x2 - x1, z2 - z1
-            if math.hypot(fx, fz) < 0.1:
-                fx, fz = tgt["hx"], tgt["hz"]
-            n = math.hypot(fx, fz) or 1.0
-            fx, fz = fx / n, fz / n
+            fx, fz = tgt["cx"], tgt["cz"]
             return Cam3(tgt["x"] - fx * 15.0, 5.0, tgt["z"] - fz * 15.0, fx, fz, 0.2, W, H, W * 0.95)
         xs = [p[0] for p in self.rib["c"]]
         zs = [p[1] for p in self.rib["c"]]
         cx, cz = (min(xs) + max(xs)) / 2, (min(zs) + max(zs)) / 2
         R = max(max(xs) - min(xs), max(zs) - min(zs), 200.0) * self.od
         fx, fz = math.cos(self.oy), math.sin(self.oy)
-        cx, cz = cx - fz * self.pan[0] + fx * self.pan[1], cz + fx * self.pan[0] + fz * self.pan[1]
+        cx, cz = cx + fz * self.pan[0] + fx * self.pan[1], cz - fx * self.pan[0] + fz * self.pan[1]
         dist = R * 1.25
         self._wpp = dist / (min(W, H * 1.4) * 0.95)
         hz_ = dist * math.cos(self.op)
@@ -8072,8 +8109,8 @@ class TrackPanel(ttk.Frame):
             dd = self.data.get(key)
             if not (dd and dd["ok"]):
                 continue
-            lap = dd["lap"]
-            xs, zs, br, ds = lap.c["x"], lap.c["z"], lap.c["brk"], lap.c["d"]
+            xs, zs, br, ds = dd["X"], dd["Z"], dd["BRK"], dd["D"]
+            nn = dd["n"]
             col = COL_A if key == "A" else COL_B
             if mode == "chase":
                 ref = next((x for x in cars if x["key"] == key), None)
@@ -8081,10 +8118,8 @@ class TrackPanel(ttk.Frame):
                 lo, hi = bisect.bisect_left(ds, dref - 60), bisect.bisect_right(ds, dref + 300)
                 st = max(1, (hi - lo) // 120)
             else:
-                lo, hi, st = 0, lap.n - 1, max(1, lap.n // 700)
+                lo, hi, st = 0, nn - 1, max(1, nn // 700)
             for i in range(lo, hi - st, st):
-                if not (xs[i] or zs[i]) or not (xs[i + st] or zs[i + st]):
-                    continue
                 s = cam.line((xs[i], 0.03, zs[i]), (xs[i + st], 0.03, zs[i + st]))
                 if s:
                     c.create_line(*s[0], fill="#ff3b30" if br[i] > 0.1 else col, width=3 if mode == "chase" else 2)
@@ -8102,56 +8137,85 @@ class TrackPanel(ttk.Frame):
         return "F1" if g == "rf2" else "GT3"
 
     @staticmethod
-    def parts(kind):
-        """Простые модели из призм: (l0, l1, w0, w1, h0, h1_зад, h1_перед, цвет, сдвиг_вбок, тип). Цвет: None — цвет круга."""
-        D, W = "#262a31", "#3b414c"
+    def box(l0, l1, w0, w1, h0, hb, hf, col=None, off=0.0):
+        return {"secs": [(l0, w0, h0, hb, hb, w0), (l1, w1, h0, hf, hf, w1)], "off": off, "col": col, "kind": "box"}
+
+    @staticmethod
+    def wheel(lc, r, w, off, col="#262a31"):
+        secs = []
+        for q in (-1.0, -0.82, -0.5, 0.0, 0.5, 0.82, 1.0):
+            sq = math.sqrt(max(0.0, 1 - q * q)) * r
+            secs.append((lc + q * r, w, r - sq + 0.02, r + sq * 0.98, r + sq, w * 0.92))
+        return {"secs": secs, "off": off, "col": col, "kind": "wheel"}
+
+    @classmethod
+    def parts(cls, kind):
+        """Модели из сечений: (l — вдоль машины, w — полуширина по плечу, h_низ, h_плечо, h_крыша, w_крыши). Цвет None — цвет круга."""
+        D, W, G = "#262a31", "#3b414c", "#1c2430"
         if kind == "F1":
-            out = [(-1.6, 2.1, 0.32, 0.30, 0.12, 0.5, 0.45, None, 0.0, "body"),     # монокок
-                   (2.1, 3.2, 0.30, 0.12, 0.30, 0.45, 0.22, None, 0.0, "body"),       # нос
-                   (-1.3, 0.9, 0.42, 0.42, 0.12, 0.5, 0.45, None, 0.0, "body"),       # днище/пончоны
-                   (-0.5, 0.35, 0.22, 0.22, 0.5, 0.78, 0.62, W, 0.0, "body"),         # кокпит
-                   (-0.25, 0.1, 0.13, 0.13, 0.7, 0.95, 0.85, "#f2f2f2", 0.0, "body"), # шлем
-                   (-2.2, -0.5, 0.28, 0.3, 0.45, 0.88, 0.52, None, 0.0, "body"),      # воздухозаборник/кожух
-                   (2.75, 3.15, 1.05, 1.05, 0.1, 0.17, 0.17, W, 0.0, "body"),         # переднее крыло
-                   (-2.75, -2.25, 0.85, 0.85, 0.85, 1.12, 1.12, W, 0.0, "body")]      # заднее крыло
-            for lf, lw in ((2.05, 0.3), (-1.6, 0.36)):
-                for sd in (-1, 1):
-                    out.append((lf - 0.36, lf + 0.36, lw, lw, 0.0, 0.72, 0.72, D, sd * (1.0 - lw + 0.1), "wheel"))
+            out = [
+                {"secs": [(-2.2, .10, .38, .52, .60, .08), (-1.5, .22, .22, .55, .88, .12), (-0.8, .30, .14, .50, .62, .16), (-0.2, .34, .12, .46, .56, .20),
+                          (0.6, .32, .12, .40, .48, .18), (1.5, .26, .12, .34, .40, .16), (2.3, .16, .14, .28, .32, .10), (3.1, .08, .14, .20, .24, .06)],
+                 "off": 0.0, "col": None, "kind": "hull"},
+                {"secs": [(-1.4, .20, .14, .44, .50, .14), (-0.6, .26, .12, .50, .56, .18), (0.1, .24, .12, .44, .48, .16), (0.6, .12, .12, .30, .32, .08)],
+                 "off": 0.5, "col": None, "kind": "hull"},
+                {"secs": [(-1.4, .20, .14, .44, .50, .14), (-0.6, .26, .12, .50, .56, .18), (0.1, .24, .12, .44, .48, .16), (0.6, .12, .12, .30, .32, .08)],
+                 "off": -0.5, "col": None, "kind": "hull"},
+                {"secs": [(-0.3, .10, .56, .74, .84, .07), (0.0, .13, .54, .80, .95, .09), (0.28, .10, .56, .76, .84, .07)], "off": 0.0, "col": "#f2f2f2", "kind": "hull"},
+                cls.box(2.7, 3.15, 1.0, 1.0, 0.1, 0.15, 0.15, W),
+                cls.box(2.7, 3.15, 0.04, 0.04, 0.1, 0.3, 0.3, W, 1.0), cls.box(2.7, 3.15, 0.04, 0.04, 0.1, 0.3, 0.3, W, -1.0),
+                cls.box(-2.8, -2.25, 0.85, 0.85, 0.9, 1.1, 1.1, W),
+                cls.box(-2.8, -2.25, 0.04, 0.04, 0.5, 1.15, 1.15, W, 0.85), cls.box(-2.8, -2.25, 0.04, 0.04, 0.5, 1.15, 1.15, W, -0.85),
+            ]
+            for sd in (-1, 1):
+                out.append(cls.wheel(2.05, 0.33, 0.17, sd * 0.93))
+                out.append(cls.wheel(-1.6, 0.36, 0.25, sd * 0.9))
             return out
-        out = [(-2.3, 2.3, 0.97, 0.9, 0.18, 0.62, 0.58, None, 0.0, "body"),          # кузов
-               (0.55, 2.3, 0.92, 0.82, 0.58, 0.72, 0.62, None, 0.0, "body"),         # капот
-               (-1.0, 0.75, 0.74, 0.62, 0.62, 1.18, 0.74, "#1c2430", 0.0, "body"),   # кабина (лобовое скошено)
-               (2.3, 2.55, 0.95, 0.95, 0.1, 0.2, 0.2, D, 0.0, "body"),               # сплиттер
-               (-2.45, -2.0, 0.95, 0.95, 1.02, 1.08, 1.08, D, 0.0, "body")]          # антикрыло
+        out = [
+            {"secs": [(-2.3, .88, .24, .58, .66, .74), (-1.9, .97, .20, .62, .72, .82), (-1.0, 1.0, .18, .66, .74, .88), (0.0, 1.0, .16, .66, .72, .88),
+                      (1.0, .99, .14, .62, .66, .84), (1.8, .92, .12, .52, .58, .72), (2.25, .78, .12, .40, .44, .55), (2.4, .55, .12, .30, .32, .40)],
+             "off": 0.0, "col": None, "kind": "hull"},
+            {"secs": [(-1.15, .66, .66, .78, 1.06, .52), (-0.6, .70, .66, .80, 1.17, .52), (0.2, .70, .66, .78, 1.12, .50), (0.95, .74, .66, .72, .84, .62)],
+             "off": 0.0, "col": G, "kind": "hull"},
+            cls.box(2.3, 2.6, 0.95, 0.9, 0.1, 0.18, 0.18, D),
+            cls.box(-2.5, -2.05, 0.95, 0.95, 1.0, 1.07, 1.07, D),
+            cls.box(-2.5, -2.05, 0.03, 0.03, 0.62, 1.05, 1.05, D, 0.7), cls.box(-2.5, -2.05, 0.03, 0.03, 0.62, 1.05, 1.05, D, -0.7),
+        ]
         for sd in (-1, 1):
-            out.append((-2.4, -2.1, 0.03, 0.03, 0.6, 1.02, 1.02, D, sd * 0.7, "body"))  # стойки крыла
-            for lf in (1.45, -1.4):
-                out.append((lf - 0.38, lf + 0.38, 0.17, 0.17, 0.0, 0.72, 0.72, D, sd * 0.93, "wheel"))
+            out.append(cls.wheel(1.45, 0.34, 0.17, sd * 0.93))
+            out.append(cls.wheel(-1.4, 0.36, 0.2, sd * 0.93))
         return out
 
     def car_3d(self, cam, car, mode):
         c = self.cv
         fx, fz = car["hx"], car["hz"]
-        rx, rz = -fz, fx
+        rx, rz = fz, -fx
         s = 1.0 if mode == "chase" else 3.0   # на обзорном виде машины крупнее, иначе их не видно
         col = car["col"]
         braking = car["brk"] > 0.1
         groups = []
-        for l0, l1, w0, w1, h0, hb, hf, pc, off, typ in self.parts(self.model_kind()):
-            base = pc or col
+        for part in self.parts(self.model_kind()):
+            base = part["col"] or col
+            off, secs = part["off"], part["secs"]
 
-            def pt(lf, lr, h, w, _o=off):
-                return (car["x"] + (fx * lf + rx * (lr * w + _o)) * s, h * s, car["z"] + (fz * lf + rz * (lr * w + _o)) * s)
+            def pt(lf, lr, h, _o=off):
+                return (car["x"] + (fx * lf + rx * (lr + _o)) * s, h * s, car["z"] + (fz * lf + rz * (lr + _o)) * s)
 
-            back = "#ff2b2b" if (braking and typ == "body" and pc is None and l0 < -1.0) else _shade(base, 0.5)
-            faces = [
-                ([pt(l0, -1, h0, w0), pt(l0, 1, h0, w0), pt(l0, 1, hb, w0), pt(l0, -1, hb, w0)], back),
-                ([pt(l1, -1, h0, w1), pt(l1, 1, h0, w1), pt(l1, 1, hf, w1), pt(l1, -1, hf, w1)], _shade(base, 0.9)),
-                ([pt(l0, -1, h0, w0), pt(l1, -1, h0, w1), pt(l1, -1, hf, w1), pt(l0, -1, hb, w0)], _shade(base, 0.66)),
-                ([pt(l0, 1, h0, w0), pt(l1, 1, h0, w1), pt(l1, 1, hf, w1), pt(l0, 1, hb, w0)], _shade(base, 0.66)),
-                ([pt(l0, -1, hb, w0), pt(l0, 1, hb, w0), pt(l1, 1, hf, w1), pt(l1, -1, hf, w1)], base),
-            ]
-            cd = cam.to(*pt((l0 + l1) / 2, 0, (h0 + hb) / 2, 0))[2]
+            rings = []
+            for lf, w, hb, hs, ht, wt in secs:
+                rings.append([pt(lf, -w, hb), pt(lf, -w, hs), pt(lf, -wt, ht), pt(lf, wt, ht), pt(lf, w, hs), pt(lf, w, hb)])
+            faces = []
+            shades = (0.62, 0.8, 1.0, 0.8, 0.62)
+            for i in range(len(rings) - 1):
+                a, b = rings[i], rings[i + 1]
+                lit = 0.92 + 0.12 * i / max(1, len(rings) - 2)
+                for e in range(5):
+                    faces.append(([a[e], a[e + 1], b[e + 1], b[e]], _shade(base, shades[e] * lit)))
+            rear_col = "#ff2b2b" if (braking and part["kind"] == "hull" and part["col"] is None) else _shade(base, 0.5)
+            faces.append((rings[0], rear_col))
+            faces.append((rings[-1], _shade(base, 0.9)))
+            xs_ = [q[0] for q in secs]
+            cd = cam.to(car["x"] + fx * (min(xs_) + max(xs_)) / 2 * s + rx * off * s, 0.5 * s, car["z"] + fz * (min(xs_) + max(xs_)) / 2 * s + rz * off * s)[2]
             out = []
             for pts, fill in faces:
                 q = cam.poly(pts)
@@ -8162,7 +8226,7 @@ class TrackPanel(ttk.Frame):
         groups.sort(key=lambda g: -g[0])
         for cd, out in groups:
             for dep, flat, fill in out:
-                c.create_polygon(*flat, fill=fill, outline=_shade(fill, 0.55))
+                c.create_polygon(*flat, fill=fill, outline=_shade(fill, 0.7))
         top = cam.to(car["x"], 1.3 * s + 0.9, car["z"])
         if top[2] > cam.NEAR:
             sx, sy = cam.scr(top)
@@ -8389,7 +8453,7 @@ class TelemetryView(ttk.Frame):
         W, H, pad = 230, 190, 12
         k = min((W - 2 * pad) / max(1.0, x1 - x0), (H - 2 * pad) / max(1.0, z1 - z0))
         ox, oy = (W - (x1 - x0) * k) / 2, (H - (z1 - z0) * k) / 2
-        self.mapxf = lambda x, z: (ox + (x - x0) * k, oy + (z - z0) * k)
+        self.mapxf = lambda x, z: (ox + (x - x0) * k, oy + (z1 - z) * k)
         vlo, vhi = min(p[2] for p in pts), max(p[2] for p in pts)
         step = max(1, len(pts) // 400)
         for i in range(0, len(pts) - step, step):

@@ -1,5 +1,5 @@
 import os
-import ctypes, os, sys, tempfile, time, unittest
+import ctypes, math, os, sys, tempfile, time, unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import yassno_ets2 as E
 import yassno_launcher  # noqa: F401  (раньше любых Tk-тестов: иначе GC чужого Tk в импорте роняет процесс)
@@ -841,15 +841,15 @@ class TrackPanelTests(unittest.TestCase):
 
     def test_camera_projection(self):
         L = yassno_launcher
-        cam = L.Cam3(0, 2, 0, 0, -1, 0.0, 800, 600, 800)
-        a = cam.to(0, 2, -10)                      # прямо по курсу, на высоте камеры
+        cam = L.Cam3(0, 2, 0, 0, 1, 0.0, 800, 600, 800)        # смотрим на +z (на карте «вверх»), +x справа
+        a = cam.to(0, 2, 10)                       # прямо по курсу, на высоте камеры
         sx, sy = cam.scr(a)
         self.assertAlmostEqual(sx, 400, delta=0.5)
         self.assertAlmostEqual(sy, 300, delta=0.5)
-        r = cam.scr(cam.to(5, 2, -10))             # справа от курса -> правее центра
+        r = cam.scr(cam.to(5, 2, 10))              # справа от курса -> правее центра
         self.assertGreater(r[0], 400)
-        self.assertIsNone(cam.line((0, 0, 5), (0, 0, 8)))   # всё позади камеры
-        self.assertIsNotNone(cam.poly([(-1, 0, -5), (1, 0, -5), (1, 0, 5), (-1, 0, 5)]))  # режется near-плоскостью
+        self.assertIsNone(cam.line((0, 0, -5), (0, 0, -8)))  # всё позади камеры
+        self.assertIsNotNone(cam.poly([(-1, 0, 5), (1, 0, 5), (1, 0, -5), (-1, 0, -5)]))  # режется near-плоскостью
 
     def test_three_views_and_playback(self):
         import gzip, json, tempfile, tkinter as tk
@@ -883,6 +883,20 @@ class TrackPanelTests(unittest.TestCase):
             tw.t = 45.0
             a, b = tw.car("A"), tw.car("B")
             self.assertGreater(a["d"], b["d"])            # A быстрее: к 45 с уже дальше по трассе
+            # лево/право: правый поворот на карте (+z вверх) должен выглядеть правым на экране
+            tw.t = 10.0
+            c1, c2 = tw.car("A"), tw.car("A")
+            self.assertAlmostEqual(c1["x"], c2["x"])
+            prev = None
+            worst = 0.0
+            for n in range(60):                                # ход на 1/30 с не даёт скачков позиции и курса
+                tw.t = 20.0 + n / 30.0
+                cur = tw.car("A")
+                if prev:
+                    worst = max(worst, math.hypot(cur["x"] - prev["x"], cur["z"] - prev["z"]))
+                    self.assertGreater(cur["hx"] * prev["hx"] + cur["hz"] * prev["hz"], 0.99)
+                prev = cur
+            self.assertLess(worst, 4.0)
             tw.on_chart(1500)
             self.assertAlmostEqual(tw.car("A")["d"], 1500, delta=30)
             # дорога по всем кругам: шире минимальной там, где круги разъезжаются, и A не обязан быть по центру
