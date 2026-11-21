@@ -1,0 +1,8 @@
+{"t":1795267987.0,"s":"20261121-163306","e":"session_start","game_min":0,"odo":0.0,"x":0,"z":0,"speed":0}
+{"t":1795267987.0,"s":"20261121-163306","e":"job_start","game_min":0,"odo":0.0,"x":0,"z":0,"speed":0,"cargo":"Roskoshnaya","src":"Bayonne","dst":"Valladolid","income":12345,"planned_km":400.0,"partial":true}
+{"t":1795267987.0,"s":"20261121-163306","e":"toll","game_min":513,"odo":1002.0,"x":1970,"z":197,"speed":34,"amount":12}
+{"t":1795267987.0,"s":"20261121-163306","e":"fine","game_min":530,"odo":1003.0,"x":2945,"z":294,"speed":79,"offence":"speeding_camera","amount":500}
+{"t":1795267987.0,"s":"20261121-163306","e":"damage","game_min":547,"odo":1003.1,"x":3054,"z":305,"speed":0,"speed_hit":0,"engine":0.0000,"trans":0.0000,"cabin":0.0300,"chassis":0.0000,"wheels":0.0000,"trailer":0.0000}
+{"t":1795267987.0,"s":"20261121-163306","e":"refuel","game_min":563,"odo":1003.1,"x":3055,"z":305,"speed":43,"liters":100.0,"fuel":598.2}
+{"t":1795267987.0,"s":"20261121-163306","e":"job_delivered","game_min":583,"odo":1003.7,"x":3714,"z":371,"speed":0,"status":"delivered","cargo":"Roskoshnaya","src":"Bayonne","dst":"Valladolid"}
+{"t":1795267987.0,"s":"20261121-163306","e":"session_end","game_min":586,"odo":1003.7,"x":3714,"z":371,"speed":0}

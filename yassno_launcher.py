@@ -39,6 +39,10 @@ try:
     import yassno_ets2_save as ETS2SAVE                # lifetime-статистика профиля ETS 2 из файлов сохранений
 except Exception:                                      # noqa: BLE001
     ETS2SAVE = None
+try:
+    import yassno_ets2_stats as ETS2STATS             # плагин-логгер статистики ETS 2 (dll) и чтение его файлов
+except Exception:                                      # noqa: BLE001
+    ETS2STATS = None
 ETS2_TEST_BUILD = False                                # True — тестовая сборка: онлайн-обновление выключено
 try:
     import yassno_setups as setups                # бесплатные сетапы LMU из открытого репозитория
@@ -71,7 +75,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.9.0"
+APP_VERSION = "3.10.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -214,7 +218,7 @@ MODES = {"stand_mode": [("table", "Таблица"), ("compact", "Компакт
          "tyres_view": [("table", "Подробная"), ("compact", "Компактная: шины рисунком"),
                        ("wear", "Износ: остаток и за круг")]}
 MAP_RADII = [200, 300, 500, 800, 1200]
-UPDATE_FILES = ("yassno_overlay.py", "yassno_launcher.py", "yassno_svgmap.py", "yassno_readers.py", "yassno_ets2.py", "yassno_ets2_save.py", "yassno_route.py", "ets2_roads.txt", "ets2_cities.txt", "README.txt")
+UPDATE_FILES = ("yassno_overlay.py", "yassno_launcher.py", "yassno_svgmap.py", "yassno_readers.py", "yassno_ets2.py", "yassno_ets2_save.py", "yassno_ets2_stats.py", "yassno_route.py", "ets2_roads.txt", "ets2_cities.txt", "README.txt")
 BACKUP_DIR = os.path.join(HERE, "backup")
 UPDATE_REPO, UPDATE_BRANCH = "Yassnnoo/yassno-overlay", "main"        # откуда лаунчер сам берёт обновления
 UPDATE_EXT = (".py", ".txt", ".png", ".cmd")
@@ -3100,6 +3104,7 @@ class Ets2Page(ttk.Frame):
         self.cmd("reset")
 
     def set_plugin(self, text, fg=None):
+        self.plugin_text = text
         lbl = getattr(self, "plugin_lbl", None)
         try:
             if lbl is not None and lbl.winfo_exists():
@@ -3248,6 +3253,10 @@ class Ets2Page(ttk.Frame):
             self.set_plugin(tr("Плагин телеметрии установлен: ") + ETS2.plugins_dir(d), UI_GREEN)
         else:
             self.set_plugin(tr("Плагин телеметрии не установлен. Нажмите «Установить плагин» — лаунчер скачает его и положит в папку игры."), UI_DIM)
+        st = getattr(self.app, "stats_plugin", None)
+        if st and ETS2.looks_like_game_dir(d):
+            fg0 = getattr(self.plugin_lbl, "cget", lambda k: None)("fg")
+            self.set_plugin(self.plugin_text + "\n" + tr("Статистика (dll): ") + tr(st[1]), "#ff6b5e" if st[0] == "error" else (fg0 or UI_DIM))
 
     def install(self):
         if self.busy:
@@ -10075,6 +10084,565 @@ class ScrollPage(ttk.Frame):
         pass
 
 
+class Ets2StatsPage(ScrollPage):
+    """Статистика ETS 2: всё, что пишет плагин yassno_ets2_stats.dll. Плагин работает внутри игры и пишет файлы всегда,
+    даже когда лаунчер закрыт; лаунчер при открытии подхватывает их (yassno_ets2_stats.py) и показывает."""
+    TITLE = "Статистика ETS 2"
+    TABS = (("over", "Обзор"), ("jobs", "Рейсы"), ("sess", "Сессии"), ("drive", "Вождение"), ("ev", "События"))
+    PERIODS = (("all", "Всё время"), ("last", "Последняя сессия"), ("d30", "30 дней"), ("d7", "7 дней"))
+    EV_NAMES = {"fine": "Штраф", "toll": "Дорожный сбор", "refuel": "Заправка", "damage": "Удар", "repair": "Ремонт", "ferry": "Паром",
+                "train": "Поезд", "rest": "Отдых", "job_start": "Рейс взят", "job_delivered": "Рейс доставлен", "job_end": "Рейс закрыт",
+                "trailer_attach": "Прицеп подцеплен", "trailer_detach": "Прицеп отцеплен", "truck": "Смена грузовика",
+                "session_start": "Запуск игры", "session_end": "Выход из игры"}
+    EV_FILTERS = (("all", "Все события"), ("fine", "Штрафы"), ("money", "Сборы, паромы, заправки"), ("damage", "Удары и ремонт"), ("jobs", "Рейсы"))
+    EV_GROUPS = {"fine": ("fine",), "money": ("toll", "ferry", "train", "refuel"), "damage": ("damage", "repair"),
+                 "jobs": ("job_start", "job_delivered", "job_end")}
+    OFFENCE = {"crash": "Авария", "avoid_sleeping": "Усталость за рулём", "wrong_way": "Встречное движение", "speeding_camera": "Превышение (камера)",
+               "speeding": "Превышение скорости", "no_lights": "Без света", "red_signal": "Красный свет", "avoid_weighing": "Проезд мимо весов",
+               "illegal_trailer": "Неразрешённый прицеп", "avoid_inspection": "Проезд мимо инспекции", "illegal_border_crossing": "Незаконный переезд границы",
+               "hard_shoulder_violation": "Обочина", "damaged_vehicle_usage": "Езда на повреждённом", "generic": "Нарушение"}
+
+    def __init__(self, parent, app):
+        super().__init__(parent, app)
+        self.tab, self.period, self.evf = "over", "all", "all"
+        self.snap = {"sessions": [], "jobs": [], "sig": None}
+        self._sig, self._t_render = None, 0.0
+        self.sel = {"jobs": 0, "sess": 0}
+        self.render()
+
+    # ---- данные
+    def data(self):
+        snap = ETS2STATS.snapshot()
+        self.snap = snap
+        ss, js = snap["sessions"], snap["jobs"]
+        now = time.time()
+        if self.period == "last" and ss:
+            sid = ss[0].get("id")
+            ss, js = ss[:1], [j for j in js if j.get("session") == sid]
+        elif self.period in ("d30", "d7"):
+            t0 = now - (30 if self.period == "d30" else 7) * 86400
+            ss = [s for s in ss if float(s.get("start") or 0) >= t0]
+            js = [j for j in js if float(j.get("t1") or 0) >= t0]
+        return ss, js
+
+    def reload(self, force=False):
+        if force:
+            self._sig = None
+        self.render()
+
+    def auto_refresh(self):
+        """Вызывается лаунчером раз в 1,5 с, пока страница открыта: перерисовывает, только если плагин записал новое."""
+        try:
+            snap = ETS2STATS.snapshot()
+        except Exception:                                # noqa: BLE001
+            return
+        live = ETS2STATS.live_session(snap["sessions"])
+        if snap["sig"] != self._sig or (live and time.time() - self._t_render > 5):
+            self.render()
+
+    def open_dir(self):
+        d = ETS2STATS.stats_dir()
+        try:
+            os.makedirs(d, exist_ok=True)
+            os.startfile(d)
+        except Exception as e:                           # noqa: BLE001
+            mb_error("Статистика ETS 2", f"Не удалось открыть папку: {e}")
+
+    # ---- форматирование
+    @staticmethod
+    def n0(v):
+        return f"{float(v):,.0f}".replace(",", " ")
+
+    @staticmethod
+    def n1(v):
+        return f"{float(v):,.1f}".replace(",", " ")
+
+    @staticmethod
+    def dur(sec):
+        sec = max(0, int(sec))
+        h, m = sec // 3600, sec % 3600 // 60
+        return f"{h} {tr('ч')} {m:02d} {tr('мин')}" if h else f"{m} {tr('мин')}"
+
+    @staticmethod
+    def when(ts):
+        return time.strftime("%d.%m.%Y %H:%M", time.localtime(float(ts))) if ts else "—"
+
+    def money(self, v):
+        return f"{self.n0(v)} €"
+
+    def km(self, v):
+        return f"{self.n1(v)} {tr('км')}"
+
+    @staticmethod
+    def pct(v):
+        return f"{float(v) * 100:.0f}%"
+
+    # ---- элементы
+    def card(self, parent, title, row, col, colspan=1, sub=""):
+        box = RoundBox(parent, radius=14, fill=UI_PANEL, border=UI_BORDER, outer=UI_BG, autow=False, fillh=True)
+        box.grid(row=row, column=col, columnspan=colspan, sticky="nsew", padx=6, pady=6)
+        f = tk.Frame(box.inner, bg=UI_PANEL)
+        f.pack(fill="both", expand=True, padx=14, pady=10)
+        hd = tk.Frame(f, bg=UI_PANEL)
+        hd.pack(fill="x", pady=(0, 6))
+        tk.Label(hd, text=tr(title), bg=UI_PANEL, fg=UI_FG, font=("Segoe UI Semibold", 11), anchor="w").pack(side="left")
+        if sub:
+            tk.Label(hd, text=sub, bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 9), anchor="e").pack(side="right")
+        body = tk.Frame(f, bg=UI_PANEL)
+        body.pack(fill="both", expand=True)
+        return body
+
+    @staticmethod
+    def kv(body, rows):
+        for cap, val in rows:
+            r = tk.Frame(body, bg=UI_PANEL)
+            r.pack(fill="x")
+            tk.Label(r, text=tr(cap), bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 10), pady=6).pack(side="left")
+            tk.Label(r, text=val if val not in (None, "") else "—", bg=UI_PANEL, fg=UI_FG, font=("Segoe UI Semibold", 10), anchor="e",
+                     justify="right", wraplength=230).pack(side="right")
+            tk.Frame(body, bg=UI_BORDER, height=1).pack(fill="x")
+
+    def seg(self, parent, items, cur, cmd):
+        """Переключатель из подписей с подчёркиванием выбранной."""
+        row = tk.Frame(parent, bg=UI_BG)
+        for key, text in items:
+            col = tk.Frame(row, bg=UI_BG)
+            col.pack(side="left", padx=(0, 4))
+            lb = tk.Label(col, text=tr(text), bg=UI_BG, fg=UI_FG if key == cur else UI_DIM, font=("Segoe UI Semibold", 10), padx=10, pady=6,
+                          cursor="arrow" if key == cur else "hand2")
+            lb.pack()
+            tk.Frame(col, bg=UI_ACCENT if key == cur else UI_BG, height=2).pack(fill="x")
+            if key != cur:
+                lb.bind("<Button-1>", lambda e, k=key: cmd(k))
+                lb.bind("<Enter>", lambda e, w=lb: w.config(fg=UI_FG))
+                lb.bind("<Leave>", lambda e, w=lb: w.config(fg=UI_DIM))
+        return row
+
+    def set_tab(self, k):
+        self.tab = k
+        self.render()
+
+    def set_period(self, k):
+        self.period = k
+        self.render()
+
+    def set_evf(self, k):
+        self.evf = k
+        self.render()
+
+    # ---- построение
+    def render(self):
+        try:
+            y = self.sc.yview()[0]
+        except tk.TclError:
+            y = 0
+        for w in self.holder.winfo_children():
+            w.destroy()
+        try:
+            self.build(self.holder)
+        except Exception as e:                           # noqa: BLE001
+            log_error(f"Статистика ETS 2: {e}")
+            tk.Label(self.holder, text=tr("Не удалось показать статистику: ") + str(e), bg=UI_BG, fg=UI_DIM, wraplength=800, justify="left").pack(anchor="w")
+        self._sig = self.snap.get("sig")
+        self._t_render = time.time()
+        try:
+            self.holder.update_idletasks()
+            self.sc.yview_moveto(y)
+        except tk.TclError:
+            pass
+
+    def build(self, body):
+        ss, js = self.data()
+        allss = self.snap["sessions"]
+        top = tk.Frame(body, bg=UI_BG)
+        top.pack(fill="x")
+        tk.Label(top, text=tr(self.TITLE), bg=UI_BG, fg=UI_FG, font=("Segoe UI Semibold", 20), anchor="w").pack(side="left")
+        ttk.Button(top, text=tr("Открыть папку"), command=self.open_dir).pack(side="right")
+        ttk.Button(top, text=tr("Обновить"), command=lambda: self.reload(True)).pack(side="right", padx=(0, 6))
+        live = ETS2STATS.live_session(allss)
+        if live:
+            nw = live.get("now") or {}
+            jb = live.get("job") or {}
+            text = "● " + tr("Игра запущена") + f" · {nw.get('speed', 0):.0f} {tr('км/ч')}"
+            tk_ = live.get("truck") or {}
+            if tk_.get("name"):
+                text += f" · {tk_.get('brand', '')} {tk_.get('name', '')}".rstrip()
+            if jb.get("cargo"):
+                text += f" · {tr('рейс')}: {jb['cargo']} {jb.get('src_city', '')} → {jb.get('dst_city', '')}"
+                if jb.get("left_km"):
+                    text += f" ({tr('осталось')} {self.n0(jb['left_km'])} {tr('км')})"
+            fg = UI_GREEN
+        elif allss:
+            s0 = allss[0]
+            text = tr("Последняя сессия") + f": {self.when(s0.get('start'))} · {self.km(s0['acc'].get('km', 0))} · {self.dur(s0['acc'].get('play_s', 0))}"
+            fg = UI_DIM
+        else:
+            text = tr("Данных пока нет: плагин статистики начнёт писать, когда вы запустите ETS 2 и въедете в игру. Лаунчер для этого запускать не нужно.")
+            fg = UI_DIM
+        tk.Label(body, text=text, bg=UI_BG, fg=fg, font=("Segoe UI", 10), anchor="w", justify="left", wraplength=1000).pack(fill="x", pady=(2, 8))
+        bar = tk.Frame(body, bg=UI_BG)
+        bar.pack(fill="x")
+        self.seg(bar, self.TABS, self.tab, self.set_tab).pack(side="left")
+        if self.tab in ("over", "drive", "jobs"):
+            self.seg(bar, self.PERIODS, self.period, self.set_period).pack(side="right")
+        tk.Frame(body, bg=UI_BORDER, height=1).pack(fill="x", pady=(0, 6))
+        grid = tk.Frame(body, bg=UI_BG)
+        grid.pack(fill="both", expand=True)
+        for c in range(3):
+            grid.columnconfigure(c, weight=1, uniform="es")
+        if not allss and not self.snap["jobs"]:
+            return
+        {"over": self.tab_over, "jobs": self.tab_jobs, "sess": self.tab_sess, "drive": self.tab_drive, "ev": self.tab_events}[self.tab](grid, ss, js)
+
+    # ---- вкладка «Обзор»
+    def tab_over(self, g, ss, js):
+        sm = ETS2STATS.summarize(ss, js)
+        a, d, rec = sm["acc"], sm["derived"], sm["records"]
+        per = dict(self.PERIODS)[self.period]
+        self.kv(self.card(g, "Итого", 0, 0, sub=tr(per)), [
+            ("Проехано", self.km(a.get("km", 0))), ("За рулём", self.dur(a.get("drive_s", 0))), ("В игре", self.dur(a.get("play_s", 0))),
+            ("Сессий", str(sm["sessions"])), ("Рейсов доставлено", f"{sm['jobs_done']}" + (f" · {tr('отменено')} {sm['jobs_cancelled']}" if sm["jobs_cancelled"] else "")),
+            ("Доход с рейсов", self.money(sm["income"])), ("Опыт", f"{self.n0(sm['xp'])} XP"),
+            ("Вовремя / с опозданием", f"{sm['on_time']} / {sm['late']}" if sm["on_time"] + sm["late"] else ""),
+            ("Средняя скорость", f"{self.n0(d['avg_kmh'])} {tr('км/ч')}" if a.get("km") else ""),
+            ("Расход", f"{self.n1(d['l100'])} {tr('л/100 км')}" if d["l100"] else ""),
+            ("Заправлено", f"{self.n0(a.get('refuel_l', 0))} {tr('л')} · {int(a.get('refuels', 0))} {tr('раз')}" if a.get("refuels") else ""),
+            ("Штрафы", f"{int(a.get('fines', 0))} · {self.money(a.get('fine_total', 0))}"),
+            ("Дорожные сборы", f"{int(a.get('tolls', 0))} · {self.money(a.get('toll_total', 0))}")])
+        rows = [("Макс. скорость", f"{self.n0(a.get('v_max', 0))} {tr('км/ч')}" if a.get("v_max") else "")]
+        if "best_income" in rec:
+            r = rec["best_income"]
+            rows.append(("Самый дорогой рейс", f"{self.money(r['income'])} · {r['src']} → {r['dst']}"))
+        if "longest_job" in rec:
+            r = rec["longest_job"]
+            rows.append(("Самый длинный рейс", f"{self.km(r['km'])} · {r['src']} → {r['dst']}"))
+        if "heaviest" in rec:
+            r = rec["heaviest"]
+            rows.append(("Самый тяжёлый груз", f"{r['mass_t']:.1f} {tr('т')} · {r['cargo']}"))
+        if "best_clean" in rec:
+            r = rec["best_clean"]
+            rows.append(("Длинный рейс без повреждений", f"{self.km(r['km'])} · {r['cargo']}"))
+        if "best_style" in rec:
+            r = rec["best_style"]
+            rows.append(("Лучший стиль вождения", f"{r['style']:.0f} / 100 · {r['src']} → {r['dst']}"))
+        if "longest_session" in rec:
+            rows.append(("Самая долгая сессия", self.dur(rec["longest_session"]["acc"].get("play_s", 0))))
+        if "longest_drive" in rec:
+            rows.append(("Самый длинный пробег за сессию", self.km(rec["longest_drive"]["acc"].get("km", 0))))
+        rows.append(("Высота: макс. / мин.", f"{self.n0(a.get('alt_max', 0))} / {self.n0(a.get('alt_min', 0))} {tr('м')}" if a.get("alt_max") else ""))
+        self.kv(self.card(g, "Рекорды", 0, 1), rows)
+        top = []
+        top.append(("Грузы", ", ".join(f"{n} ×{c}" for n, c in sm["cargos"][:5])))
+        top.append(("Куда возил", ", ".join(f"{n} ×{c}" for n, c in sm["dests"][:5])))
+        top.append(("Откуда", ", ".join(f"{n} ×{c}" for n, c in sm["srcs"][:5])))
+        top.append(("Городов в рейсах", str(len(sm["cities"]))))
+        for nm, km in sm["trucks"][:4]:
+            top.append((nm, self.km(km)))
+        self.kv(self.card(g, "Любимое", 0, 2), top)
+        self.hist_card(g, a, 1, 0, 2)
+        self.gears_card(g, a, 1, 2)
+
+    def hist_card(self, g, a, row, col, span):
+        body = self.card(g, "Скорость: время на каждой", row, col, span, sub=tr("шаг 10 км/ч"))
+        hs = a.get("hist_s") or []
+        cv = tk.Canvas(body, height=150, bg=UI_PANEL, highlightthickness=0)
+        cv.pack(fill="x")
+
+        def draw(e=None):
+            cv.delete("all")
+            w = max(200, cv.winfo_width())
+            mx = max(hs) if hs and max(hs) > 0 else 1
+            n = len(hs) or 1
+            bw = (w - 20) / n
+            for i, v in enumerate(hs):
+                x0 = 10 + i * bw
+                h = 105 * v / mx
+                cv.create_rectangle(x0 + 3, 118 - h, x0 + bw - 3, 118, fill=UI_ACCENT if v else UI_BORDER, outline="")
+                cv.create_text(x0 + bw / 2, 132, text=(f"{i * 10}+" if i == n - 1 else f"{i * 10}"), fill=UI_DIM, font=("Segoe UI", 8))
+                if v >= mx * 0.08:
+                    cv.create_text(x0 + bw / 2, 118 - h - 8, text=self.dur(v) if v >= 60 else f"{v:.0f}{tr('с')}", fill=UI_FG, font=("Segoe UI", 8))
+        cv.bind("<Configure>", draw)
+        draw()
+
+    def gears_card(self, g, a, row, col):
+        body = self.card(g, "Передачи", row, col)
+        tab = ETS2STATS.gear_table(a, 7)
+        if not tab:
+            tk.Label(body, text="—", bg=UI_PANEL, fg=UI_DIM).pack(anchor="w")
+            return
+        mx = tab[0][1]
+        tot = sum(x[1] for x in tab) or 1
+        for name, sec in tab:
+            r = tk.Frame(body, bg=UI_PANEL)
+            r.pack(fill="x", pady=2)
+            tk.Label(r, text=name, bg=UI_PANEL, fg=UI_FG, font=("Segoe UI Semibold", 10), width=4, anchor="w").pack(side="left")
+            bar = tk.Canvas(r, height=12, bg=UI_PANEL, highlightthickness=0)
+            bar.pack(side="left", fill="x", expand=True)
+            bar.bind("<Configure>", lambda e, b=bar, s=sec: (b.delete("all"), b.create_rectangle(0, 2, max(2, (b.winfo_width() - 2) * s / mx), 10, fill=UI_ACCENT, outline="")))
+            tk.Label(r, text=f"{sec / tot * 100:.0f}%", bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 9), width=5, anchor="e").pack(side="left")
+
+    # ---- вкладка «Рейсы»
+    JOB_COLS = (("when", "Когда", 120, "w"), ("cargo", "Груз", 130, "w"), ("route", "Маршрут", 230, "w"), ("km", "Км", 60, "e"),
+                ("income", "Доход", 80, "e"), ("time", "Время", 80, "e"), ("avg", "Ср. км/ч", 64, "e"), ("l100", "л/100", 56, "e"),
+                ("dmg", "Груз", 54, "e"), ("state", "Итог", 100, "w"))
+
+    def tab_jobs(self, g, ss, js):
+        views = [ETS2STATS.job_view(j) for j in js]
+        if not views:
+            tk.Label(g, text=tr("Рейсов в выбранном периоде нет."), bg=UI_BG, fg=UI_DIM).grid(row=0, column=0, columnspan=3, sticky="w")
+            return
+        box = RoundBox(g, radius=12, fill=UI_BG, border=mix(UI_BORDER, UI_DIM, 0.35))
+        box.grid(row=0, column=0, columnspan=3, sticky="ew", padx=6, pady=6)
+        tree = ttk.Treeview(box.inner, columns=[c[0] for c in self.JOB_COLS], show="headings", height=min(12, max(4, len(views))), selectmode="browse")
+        for k, name, w, an in self.JOB_COLS:
+            tree.heading(k, text=tr(name))
+            tree.column(k, width=w, minwidth=w, anchor=an, stretch=(k == "route"))
+        sb = ttk.Scrollbar(box.inner, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=sb.set)
+        tree.pack(side="left", fill="both", expand=True, padx=(4, 0), pady=4)
+        sb.pack(side="right", fill="y", pady=4)
+        tree.tag_configure("bad", foreground="#ff6b5e")
+        tree.tag_configure("dim", foreground=UI_DIM)
+        st_names = {"delivered": "доставлен", "cancelled": "отменён", "ended": "закрыт"}
+        for i, v in enumerate(views):
+            state = tr(st_names.get(v["status"], v["status"]))
+            if v["on_time"] is False:
+                state += " · " + tr("опоздал")
+            if v["partial"]:
+                state += " *"
+            tags = ("bad",) if v["status"] == "cancelled" or v["on_time"] is False else (("dim",) if v["status"] == "ended" else ())
+            tree.insert("", "end", iid=str(i), tags=tags, values=(
+                self.when(v["t1"]), v["cargo"], f"{v['src']} → {v['dst']}", self.n0(v["km"]), self.n0(v["income"]) if v["status"] == "delivered" else "—",
+                self.dur(v["real_s"]), self.n0(v["avg_kmh"]) if v["avg_kmh"] else "—", self.n1(v["l100"]) if v["l100"] else "—",
+                f"{v['cargo_damage'] * 100:.1f}%", state))
+        det = tk.Frame(g, bg=UI_BG)
+        det.grid(row=1, column=0, columnspan=3, sticky="nsew")
+        for c in range(3):
+            det.columnconfigure(c, weight=1, uniform="jd")
+        tk.Label(g, text=tr("* рейс уже шёл до запуска плагина: показаны только километры и время после запуска"), bg=UI_BG, fg=UI_DIM,
+                 font=("Segoe UI", 9)).grid(row=2, column=0, columnspan=3, sticky="w", padx=8)
+
+        def show(e=None):
+            for w in det.winfo_children():
+                w.destroy()
+            cur = tree.selection()
+            if not cur:
+                return
+            idx = int(cur[0])
+            self.sel["jobs"] = idx
+            v = views[idx]
+            self.kv(self.card(det, "Рейс", 0, 0), [
+                ("Груз", f"{v['cargo']} · {v['mass_t']:.1f} {tr('т')}" if v["mass_t"] else v["cargo"]),
+                ("Откуда", f"{v['src']} · {v['src_comp']}" if v["src_comp"] else v["src"]), ("Куда", f"{v['dst']} · {v['dst_comp']}" if v["dst_comp"] else v["dst"]),
+                ("Итог", tr(st_names.get(v["status"], v["status"]))),
+                ("Доход", self.money(v["income"]) + (f" · +{self.n0(v['xp'])} XP" if v["xp"] else "")),
+                ("Штраф за отмену", self.money(v["penalty"]) if v["penalty"] else ""),
+                ("Вовремя", "" if v["on_time"] is None else (tr("да") if v["on_time"] else tr("нет")))])
+            self.kv(self.card(det, "Дорога", 0, 1), [
+                ("Дистанция", f"{self.n0(v['km'])} {tr('км')}" + (f" ({tr('план')} {self.n0(v['planned_km'])})" if v["planned_km"] else "")),
+                ("Реальное время", self.dur(v["real_s"])), ("Время в игре", self.dur(v["game_min"] * 60)),
+                ("Средняя скорость", f"{self.n0(v['avg_kmh'])} {tr('км/ч')}" if v["avg_kmh"] else ""),
+                ("Топливо", f"{self.n0(v['fuel_l'])} {tr('л')} · {self.n1(v['l100'])} {tr('л/100 км')}" if v["fuel_l"] else ""),
+                ("Грузовик", f"{v['truck']} {v['plate']}".strip()), ("Прицеп", v["trailer"])])
+            self.kv(self.card(det, "Качество", 0, 2), [
+                ("Повреждение груза", f"{v['cargo_damage'] * 100:.1f}%"), ("Удары", str(v["collisions"])),
+                ("Резких торможений", str(v["hard_brakes"])), ("Штрафы", f"{v['fines']} · {self.money(v['fine_total'])}" if v["fines"] else "0"),
+                ("Дорожные сборы", self.money(v["tolls"]) if v["tolls"] else ""),
+                ("Стиль вождения", f"{v['style']:.0f} / 100" if v["style"] is not None else ""),
+                ("Автопарковка / автозагрузка", f"{tr('да') if v['auto_park'] else tr('нет')} / {tr('да') if v['auto_load'] else tr('нет')}")])
+        tree.bind("<<TreeviewSelect>>", show)
+        first = str(min(self.sel["jobs"], len(views) - 1))
+        tree.selection_set(first)
+        tree.see(first)
+        show()
+
+    # ---- вкладка «Сессии»
+    SESS_COLS = (("when", "Запуск игры", 120, "w"), ("dur", "В игре", 80, "e"), ("km", "Км", 64, "e"), ("avg", "Ср. км/ч", 64, "e"),
+                 ("l100", "л/100", 56, "e"), ("truck", "Грузовик", 140, "w"), ("fines", "Штр.", 44, "e"), ("hits", "Удары", 50, "e"))
+
+    def tab_sess(self, g, ss, js):
+        ss = self.snap["sessions"]
+        if not ss:
+            return
+        box = RoundBox(g, radius=12, fill=UI_BG, border=mix(UI_BORDER, UI_DIM, 0.35))
+        box.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=6, pady=6)
+        tree = ttk.Treeview(box.inner, columns=[c[0] for c in self.SESS_COLS], show="headings", height=16, selectmode="browse")
+        for k, name, w, an in self.SESS_COLS:
+            tree.heading(k, text=tr(name))
+            tree.column(k, width=w, minwidth=w, anchor=an, stretch=(k == "truck"))
+        sb = ttk.Scrollbar(box.inner, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=sb.set)
+        tree.pack(side="left", fill="both", expand=True, padx=(4, 0), pady=4)
+        sb.pack(side="right", fill="y", pady=4)
+        for i, s in enumerate(ss):
+            a = s["acc"]
+            d = ETS2STATS.derived(a)
+            t = s.get("truck") or {}
+            tree.insert("", "end", iid=str(i), values=(
+                ("● " if s.get("live") else "") + self.when(s.get("start")), self.dur(a.get("play_s", 0)), self.n1(a.get("km", 0)),
+                self.n0(d["avg_kmh"]) if a.get("km") else "—", self.n1(d["l100"]) if d["l100"] else "—",
+                f"{t.get('brand', '')} {t.get('name', '')}".strip(), int(a.get("fines", 0)), int(a.get("collisions", 0))))
+        right = tk.Frame(g, bg=UI_BG)
+        right.grid(row=0, column=2, sticky="nsew")
+        right.columnconfigure(0, weight=1)
+
+        def show(e=None):
+            for w in right.winfo_children():
+                w.destroy()
+            cur = tree.selection()
+            if not cur:
+                return
+            idx = int(cur[0])
+            self.sel["sess"] = idx
+            s = ss[idx]
+            a = s["acc"]
+            body = self.card(right, "Маршрут сессии", 0, 0)
+            cv = tk.Canvas(body, height=250, bg=UI_FIELD, highlightthickness=0)
+            cv.pack(fill="x")
+            pts = ETS2STATS.load_track(s.get("id"), self.snap.get("folder"))
+            cv.bind("<Configure>", lambda e, c=cv, p=pts: self.draw_track(c, p))
+            self.draw_track(cv, pts)
+            w0, w1 = s.get("wear0") or {}, s.get("wear") or {}
+            wear = ", ".join(f"{n} +{(w1.get(k, 0) - w0.get(k, 0)) * 100:.1f}%" for k, n in (("cabin", "кабина"), ("chassis", "шасси"), ("engine", "двигатель"), ("wheels", "колёса"), ("trans", "коробка")) if w1.get(k, 0) - w0.get(k, 0) > 0.0005)
+            rows = [("Километры", self.km(a.get("km", 0))), ("За рулём / в игре", f"{self.dur(a.get('drive_s', 0))} / {self.dur(a.get('play_s', 0))}"),
+                    ("Макс. скорость", f"{self.n0(a.get('v_max', 0))} {tr('км/ч')}"), ("Игровое время", self.dur((s.get("game_min", 0) - s.get("game_min0", 0)) * 60)),
+                    ("Одометр", f"{self.n0(s.get('odo0', 0))} → {self.n0(s.get('odo', 0))} {tr('км')}"), ("Плагин", f"v{s.get('plugin', '')}")]
+            if wear:
+                rows.append(("Износ за сессию", wear))
+            self.kv(self.card(right, "Сессия", 1, 0), rows)
+        tree.bind("<<TreeviewSelect>>", show)
+        first = str(min(self.sel["sess"], len(ss) - 1))
+        tree.selection_set(first)
+        tree.see(first)
+        show()
+
+    @staticmethod
+    def draw_track(cv, pts):
+        cv.delete("all")
+        w, h = max(120, cv.winfo_width()), int(cv.cget("height"))
+        if len(pts) < 2:
+            cv.create_text(w / 2, h / 2, text=tr("Трека нет"), fill=UI_DIM)
+            return
+        if len(pts) > 2500:
+            pts = pts[::len(pts) // 2500 + 1]
+        xs, zs = [p[1] for p in pts], [p[2] for p in pts]
+        x0, x1, z0, z1 = min(xs), max(xs), min(zs), max(zs)
+        pad = 14
+        sc = min((w - 2 * pad) / max(x1 - x0, 1.0), (h - 2 * pad) / max(z1 - z0, 1.0))
+        ox, oz = (w - (x1 - x0) * sc) / 2, (h - (z1 - z0) * sc) / 2
+        def P(p):
+            return ox + (p[1] - x0) * sc, oz + (p[2] - z0) * sc
+        for a, b in zip(pts, pts[1:]):
+            if b[0] - a[0] > 30 or abs(b[1] - a[1]) > 400 or abs(b[2] - a[2]) > 400:      # пауза/телепорт — линию не тянем
+                continue
+            col = mix("#2ee26d", "#ff3b30", max(0.0, min(1.0, (a[4] - 30) / 70.0)))
+            (xa, ya), (xb, yb) = P(a), P(b)
+            cv.create_line(xa, ya, xb, yb, fill=col, width=2, capstyle="round")
+        sx, sy = P(pts[0])
+        ex, ey = P(pts[-1])
+        cv.create_oval(sx - 4, sy - 4, sx + 4, sy + 4, fill=UI_FG, outline="")
+        cv.create_oval(ex - 5, ey - 5, ex + 5, ey + 5, fill=UI_ACCENT, outline=UI_FG)
+
+    # ---- вкладка «Вождение»
+    def tab_drive(self, g, ss, js):
+        a = ETS2STATS.sum_acc([s["acc"] for s in ss])
+        d = ETS2STATS.derived(a)
+        km = a.get("km", 0)
+        if not km:
+            tk.Label(g, text=tr("В выбранном периоде нет данных о поездках."), bg=UI_BG, fg=UI_DIM).grid(row=0, column=0, columnspan=3, sticky="w")
+            return
+        sty = d["style"]
+        self.kv(self.card(g, "Стиль вождения", 0, 0, sub=tr("условная оценка")), [
+            ("Оценка", f"{sty:.0f} / 100" if sty is not None else "—"),
+            ("Резких торможений на 100 км", self.n1(d["hard_brakes_100"])), ("Экстренных торможений", str(int(a.get("emergency_brakes", 0)))),
+            ("Ударов на 1000 км", self.n1(d["collisions_1000"])), ("Ударов всего", str(int(a.get("collisions", 0)))),
+            ("Резкие повороты", self.dur(a.get("hard_corner_s", 0))), ("Ремонтов", str(int(a.get("repairs", 0))))])
+        self.kv(self.card(g, "Скорость и лимит", 0, 1), [
+            ("Максимальная", f"{self.n0(a.get('v_max', 0))} {tr('км/ч')}"), ("Средняя в движении", f"{self.n0(d['avg_kmh'])} {tr('км/ч')}"),
+            ("Над лимитом", f"{self.pct(d['over_share'])} · {self.dur(a.get('over_s', 0))}" if a.get("limit_s") else ""),
+            ("Больше лимита на 10+ км/ч", self.pct(d["over10_share"]) if a.get("limit_s") else ""),
+            ("Макс. превышение", f"{self.n0(a.get('over_max', 0))} {tr('км/ч')}" if a.get("over_max") else ""),
+            ("Круиз-контроль", f"{self.pct(d['cruise_share'])} {tr('пути')}"), ("Задним ходом", self.km(a.get("km_reverse", 0)))])
+        self.kv(self.card(g, "Двигатель и коробка", 0, 2), [
+            ("Средние обороты", f"{self.n0(d['avg_rpm'])} {tr('об/мин')}"), ("Максимум оборотов", f"{self.n0(a.get('rpm_max', 0))}"),
+            ("У красной зоны", self.dur(a.get("redline_s", 0))), ("Переключений", self.n0(a.get("shifts", 0))),
+            ("Моторный тормоз", self.dur(a.get("motor_brake_s", 0))), ("Замедлитель", self.dur(a.get("retarder_s", 0))),
+            ("Температура: масло / вода", f"{self.n0(a.get('oil_temp_max', 0))} / {self.n0(a.get('water_temp_max', 0))} °C")])
+        self.kv(self.card(g, "Топливо", 1, 0), [
+            ("Расход", f"{self.n1(d['l100'])} {tr('л/100 км')}" if d["l100"] else ""), ("Сожжено всего", f"{self.n0(a.get('fuel_used', 0))} {tr('л')}"),
+            ("На холостом", f"{self.n1(d['idle_l_h'])} {tr('л/ч')}" if d["idle_l_h"] else ""),
+            ("Заправок", f"{int(a.get('refuels', 0))} · {self.n0(a.get('refuel_l', 0))} {tr('л')}"),
+            ("AdBlue", f"{self.n1(d['adblue_l100'])} {tr('л/100 км')}" if d["adblue_l100"] else ""),
+            ("Лампа «мало топлива»", self.dur(a.get("fuel_warn_s", 0)))])
+        self.kv(self.card(g, "Педали и перегрузки", 1, 1), [
+            ("Газ в среднем", self.pct(d["avg_throttle"])), ("Тормоз в среднем", self.pct(d["avg_brake"])),
+            ("Газ в пол", self.dur(a.get("full_thr_s", 0))), ("На тормозе", self.dur(a.get("brake_s", 0))),
+            ("Макс. торможение", f"{a.get('max_decel', 0):.1f} {tr('м/с²')}"), ("Макс. разгон", f"{a.get('max_accel', 0):.1f} {tr('м/с²')}"),
+            ("Макс. боковая", f"{a.get('max_lat', 0):.1f} {tr('м/с²')}"), ("Температура тормозов", f"{self.n0(a.get('brake_temp_max', 0))} °C")])
+        self.kv(self.card(g, "Свет и время суток", 1, 2), [
+            ("Ночью", f"{self.pct(d['night_share'])} {tr('пути')} · {self.dur(a.get('night_s', 0))}"),
+            ("Ближний свет", self.dur(a.get("low_s", 0))), ("Дальний свет", self.dur(a.get("high_s", 0))), ("Дворники", self.dur(a.get("wipers_s", 0))),
+            ("Поворотники включал", self.n0(a.get("blink_toggles", 0))), ("Аварийка", self.dur(a.get("hazard_s", 0))),
+            ("Маячок / доп. свет", f"{self.dur(a.get('beacon_s', 0))} / {self.dur(a.get('aux_s', 0))}"), ("Ручник включал", self.n0(a.get("park_engages", 0)))])
+        dm = [("Двигатель", a.get("dmg_engine", 0)), ("Коробка", a.get("dmg_trans", 0)), ("Кабина", a.get("dmg_cabin", 0)), ("Шасси", a.get("dmg_chassis", 0)),
+              ("Колёса", a.get("dmg_wheels", 0)), ("Прицеп", a.get("dmg_trailer", 0))]
+        self.kv(self.card(g, "Повреждения за период", 2, 0, sub=tr("сумма ударов")), [(n, f"{v * 100:.1f}%") for n, v in dm])
+        self.kv(self.card(g, "Рельеф и дорога", 2, 1), [
+            ("Набор высоты", f"{self.n0(a.get('climb_m', 0))} {tr('м')}"), ("Спуск", f"{self.n0(a.get('descend_m', 0))} {tr('м')}"),
+            ("С грузом", f"{self.pct(d['loaded_share'])} {tr('пути')}"), ("С прицепом", self.km(a.get("km_trailer", 0))),
+            ("Отдыхов", str(int(a.get("rests", 0)))), ("Запас до отдыха, мин", self.n0(a["rest_min"]) if a.get("rest_min", -1) >= 0 else "")])
+        self.hist_card(g, a, 2, 2, 1)
+
+    # ---- вкладка «События»
+    def tab_events(self, g, ss, js):
+        kinds = self.EV_GROUPS.get(self.evf)
+        ev = ETS2STATS.load_events(self.snap.get("folder"), kinds, 600)
+        row = tk.Frame(g, bg=UI_BG)
+        row.grid(row=0, column=0, columnspan=3, sticky="w", padx=6)
+        self.seg(row, self.EV_FILTERS, self.evf, self.set_evf).pack(side="left")
+        if not ev:
+            tk.Label(g, text=tr("Событий нет."), bg=UI_BG, fg=UI_DIM).grid(row=1, column=0, columnspan=3, sticky="w", padx=8, pady=8)
+            return
+        box = RoundBox(g, radius=12, fill=UI_BG, border=mix(UI_BORDER, UI_DIM, 0.35))
+        box.grid(row=1, column=0, columnspan=3, sticky="ew", padx=6, pady=6)
+        cols = (("when", "Когда", 130, "w"), ("kind", "Событие", 150, "w"), ("what", "Подробности", 560, "w"), ("speed", "Км/ч", 54, "e"))
+        tree = ttk.Treeview(box.inner, columns=[c[0] for c in cols], show="headings", height=18, selectmode="browse")
+        for k, name, w, an in cols:
+            tree.heading(k, text=tr(name))
+            tree.column(k, width=w, minwidth=w, anchor=an, stretch=(k == "what"))
+        sb = ttk.Scrollbar(box.inner, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=sb.set)
+        tree.pack(side="left", fill="both", expand=True, padx=(4, 0), pady=4)
+        sb.pack(side="right", fill="y", pady=4)
+        tree.tag_configure("bad", foreground="#ff6b5e")
+        tree.tag_configure("dim", foreground=UI_DIM)
+        for i, e in enumerate(ev):
+            kind = e.get("e", "")
+            tags = ("bad",) if kind in ("fine", "damage") else (("dim",) if kind in ("session_start", "session_end") else ())
+            tree.insert("", "end", iid=str(i), tags=tags, values=(self.when(e.get("t")), tr(self.EV_NAMES.get(kind, kind)), self.ev_text(e), self.n0(e.get("speed", 0))))
+
+    def ev_text(self, e):
+        k = e.get("e")
+        if k == "fine":
+            return f"{tr(self.OFFENCE.get(e.get('offence', ''), e.get('offence', '')))} · {self.money(e.get('amount', 0))}"
+        if k == "toll":
+            return self.money(e.get("amount", 0))
+        if k in ("ferry", "train"):
+            return f"{e.get('from', '')} → {e.get('to', '')} · {self.money(e.get('amount', 0))}"
+        if k == "refuel":
+            return f"+{self.n0(e.get('liters', 0))} {tr('л')} ({tr('в баке')} {self.n0(e.get('fuel', 0))})"
+        if k == "damage":
+            parts = [f"{n} {e[key] * 100:.1f}%" for key, n in (("cabin", "кабина"), ("chassis", "шасси"), ("trailer", "прицеп"), ("engine", "двигатель"), ("wheels", "колёса"), ("trans", "коробка")) if e.get(key, 0) > 0.0004]
+            return f"{tr('на скорости')} {self.n0(e.get('speed_hit', 0))} {tr('км/ч')} · " + ", ".join(tr(p.split(' ')[0]) + " " + p.split(' ')[1] for p in parts)
+        if k == "job_start":
+            return f"{e.get('cargo', '')}: {e.get('src', '')} → {e.get('dst', '')} · {self.money(e.get('income', 0))}"
+        if k in ("job_delivered", "job_end"):
+            return f"{e.get('cargo', '')}: {e.get('src', '')} → {e.get('dst', '')}"
+        if k == "rest":
+            return tr("Выспался: запас до отдыха восстановлен")
+        return ""
+
+
 class SetupsPage(ScrollPage):
     """Отдельный экран «Сетапы»: подбор бесплатных сетапов HYMO / P1Doks под текущую трассу и машину (Le Mans Ultimate)."""
     TITLE = "Сетапы"
@@ -10923,6 +11491,8 @@ class App:
         self.root.after(500, self.poll)
         self.root.after(1000, self.watch)
         self.root.after(300, self.pump)
+        self.stats_plugin = None                          # (статус, текст) последней установки dll статистики
+        self.root.after(2500, self.install_stats_plugin)
         if "--minimized" in sys.argv or self.cfg.get("start_min_now"):
             self.root.after(400, self.start_hidden)
         if self.cfg.get("auto_update", True):
@@ -11061,6 +11631,7 @@ class App:
         self.make_panel(self.selected)                     # остальные игры достраиваем уже после показа окна
         self.settings_page = SettingsPage(self.holder, self)
         self.stats_page = StatsPage(self.holder, self)
+        self.ets2_stats_page = Ets2StatsPage(self.holder, self) if ETS2STATS else self.stats_page
         self.ac_page = AcSoonPage(self.holder, self)
         self.ets2_page = Ets2Page(self.holder, self)
         self.home_page = HomePage(self.holder, self)
@@ -11168,7 +11739,7 @@ class App:
             except Exception:
                 pass
         self.settings_page.pack_forget()
-        self.stats_page.pack_forget()
+        self.hide_stats()
         self.ac_page.pack_forget()
         self.ets2_page.pack_forget()
         self.home_page.pack_forget()
@@ -11195,7 +11766,7 @@ class App:
         for p in self.panels.values():
             p.pack_forget()
         self.settings_page.pack_forget()
-        self.stats_page.pack_forget()
+        self.hide_stats()
         self.ets2_page.pack_forget()
         self.home_page.pack_forget()
         self.setups_page.pack_forget()
@@ -11213,7 +11784,7 @@ class App:
         for p in self.panels.values():
             p.pack_forget()
         self.settings_page.pack_forget()
-        self.stats_page.pack_forget()
+        self.hide_stats()
         self.ac_page.pack_forget()
         fresh = not self.ets2_page.winfo_ismapped()
         self.ets2_page.pack(fill="both", expand=True)
@@ -11230,7 +11801,7 @@ class App:
         for p in self.panels.values():
             p.pack_forget()
         self.settings_page.pack_forget()
-        self.stats_page.pack_forget()
+        self.hide_stats()
         self.ac_page.pack_forget()
         self.ets2_page.pack_forget()
         self.setups_page.pack_forget()
@@ -11244,7 +11815,7 @@ class App:
         self.remember_view("")
         for p in self.panels.values():
             p.pack_forget()
-        for pg in (self.settings_page, self.stats_page, self.ac_page, self.ets2_page, self.home_page, self.setups_page, self.apps_page):
+        for pg in (self.settings_page, self.stats_page, self.ets2_stats_page, self.ac_page, self.ets2_page, self.home_page, self.setups_page, self.apps_page):
             pg.pack_forget()
         if self.selected not in self.panels:
             self.make_panel(self.selected)
@@ -11267,7 +11838,7 @@ class App:
         self.view = "settings"
         for p in self.panels.values():
             p.pack_forget()
-        self.stats_page.pack_forget()
+        self.hide_stats()
         self.ac_page.pack_forget()
         self.ets2_page.pack_forget()
         self.home_page.pack_forget()
@@ -11275,6 +11846,29 @@ class App:
         self.apps_page.pack_forget()
         self.settings_page.pack(fill="both", expand=True)
         self.update_tiles()
+
+    def install_stats_plugin(self, force=False):
+        """При запуске лаунчера ставит/обновляет yassno_ets2_stats.dll в plugins игры (в фоне). Дальше плагин пишет статистику сам."""
+        if not ETS2STATS or not ETS2 or ETS2_TEST_BUILD:
+            return
+
+        def work():
+            try:
+                d = (ETS2.load_cfg() or {}).get("game_dir") or ETS2.find_game_dir(steam_libraries())
+                if not d:
+                    self.stats_plugin = ("error", "Папка ETS 2 не найдена")
+                else:
+                    self.stats_plugin = ETS2STATS.install_plugin(d, HERE)
+            except Exception as e:                       # noqa: BLE001
+                self.stats_plugin = ("error", str(e))
+        threading.Thread(target=work, daemon=True).start()
+
+    def hide_stats(self):
+        self.stats_page.pack_forget()
+        self.ets2_stats_page.pack_forget()
+
+    def stats_current(self):
+        return self.ets2_stats_page if (self.home_sub == "ets2" and ETS2STATS) else self.stats_page
 
     def show_stats(self):
         self.view = "stats"
@@ -11286,8 +11880,9 @@ class App:
         self.home_page.pack_forget()
         self.setups_page.pack_forget()
         self.apps_page.pack_forget()
-        self.stats_page.pack(fill="both", expand=True)
-        self.stats_page.reload()
+        pg = self.stats_current()
+        pg.pack(fill="both", expand=True)
+        pg.reload()
         self.update_tiles()
 
     def open_panel_page(self, page, card=None):
@@ -11566,7 +12161,7 @@ class App:
         self.refresh_status()
         if self.view == "stats":
             try:
-                self.stats_page.auto_refresh()
+                self.stats_current().auto_refresh()
             except tk.TclError:
                 pass
         for g, p in self.panels.items():
