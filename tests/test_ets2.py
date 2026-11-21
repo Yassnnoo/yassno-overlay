@@ -910,6 +910,23 @@ class TrackPanelTests(unittest.TestCase):
             self.assertNotEqual(before, tuple(tw.pan))
             tw.reset_view()
             self.assertEqual(tw.pan, [0.0, 0.0])
+            for _ in range(60):                                # зум до самых машин, ничего не ломается
+                tw.on_wheel(1)
+            self.assertLess(tw.od, 0.05)
+            tw.draw()
+            tw.mode.set("top")
+            tw.on_mode()
+            self.assertTrue(tw.fol_var.get())                  # сверху по умолчанию — крупно вокруг машин
+            w0 = tw.tw
+            tw.on_wheel(1)
+            self.assertLess(tw.tw, w0)
+            tw.draw()
+            tw.fol_var.set(False)
+            tw.on_follow()
+            tw.on_pan_press(type("E", (), {"x": 100, "y": 100})())
+            tw.on_pan(type("E", (), {"x": 140, "y": 90})())
+            self.assertNotEqual(tw.tpan, [0.0, 0.0])
+            tw.draw()
             tw.shutdown()
         finally:
             root.destroy()

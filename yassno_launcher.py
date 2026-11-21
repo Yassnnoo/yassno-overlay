@@ -75,7 +75,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.10.1"
+APP_VERSION = "3.10.2"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -7650,7 +7650,7 @@ def _shade(col, k):
 class Cam3:
     """Простая перспективная камера: мир (x, высота, z), курс (fx, fz), наклон вниз pitch."""
 
-    NEAR = 0.6
+    NEAR = 0.15
 
     def __init__(self, px, py, pz, fx, fz, pitch, W, H, focal):
         n = math.hypot(fx, fz) or 1.0
@@ -7723,6 +7723,11 @@ class TrackPanel(ttk.Frame):
         self._drag = self._pan = None
         self.pan = [0.0, 0.0]
         self._wpp = 1.0
+        self._tk = 1.0
+        self._cs = 3.0                                  # масштаб машин на обзорном виде (вблизи — реальный размер)
+        self.tw, self.tz, self.tpan = 70.0, 1.0, [0.0, 0.0]   # вид сверху: ширина кадра в метрах / зум всей карты / сдвиг
+        self.fv = {"top": True, "orbit": False}
+        self.fol_var = tk.BooleanVar(value=True)
         self.data = {}
         self.rib = None
         head = ttk.Frame(self)
@@ -7744,6 +7749,7 @@ class TrackPanel(ttk.Frame):
         mc = ttk.Combobox(top, width=5, state="readonly", values=("Авто", "GT3", "F1", "Квадрат"), textvariable=self.model)
         mc.pack(side="left")
         mc.bind("<<ComboboxSelected>>", lambda e: (tv.app.cfg.__setitem__("tel_track_model", self.model.get()), tv.app.save_cfg(), self.draw()))
+        ttk.Checkbutton(top, text=tr("Следить за машиной"), variable=self.fol_var, command=self.on_follow).pack(side="left", padx=(10, 0))
         self.cv = tk.Canvas(self, bg="#14191f", highlightthickness=1, highlightbackground=UI_BORDER, width=560, height=400)
         self.cv.pack(fill="both", expand=True)
         self.cv.bind("<Configure>", lambda e: self.draw())
@@ -7752,7 +7758,7 @@ class TrackPanel(ttk.Frame):
         self.cv.bind("<ButtonPress-3>", self.on_pan_press)
         self.cv.bind("<B3-Motion>", self.on_pan)
         self.cv.bind("<Double-Button-1>", self.reset_view)
-        ttk.Label(self, text=tr("Обзор 3D: левая кнопка — вращать, правая — двигать вид, колесо — масштаб, двойной щелчок — сброс"),
+        ttk.Label(self, text=tr("Колесо — приближение (в «Обзоре 3D» до самых машин), правая кнопка — двигать вид, левая в «Обзоре 3D» — вращать, двойной щелчок — сброс"),
                   style="Dim.TLabel", wraplength=560, justify="left").pack(anchor="w", pady=(3, 0))
         self.cv.bind("<MouseWheel>", lambda e: self.on_wheel(1 if e.delta > 0 else -1))
         self.cv.bind("<Button-4>", lambda e: self.on_wheel(1))
@@ -7769,6 +7775,7 @@ class TrackPanel(ttk.Frame):
         ttk.Label(bot, text=tr("Скорость ×"), style="Dim.TLabel").pack(side="left")
         cb = ttk.Combobox(bot, width=5, state="readonly", values=self.SPEEDS, textvariable=self.spd)
         cb.pack(side="left", padx=(4, 0))
+        self.fol_var.set(self.fv.get(self.mode.get(), False))
         self.reload()
 
     # ---- данные
@@ -7946,7 +7953,12 @@ class TrackPanel(ttk.Frame):
                 "col": COL_A if key == "A" else COL_B}
 
     # ---- управление
+    def on_follow(self):
+        self.fv[self.mode.get()] = self.fol_var.get()
+        self.draw()
+
     def on_mode(self):
+        self.fol_var.set(self.fv.get(self.mode.get(), False))
         self.tv.app.cfg["tel_track_mode"] = self.mode.get()
         self.tv.app.save_cfg()
         self.draw()
@@ -8020,7 +8032,15 @@ class TrackPanel(ttk.Frame):
         self.draw()
 
     def on_wheel(self, k):
-        self.od = max(0.35, min(3.0, self.od * (0.88 if k > 0 else 1.14)))
+        f = 0.82 if k > 0 else 1.22
+        m = self.mode.get()
+        if m == "orbit":
+            self.od = max(0.012, min(3.0, self.od * f))
+        elif m == "top":
+            if self.fv["top"]:
+                self.tw = max(12.0, min(3000.0, self.tw * f))
+            else:
+                self.tz = max(1.0, min(60.0, self.tz / f))
         self.draw()
 
     def shutdown(self):
@@ -8033,21 +8053,34 @@ class TrackPanel(ttk.Frame):
             self._job = None
 
     def on_pan_press(self, e):
-        self._pan = (e.x, e.y, self.pan[0], self.pan[1])
+        self._pan = (e.x, e.y, self.pan[0], self.pan[1], self.tpan[0], self.tpan[1])
 
     def on_pan(self, e):
-        if not self._pan or self.mode.get() != "orbit":
+        if not self._pan:
             return
-        x0, y0, px, py = self._pan
-        k = self._wpp
-        self.pan[0] = px - (e.x - x0) * k                         # вдоль экрана (влево/вправо)
-        self.pan[1] = py + (e.y - y0) * k / max(0.35, math.sin(self.op))   # вглубь
+        x0, y0, px, py, tx, tz_ = self._pan
+        m = self.mode.get()
+        if m == "orbit":
+            k = self._wpp
+            self.pan[0] = px - (e.x - x0) * k                         # вдоль экрана (влево/вправо)
+            self.pan[1] = py + (e.y - y0) * k / max(0.35, math.sin(self.op))   # вглубь
+        elif m == "top":
+            k = max(1e-6, self._tk)
+            self.tpan[0] = tx - (e.x - x0) / k
+            self.tpan[1] = tz_ + (e.y - y0) / k
+        else:
+            return
         self.draw()
 
     def reset_view(self, e=None):
-        if self.mode.get() == "orbit":
+        m = self.mode.get()
+        if m == "orbit":
             self.oy, self.op, self.od, self.pan = math.pi / 2, 0.7, 0.85, [0.0, 0.0]
-            self.draw()
+        elif m == "top":
+            self.tw, self.tz, self.tpan = 70.0, 1.0, [0.0, 0.0]
+        else:
+            return
+        self.draw()
 
     # ---- рисование
     def draw(self):
@@ -8095,39 +8128,62 @@ class TrackPanel(ttk.Frame):
         if gap:
             c.create_text(10, y + 4, text=gap, fill=UI_ACCENT, anchor="w", font=("Segoe UI Semibold", 10))
 
-    def fit_top(self, W, H):
+    def top_xf(self, W, H, cars):
+        """Вид сверху: пока включено «Следить» — крупно вокруг машин; иначе вся трасса с зумом и сдвигом."""
         rib = self.rib
-        xs = [p[0] for p in rib["c"]]
-        zs = [p[1] for p in rib["c"]]
-        x0, x1, z0, z1 = min(xs), max(xs), min(zs), max(zs)
-        pad = 50
-        k = min((W - 2 * pad) / max(1.0, x1 - x0), (H - 2 * pad) / max(1.0, z1 - z0))
-        ox, oy = (W - (x1 - x0) * k) / 2, (H - (z1 - z0) * k) / 2
-        return k, (lambda x, z: (ox + (x - x0) * k, oy + (z1 - z) * k))
+        if self.fv["top"] and cars:
+            tgt = next((x for x in cars if x["key"] == self.follow.get()), cars[0])
+            cx, cz = tgt["x"], tgt["z"]
+            if len(cars) == 2 and math.hypot(cars[0]["x"] - cars[1]["x"], cars[0]["z"] - cars[1]["z"]) < self.tw * 0.55:
+                cx, cz = (cars[0]["x"] + cars[1]["x"]) / 2, (cars[0]["z"] + cars[1]["z"]) / 2
+            k = W / self.tw
+        else:
+            xs = [p[0] for p in rib["c"]]
+            zs = [p[1] for p in rib["c"]]
+            x0, x1, z0, z1 = min(xs), max(xs), min(zs), max(zs)
+            pad = 50
+            k0 = min((W - 2 * pad) / max(1.0, x1 - x0), (H - 2 * pad) / max(1.0, z1 - z0))
+            k = k0 * self.tz
+            cx, cz = (x0 + x1) / 2 + self.tpan[0], (z0 + z1) / 2 + self.tpan[1]
+        self._tk = k
+        return k, (lambda x, z: (W / 2 + (x - cx) * k, H / 2 - (z - cz) * k))
 
     def draw_top(self, W, H, cars):
         c, rib = self.cv, self.rib
-        k, xf = self.fit_top(W, H)
+        k, xf = self.top_xf(W, H, cars)
         n = len(rib["c"])
         pts = [xf(*p) for p in rib["c"]]
         Lp, Rp = [xf(*p) for p in rib["L"]], [xf(*p) for p in rib["R"]]
+        m = 40
+
+        def vis(*ps):
+            xs_ = [q[0] for q in ps]
+            ys_ = [q[1] for q in ps]
+            return max(xs_) > -m and min(xs_) < W + m and max(ys_) > -m and min(ys_) < H + m
+        on = [vis(Lp[i], Rp[i], Rp[i + 1], Lp[i + 1]) for i in range(n - 1)]
         for i in range(n - 1):
-            c.create_polygon(*Lp[i], *Rp[i], *Rp[i + 1], *Lp[i + 1], fill="#2b2f36", outline="#2b2f36")
+            if on[i]:
+                c.create_polygon(*Lp[i], *Rp[i], *Rp[i + 1], *Lp[i + 1], fill="#2b2f36", outline="#2b2f36")
+        lw = 1 if k < 1.5 else 2
         for i in range(n - 1):
-            c.create_line(*pts[i], *pts[i + 1], fill=speed_color(rib["v"][i], rib["vlo"], rib["vhi"]), width=1)
+            if on[i]:
+                c.create_line(*Lp[i], *Lp[i + 1], fill="#cfd3da" if (i // 2) % 2 else "#d93a32", width=lw)
+                c.create_line(*Rp[i], *Rp[i + 1], fill="#cfd3da" if (i // 2) % 2 else "#d93a32", width=lw)
         for key in ("A", "B"):
             dd = self.data.get(key)
             if dd and dd["ok"]:
-                self.trail_top(dd, xf, COL_A if key == "A" else COL_B)
+                self.trail_top(dd, xf, COL_A if key == "A" else COL_B, W, H, 2 if k > 3 else 1)
         for car in cars:
             self.car_top(car, k, xf)
 
-    def trail_top(self, dd, xf, col):
-        step = max(1, dd["n"] // 500)
+    def trail_top(self, dd, xf, col, W=10**6, H=10**6, width=1):
+        step = max(1, dd["n"] // (1500 if width > 1 else 500))
         xs, zs, br = dd["X"], dd["Z"], dd["BRK"]
         for i in range(0, dd["n"] - step, step):
             a, b = xf(xs[i], zs[i]), xf(xs[i + step], zs[i + step])
-            self.cv.create_line(*a, *b, fill="#ff3b30" if br[i] > 0.1 else col, width=1)
+            if max(a[0], b[0]) < -20 or min(a[0], b[0]) > W + 20 or max(a[1], b[1]) < -20 or min(a[1], b[1]) > H + 20:
+                continue
+            self.cv.create_line(*a, *b, fill="#ff3b30" if br[i] > 0.1 else col, width=width)
 
     def car_top(self, car, k, xf):
         sx, sy = xf(car["x"], car["z"])
@@ -8155,11 +8211,15 @@ class TrackPanel(ttk.Frame):
         xs = [p[0] for p in self.rib["c"]]
         zs = [p[1] for p in self.rib["c"]]
         cx, cz = (min(xs) + max(xs)) / 2, (min(zs) + max(zs)) / 2
+        if self.fv["orbit"] and cars:
+            tgt = next((x for x in cars if x["key"] == self.follow.get()), cars[0])
+            cx, cz = tgt["x"], tgt["z"]
         R = max(max(xs) - min(xs), max(zs) - min(zs), 200.0) * self.od
         fx, fz = math.cos(self.oy), math.sin(self.oy)
         cx, cz = cx + fz * self.pan[0] + fx * self.pan[1], cz - fx * self.pan[0] + fz * self.pan[1]
         dist = R * 1.25
         self._wpp = dist / (min(W, H * 1.4) * 0.95)
+        self._cs = max(1.0, min(3.0, dist / 60.0))
         hz_ = dist * math.cos(self.op)
         return Cam3(cx - fx * hz_, dist * math.sin(self.op), cz - fz * hz_, fx, fz, self.op, W, H, min(W, H * 1.4) * 0.95)
 
@@ -8180,7 +8240,7 @@ class TrackPanel(ttk.Frame):
             step = 1
         else:
             step = 2 if n > 700 else 1
-        wide = 1.0 if mode == "chase" else 2.4
+        wide = 1.0 if mode == "chase" else 1.0 + 1.4 * (self._cs - 1.0) / 2.0      # издали дорога шире, вблизи — как есть
 
         def edge(E, i):
             cx, cz = rib["c"][i]
@@ -8226,12 +8286,16 @@ class TrackPanel(ttk.Frame):
                 dref = ref["d"] if ref else 0.0
                 lo, hi = bisect.bisect_left(ds, dref - 60), bisect.bisect_right(ds, dref + 300)
                 st = max(1, (hi - lo) // 120)
+            elif self._cs < 1.9:                       # вблизи рисуем только участок вокруг машины, но подробно
+                ref = next((x for x in cars if x["key"] == key), None)
+                dref = ref["d"] if ref else 0.0
+                lo, hi, st = bisect.bisect_left(ds, dref - 150), bisect.bisect_right(ds, dref + 250), 1
             else:
                 lo, hi, st = 0, nn - 1, max(1, nn // 700)
             for i in range(lo, hi - st, st):
                 s = cam.line((xs[i], 0.03, zs[i]), (xs[i + st], 0.03, zs[i + st]))
                 if s:
-                    c.create_line(*s[0], fill="#ff3b30" if br[i] > 0.1 else col, width=3 if mode == "chase" else 2)
+                    c.create_line(*s[0], fill="#ff3b30" if br[i] > 0.1 else col, width=3 if (mode == "chase" or self._cs < 1.9) else 2)
         for car in sorted(cars, key=lambda x: -cam.to(x["x"], 0, x["z"])[2]):
             self.car_3d(cam, car, mode)
 
@@ -8303,7 +8367,7 @@ class TrackPanel(ttk.Frame):
         c = self.cv
         fx, fz = car["hx"], car["hz"]
         rx, rz = fz, -fx
-        s = 1.0 if mode == "chase" else 3.0   # на обзорном виде машины крупнее, иначе их не видно
+        s = 1.0 if mode == "chase" else self._cs   # издали машины крупнее, иначе их не видно; вблизи — реальный размер
         col = car["col"]
         braking = car["brk"] > 0.1
         groups = []
