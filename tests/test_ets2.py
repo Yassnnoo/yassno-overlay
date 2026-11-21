@@ -912,3 +912,28 @@ class TrackPanelTests(unittest.TestCase):
             tw.shutdown()
         finally:
             root.destroy()
+
+
+    def test_road_uses_other_sessions(self):
+        import gzip, json, tempfile
+        L = yassno_launcher
+        d = tempfile.mkdtemp()
+        old = (L.STATS_DIR, L.TEL_DIR)
+        L.STATS_DIR, L.TEL_DIR = os.path.join(d, "stats"), os.path.join(d, "tel")
+        L._ROAD_LAPS.clear()
+        L._SESS_CACHE.clear()
+        try:
+            os.makedirs(L.STATS_DIR)
+            for i, name in enumerate(("s1", "s2")):
+                with open(os.path.join(L.STATS_DIR, name + ".json"), "w", encoding="utf-8") as f:
+                    json.dump({"game": "lmu", "track": "Fuji", "laps": []}, f)
+                os.makedirs(os.path.join(L.TEL_DIR, name))
+                with gzip.open(os.path.join(L.TEL_DIR, name, "lap1.json.gz"), "wt") as f:
+                    json.dump(self.lap_raw(3.0 * i, 90.0 + i, 1), f)
+            got = L.other_track_laps(os.path.join(L.STATS_DIR, "s1.json"))
+            self.assertEqual(len(got), 1)                      # круг второй сессии, своя сессия не считается
+            self.assertEqual(L.other_track_laps(os.path.join(L.STATS_DIR, "s1.json")), got)   # из кэша
+        finally:
+            L.STATS_DIR, L.TEL_DIR = old
+            L._ROAD_LAPS.clear()
+            L._SESS_CACHE.clear()

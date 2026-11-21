@@ -71,7 +71,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.8.3"
+APP_VERSION = "3.8.4"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -7167,6 +7167,44 @@ def tel_files(session_path):
     return sorted(out)
 
 
+_ROAD_LAPS = {}
+
+
+def other_track_laps(session_path, limit=12):
+    """Круги из других сессий на той же трассе (по 3 с сессии): чем больше кругов, тем точнее оценка ширины дороги."""
+    try:
+        me = read_json(session_path) if session_path else {}
+    except Exception:
+        return []
+    track, game = me.get("track"), me.get("game")
+    if not track or game in (None, "import"):
+        return []
+    key = (game, track)
+    if key in _ROAD_LAPS:
+        return _ROAD_LAPS[key]
+    out = []
+    try:
+        for item in load_sessions():
+            path, d = item[0], item[1]
+            if path == session_path or d.get("track") != track or d.get("game") != game:
+                continue
+            files = tel_files(path)
+            for no, fp in files[::max(1, len(files) // 3)][:3]:
+                try:
+                    with gzip.open(fp, "rt", encoding="utf-8") as f:
+                        lap = TLap(json.load(f))
+                except (OSError, ValueError, EOFError):
+                    continue
+                if lap.n >= 10 and not lap.partial and not lap.pit and lap.length > 50:
+                    out.append(lap)
+            if len(out) >= limit:
+                break
+    except Exception:
+        pass
+    _ROAD_LAPS[key] = out
+    return out
+
+
 class TLap:
     """Один круг телеметрии: ряды по дистанции, значение в любой точке — линейной интерполяцией."""
 
@@ -7734,7 +7772,12 @@ class TrackPanel(ttk.Frame):
             for a in v:
                 pre.append(pre[-1] + a)
             return [(pre[min(len(v), i + k + 1)] - pre[max(0, i - k)]) / (min(len(v), i + k + 1) - max(0, i - k)) for i in range(len(v))]
-        X2, Z2 = sm(out["x"], 3), sm(out["z"], 3)
+        X2, Z2 = sm(sm(out["x"], 3), 3), sm(sm(out["z"], 3), 3)
+        dm, top = sm(sm(out["d"], 4), 4), -1.0
+        for i in range(N):                                   # дистанция только растёт: без «стоп-вперёд» на неровных отметках
+            top = max(top, dm[i])
+            dm[i] = top
+        out["d"] = dm
         hx, hz, px, pz = [], [], 0.0, 1.0
         for i in range(N):
             a, b = min(N - 1, i + 4), max(0, i - 4)
@@ -7763,8 +7806,10 @@ class TrackPanel(ttk.Frame):
         self.data = {"A": self.prep(a), "B": self.prep(b)}
         base = next((self.data[k] for k in ("A", "B") if self.data[k] and self.data[k]["ok"]), None)
         self.rib = None
+        self._rib_new = None
         if base:
-            self.build_ribbon(base["lap"])
+            self.rib = self.build_ribbon(base["lap"])
+            self.road_more(base["lap"])
         self.tmax = max([v["end"] for v in self.data.values() if v] or [1.0])
         self.sl.configure(to=max(1.0, self.tmax))
         if self.follow.get() == "A" and not self.data["A"] and self.data["B"]:
@@ -7772,7 +7817,7 @@ class TrackPanel(ttk.Frame):
         self.t = min(self.t, self.tmax)
         self.draw()
 
-    def build_ribbon(self, lap):
+    def build_ribbon(self, lap, extra=()):
         """Дорога: осевая по кругу-основе, ширина и сдвиг — по тому, где реально ездили все круги сессии."""
         ds, xs, zs, vs = lap.c["d"], lap.c["x"], lap.c["z"], lap.c["spd"]
         idx, last = [], -1e9
@@ -7781,7 +7826,7 @@ class TrackPanel(ttk.Frame):
                 idx.append(i)
                 last = ds[i]
         if len(idx) < 8:
-            return
+            return None
         c = [(xs[i], zs[i]) for i in idx]
         n = len(c)
         rn = []
@@ -7792,7 +7837,8 @@ class TrackPanel(ttk.Frame):
             rn.append((-fz / h, fx / h))
         rd = [ds[i] for i in idx]
         lo, hi = [1e9] * n, [-1e9] * n
-        others = [l for _, _, l in getattr(self.tv, "items", []) if l and not l.partial and l.n >= 10 and l.length > 50][:14]
+        others = ([l for _, _, l in getattr(self.tv, "items", []) if l and not l.partial and l.n >= 10 and l.length > 50][:14]
+                  + [l for l in extra if abs(l.length - lap.length) < 0.15 * lap.length])
         for lp in [lap] + [l for l in others if l is not lap]:
             sc = lp.length / lap.length if lap.length > 50 else 1.0
             for j in range(n):
@@ -7813,7 +7859,33 @@ class TrackPanel(ttk.Frame):
         L = [(cc[j][0] - rn[j][0] * hw[j], cc[j][1] - rn[j][1] * hw[j]) for j in range(n)]
         R = [(cc[j][0] + rn[j][0] * hw[j], cc[j][1] + rn[j][1] * hw[j]) for j in range(n)]
         sp = [vs[i] for i in idx]
-        self.rib = {"d": rd, "c": cc, "L": L, "R": R, "v": sp, "vlo": min(sp), "vhi": max(sp)}
+        return {"d": rd, "c": cc, "L": L, "R": R, "v": sp, "vlo": min(sp), "vhi": max(sp)}
+
+    def road_more(self, lap):
+        """Уточняем дорогу по кругам из других сессий на этой трассе — в фоне, чтобы окно не подвисало."""
+        sess = getattr(self.tv, "session", None)
+
+        def work():
+            try:
+                extra = other_track_laps(sess)
+                if extra:
+                    self._rib_new = self.build_ribbon(lap, extra)
+            except Exception:
+                pass
+        threading.Thread(target=work, daemon=True).start()
+        self.after(700, self.road_poll)
+
+    def road_poll(self):
+        if getattr(self, "_rib_new", None):
+            self.rib, self._rib_new = self._rib_new, None
+            self.draw()
+        else:
+            try:
+                self._poll_n = getattr(self, "_poll_n", 0) + 1
+                if self._poll_n < 40 and self.winfo_exists():
+                    self.after(700, self.road_poll)
+            except tk.TclError:
+                pass
 
     def car(self, key):
         dd = self.data.get(key)
@@ -7879,7 +7951,7 @@ class TrackPanel(ttk.Frame):
         if self._n % 3 == 0 or not self.playing:
             self.sync_chart()
         if self.playing:
-            self._job = self.after(33, self.tick)
+            self._job = self.after(25, self.tick)
 
     def sync_chart(self):
         c = self.car("A") or self.car("B")
