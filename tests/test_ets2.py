@@ -938,3 +938,31 @@ class TrackPanelTests(unittest.TestCase):
             L.STATS_DIR, L.TEL_DIR = old
             L._ROAD_LAPS.clear()
             L._SESS_CACHE.clear()
+
+
+    def test_compare_sessions_helpers(self):
+        import gzip, json, tempfile
+        L = yassno_launcher
+        d = tempfile.mkdtemp()
+        old = (L.STATS_DIR, L.TEL_DIR)
+        L.STATS_DIR, L.TEL_DIR = os.path.join(d, "stats"), os.path.join(d, "tel")
+        L._SESS_CACHE.clear()
+        try:
+            os.makedirs(L.STATS_DIR)
+            for name, track in (("s1", "Fuji"), ("s2", "Fuji"), ("s3", "Monza")):
+                with open(os.path.join(L.STATS_DIR, name + ".json"), "w", encoding="utf-8") as f:
+                    json.dump({"game": "lmu", "track": track, "car": "GT3", "started": "2026-11-20T18:30:00", "laps": []}, f)
+                if name != "s3":                                # у s3 телеметрии нет
+                    os.makedirs(os.path.join(L.TEL_DIR, name))
+                    with gzip.open(os.path.join(L.TEL_DIR, name, "lap2.json.gz"), "wt") as f:
+                        json.dump(self.lap_raw(0.0, 90.0, 2), f)
+            s1 = os.path.join(L.STATS_DIR, "s1.json")
+            got = L.compare_sessions("Fuji", skip=s1)
+            self.assertEqual([os.path.basename(p) for p, _, _ in got], ["s2.json"])
+            self.assertEqual(len(L.compare_sessions(None)), 2)         # без фильтра — все сессии с телеметрией
+            self.assertIn("20.11 18:30", got[0][1])
+            laps = L.session_laps(got[0][0])
+            self.assertEqual([(n, round(t)) for n, _, t, _ in laps], [(2, 90)])
+        finally:
+            L.STATS_DIR, L.TEL_DIR = old
+            L._SESS_CACHE.clear()

@@ -71,7 +71,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.8.5"
+APP_VERSION = "3.9.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -7170,6 +7170,34 @@ def tel_files(session_path):
 _ROAD_LAPS = {}
 
 
+def session_short(d, path=""):
+    """Короткая подпись сессии для списка сравнения: дата, трасса, машина."""
+    st = str(d.get("started", ""))
+    when = f"{st[8:10]}.{st[5:7]} {st[11:16]}" if len(st) >= 16 else os.path.splitext(os.path.basename(path))[0][:14]
+    return " · ".join(x for x in (when, str(d.get("track", "")), str(d.get("car", "") or d.get("model", ""))) if x)
+
+
+def compare_sessions(track=None, skip=None):
+    """Сессии, у которых есть записанная телеметрия: [(путь, подпись, данные)], новые первыми. track — только эта трасса."""
+    out = []
+    for item in load_sessions():
+        path, d = item[0], item[1]
+        if path == skip or (track and d.get("track") != track) or not tel_files(path):
+            continue
+        out.append((path, session_short(d, path), d))
+    return out
+
+
+def session_laps(path):
+    """Записанные круги сессии: [(номер, файл, время или None, признак пит/неполный)]."""
+    out = []
+    for no, fp in tel_files(path):
+        lap = load_tlap(fp)
+        if lap and lap.n >= 10:
+            out.append((no, fp, lap.time, bool(lap.pit or lap.partial)))
+    return out
+
+
 def other_track_laps(session_path, limit=12):
     """Круги из других сессий на той же трассе (по 3 с сессии): чем больше кругов, тем точнее оценка ширины дороги."""
     try:
@@ -8317,6 +8345,7 @@ class TelemetryView(ttk.Frame):
         self.stats, self.app = stats, stats.app
         self.session = None
         self.files = {}
+        self.ext = {}                                  # чужие круги (из других сессий): путь -> подпись
         self.A = self.B = None
         self.view, self.full, self.cur_d, self._drag = (0.0, 1.0), (0.0, 1.0), None, None
         self.on = [k for k in (self.app.cfg.get("tel_strips") or STRIP_DEFAULT) if k in dict((s[0], 1) for s in STRIPS)] or list(STRIP_DEFAULT)
@@ -8326,7 +8355,7 @@ class TelemetryView(ttk.Frame):
         left.grid(row=0, column=0, sticky="ns", padx=(0, 8))
         ttk.Label(left, text="Круги", style="Head.TLabel").pack(anchor="w")
         self.tree = ttk.Treeview(left, columns=("lap", "time", "mark"), show="headings", height=10, selectmode="browse")
-        for k, name, w in (("lap", "Круг", 46), ("time", "Время", 80), ("mark", "", 60)):
+        for k, name, w in (("lap", "Круг", 70), ("time", "Время", 80), ("mark", "", 40)):
             self.tree.heading(k, text=tr(name))
             self.tree.column(k, width=w, minwidth=w, anchor="center" if k != "time" else "e", stretch=False)
         self.tree.pack(fill="y", expand=True, pady=(2, 4))
@@ -8334,6 +8363,7 @@ class TelemetryView(ttk.Frame):
         self.tree.tag_configure("B", foreground=COL_B)
         self.tree.tag_configure("pit", foreground=UI_DIM)
         self.tree.tag_configure("best", foreground="#b04dff")
+        self.tree.tag_configure("ext", foreground=UI_FG)
         self.tree.bind("<ButtonRelease-1>", lambda e: self.pick("A"))
         self.tree.bind("<Button-3>", self.right_pick)
         ttk.Label(left, text=tr("Левая кнопка — круг A,\nправая — круг B для сравнения"), style="Dim.TLabel", justify="left").pack(anchor="w")
@@ -8341,6 +8371,12 @@ class TelemetryView(ttk.Frame):
         bb.pack(fill="x", pady=(4, 0))
         ttk.Button(bb, text=tr("Лучший → A"), command=self.best_to_a).pack(side="left", padx=(0, 4))
         ttk.Button(bb, text=tr("Без B"), command=self.clear_b).pack(side="left")
+        bb2 = ttk.Frame(left)
+        bb2.pack(fill="x", pady=(4, 0))
+        ttk.Button(bb2, text=tr("Круг из другой сессии…"), command=self.pick_other).pack(side="left", padx=(0, 4))
+        ttk.Button(bb2, text=tr("Убрать чужие"), command=self.clear_ext).pack(side="left")
+        self.cmp_lbl = ttk.Label(left, text="", style="Dim.TLabel", justify="left", wraplength=230)
+        self.cmp_lbl.pack(anchor="w", pady=(3, 0))
         self.map = tk.Canvas(left, width=230, height=190, bg=UI_FIELD, highlightthickness=1, highlightbackground=UI_BORDER)
         self.map.pack(pady=(6, 0))
 
@@ -8436,6 +8472,12 @@ class TelemetryView(ttk.Frame):
                 tags.append("best")
             mark = "A" if fp == self.A else "B" if fp == self.B else (tr("пит") if lap and lap.pit else tr("часть") if lap and lap.partial else "")
             self.tree.insert("", "end", iid=fp, values=(no, fmt_time(lap.time) if lap and lap.time else "-", mark), tags=tags)
+        for fp, (short, _full) in self.ext.items():
+            lap = self.lap(fp)
+            tag = ("A",) if fp == self.A else ("B",) if fp == self.B else ("ext",)
+            mark = "A" if fp == self.A else "B" if fp == self.B else "↗"
+            self.tree.insert("", "end", iid=fp, values=(short, fmt_time(lap.time) if lap and lap.time else "-", mark), tags=tag)
+        self.show_cmp()
 
     def pick(self, which):
         sel = self.tree.selection()
@@ -8455,6 +8497,102 @@ class TelemetryView(ttk.Frame):
         if iid:
             self.tree.selection_set(iid)
             self.pick("B")
+
+    def show_cmp(self):
+        parts = []
+        for tag, fp in (("A", self.A), ("B", self.B)):
+            if fp in self.ext:
+                parts.append(f"{tag}: {self.ext[fp][1]}")
+        self.cmp_lbl.configure(text="\n".join(parts))
+
+    def clear_ext(self):
+        self.ext = {}
+        if self.A not in self.files:
+            self.A = None
+            self.set_default_a()
+        if self.B not in self.files:
+            self.B = None
+        self.fill_tree()
+        self.after_select()
+
+    def pick_other(self):
+        """Окно выбора круга из другой сессии (по умолчанию — той же трассы): круг становится A или B."""
+        cur = read_json(self.session).get("track") if self.session else None
+        win = tk.Toplevel(self)
+        win.title(tr("Круг из другой сессии"))
+        win.configure(bg=UI_BG)
+        win.geometry("760x420")
+        win.transient(self.winfo_toplevel())
+        same = tk.BooleanVar(value=bool(cur))
+        top = ttk.Frame(win)
+        top.pack(fill="x", padx=10, pady=(10, 4))
+        ttk.Checkbutton(top, text=tr("Только эта трасса") + (f" ({cur})" if cur else ""), variable=same, command=lambda: fill_sess()).pack(side="left")
+        body = ttk.Frame(win)
+        body.pack(fill="both", expand=True, padx=10, pady=4)
+        body.columnconfigure(0, weight=3)
+        body.columnconfigure(1, weight=2)
+        body.rowconfigure(0, weight=1)
+        sl = tk.Listbox(body, bg=UI_FIELD, fg=UI_FG, selectbackground=UI_ACCENT, selectforeground=UI_ACCENT_FG, highlightthickness=0,
+                        relief="flat", activestyle="none", exportselection=False, font=("Segoe UI", 10))
+        sl.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        lt = ttk.Treeview(body, columns=("lap", "time"), show="headings", selectmode="browse")
+        lt.heading("lap", text=tr("Круг"))
+        lt.heading("time", text=tr("Время"))
+        lt.column("lap", width=60, anchor="center", stretch=False)
+        lt.column("time", width=100, anchor="e")
+        lt.grid(row=0, column=1, sticky="nsew")
+        state = {"sess": [], "laps": {}}
+
+        def fill_sess():
+            sl.delete(0, "end")
+            state["sess"] = compare_sessions(cur if same.get() else None, skip=self.session)
+            for _, label, _ in state["sess"]:
+                sl.insert("end", label)
+            lt.delete(*lt.get_children())
+            if not state["sess"]:
+                sl.insert("end", tr("Нет других сессий с телеметрией"))
+
+        def on_sess(e=None):
+            sel = sl.curselection()
+            lt.delete(*lt.get_children())
+            if not sel or sel[0] >= len(state["sess"]):
+                return
+            path, label, d = state["sess"][sel[0]]
+            laps = session_laps(path)
+            best = min((t for _, _, t, bad in laps if t and not bad), default=None)
+            state["laps"] = {}
+            for no, fp, t, bad in laps:
+                state["laps"][fp] = (no, label, path)
+                lt.insert("", "end", iid=fp, values=(no, (fmt_time(t) if t else "-") + (" ★" if t and t == best and not bad else "")))
+
+        def choose(which):
+            sel = lt.selection()
+            if not sel:
+                return
+            fp = sel[0]
+            no, label, path = state["laps"][fp]
+            st = label.split(" · ")[0]
+            self.ext[fp] = (f"{st[:5]}·{no}", f"{label} · круг {no}")
+            if which == "A":
+                self.A = fp
+                if self.B == fp:
+                    self.B = None
+            else:
+                self.B = fp
+                if self.A == fp:
+                    self.A = None
+            self.fill_tree()
+            self.after_select()
+            win.destroy()
+
+        sl.bind("<<ListboxSelect>>", on_sess)
+        lt.bind("<Double-1>", lambda e: choose("B"))
+        bot = ttk.Frame(win)
+        bot.pack(fill="x", padx=10, pady=10)
+        ttk.Button(bot, text=tr("Закрыть"), command=win.destroy).pack(side="right")
+        ttk.Button(bot, text=tr("Взять как B"), command=lambda: choose("B"), style="Accent.TButton").pack(side="right", padx=6)
+        ttk.Button(bot, text=tr("Взять как A"), command=lambda: choose("A")).pack(side="right")
+        fill_sess()
 
     def best_to_a(self):
         cand = [(l.time, fp) for _, fp, l in self.items if l and l.time and not l.pit and not l.partial]
