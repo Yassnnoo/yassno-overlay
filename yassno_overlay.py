@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "3.10.3"
+APP_VERSION = "3.11.0"
 import argparse
 import bisect
 import collections
@@ -1101,10 +1101,10 @@ DEFAULT_THEME = {"accent": "#f2b705", "text": "#eef1f5", "dim": "#8791a0", "pane
                  "background": "#0b0e13", "border": "#2a3140", "me": "#4da3ff",
                  "throttle": "#2ee26d", "brake": "#ff3b30", "clutch": "#4a90ff"}
 ELEMENTS = ("standings", "relative", "pedals", "shiftlight", "trackmap", "radar", "weather", "lights", "limiter", "fuel",
-            "delta", "alerts", "tyres", "pitplan", "gaps", "engine", "sesstime", "clock", "speedo", "laplog", "micro")
+            "delta", "alerts", "tyres", "pitplan", "gaps", "engine", "sesstime", "clock", "speedo", "laplog", "micro", "bestlap")
 LAYOUT_POS = ("x", "y", "rel_x", "rel_y", "ped_x", "ped_y", "map_x", "map_y", "radar_x", "radar_y", "wx_x", "wx_y",
               "lights_x", "lights_y", "lim_x", "lim_y", "fuel_x", "fuel_y", "delta_x", "delta_y", "alerts_x", "alerts_y",
-              "tyres_x", "tyres_y", "pitplan_x", "pitplan_y", "gaps_x", "gaps_y", "engine_x", "engine_y", "sesstime_x", "sesstime_y", "clock_x", "clock_y", "speedo_x", "speedo_y", "laplog_x", "laplog_y", "micro_x", "micro_y")
+              "tyres_x", "tyres_y", "pitplan_x", "pitplan_y", "gaps_x", "gaps_y", "engine_x", "engine_y", "sesstime_x", "sesstime_y", "clock_x", "clock_y", "speedo_x", "speedo_y", "laplog_x", "laplog_y", "micro_x", "micro_y", "bestlap_x", "bestlap_y")
 LAYOUT_SCALE = tuple("scale_" + e for e in ELEMENTS) + ("map_scale", "fuel_scale") + tuple("sx_" + e for e in ELEMENTS) + tuple("sy_" + e for e in ELEMENTS)
 LAYOUT_KEYS = ELEMENTS + ("stand_mode", "map_mode", "delta_view", "delta_theme", "tyres_view", "engine_view", "speedo_view", "speedo_max", "laplog_count", "laplog_best", "laplog_delta", "laplog_temp", "laplog_ref", "laplog_newest") + LAYOUT_POS + LAYOUT_SCALE
 SCREEN_KEYS = LAYOUT_POS + tuple("sx_" + e for e in ELEMENTS) + tuple("sy_" + e for e in ELEMENTS)
@@ -1373,7 +1373,7 @@ SCALE_SPEC = {"trackmap": ("map_scale", 0.5, 3.0, 1.0), "radar": ("radar_scale",
 OVERLAY_NAMES = {"standings": "Таблица", "relative": "Релатив", "pedals": "Ввод", "trackmap": "Карта", "radar": "Радар",
                  "weather": "Погода", "lights": "Огни", "limiter": "Лимитер", "fuel": "Топливо", "delta": "Дельта",
                  "alerts": "Предупреждения", "tyres": "Шины", "pitplan": "План пит-стопа", "gaps": "Отрывы",
-                 "engine": "Двигатель", "sesstime": "Время сессии", "clock": "Часы", "speedo": "Спидометр", "laplog": "Журнал кругов", "micro": "Микро-сектора"}
+                 "engine": "Двигатель", "sesstime": "Время сессии", "clock": "Часы", "speedo": "Спидометр", "laplog": "Журнал кругов", "micro": "Микро-сектора", "bestlap": "Лучший круг"}
 
 
 EDGE = 9                                                        # ширина полосы у края окна, за которую его растягивают
@@ -5325,11 +5325,172 @@ class GapsWindow(SimpleWindow):
                 c.create_text(14, y0 + int(rh * 1.85), text=s, fill=col, anchor="w", font=m.small)
 
 
+class BestLapTracker:
+    """Следит за лучшим кругом гонки: когда он обновляется, запоминает время, пилота и машину."""
+    HOLD = 6.0
+
+    def __init__(self):
+        self.key = None
+        self.best = None                     # текущий лучший круг гонки (в области «все» или «мой класс»)
+        self.event = None                    # последнее обновление: время, пилот, номер, класс, прежний рекорд
+        self.fresh = True
+
+    def reset(self, key):
+        self.key, self.best, self.event, self.fresh = key, None, None, True
+
+    def update(self, frame, only_class=False):
+        key = (frame.get("session_start"), frame.get("track"), frame.get("kind"))
+        if key != self.key:
+            self.reset(key)
+        if frame.get("kind") != "RACE":
+            return
+        cars = frame.get("cars") or []
+        me = next((c for c in cars if c.get("player")), None)
+        if only_class and me:
+            cars = [c for c in cars if c.get("cls") == me.get("cls")]
+        cand = [c for c in cars if 5.0 < (c.get("best") or 0.0) < 3600.0]
+        if not cand:
+            self.fresh = False
+            return
+        top = min(cand, key=lambda c: c["best"])
+        if self.fresh:                       # первый кадр уже с рекордом (зашли посреди гонки) — это не событие
+            self.fresh = False
+            self.best = top["best"]
+            return
+        if self.best is None:                # в гонке ещё не было ни одного круга — первый рекорд
+            self.best = top["best"]
+            self.event = self.make(top, None)
+        elif top["best"] < self.best - 0.0005:
+            self.event = self.make(top, self.best)
+            self.best = top["best"]
+
+    @staticmethod
+    def make(car, prev):
+        return {"time": float(car["best"]), "name": str(car.get("driver") or car.get("vehicle") or "—"),
+                "num": str(car.get("number") or "").strip(), "cls": str(car.get("cls") or ""), "mine": bool(car.get("player")),
+                "prev": prev, "lap": int(car.get("laps") or 0), "t0": time.monotonic()}
+
+    def shown(self, hold=None):
+        """(событие, непрозрачность 0..1) или (None, 0)."""
+        ev = self.event
+        if not ev:
+            return None, 0.0
+        hold = float(hold or self.HOLD)
+        age = time.monotonic() - ev["t0"]
+        fin, fout = 0.25, 0.9
+        if age < 0 or age > hold + fout:
+            return None, 0.0
+        if age < fin:
+            return ev, age / fin
+        if age <= hold:
+            return ev, 1.0
+        return ev, max(0.0, 1.0 - (age - hold) / fout)
+
+
+bestlap_tracker = BestLapTracker()
+
+
+class BestLapWindow(RelativeWindow):
+    """Лучший круг гонки: прозрачная надпись без подложки. Появляется на несколько секунд, когда рекорд обновили."""
+    POS, ON = ("bestlap_x", "bestlap_y"), "bestlap"
+    OWN_ALPHA = True
+    PURPLE = "#c77dff"
+
+    def build(self):
+        m = self.main
+        self.cw, self.rh, self.R = m.cw, m.rh, m.R if self.rounded else 0
+        self.width, self.height = int(self.cw * 27), int(self.rh * 5.6)
+        if not getattr(self, "_keyed", False):             # подложки нет в любом стиле окон: фон — «ключевой» цвет
+            self._keyed = True
+            self.top.configure(bg=KEY)
+            self.canvas.config(bg=KEY)
+            try:
+                self.top.attributes("-transparentcolor", KEY)
+            except tk.TclError:
+                self.top.configure(bg=BG)
+                self.canvas.config(bg=BG)
+        base = max(8, int(m.cfg["font"]))
+        self.f_time = tkfont.Font(family=m.family, size=int(base * 2.7), weight="bold")
+        self.f_lbl = tkfont.Font(family=m.family, size=max(8, int(base * 0.95)), weight="bold")
+        self.f_nm = tkfont.Font(family=m.family, size=int(base * 1.2), weight="bold")
+        self.f_sm = tkfont.Font(family=m.family, size=max(8, int(base * 0.95)), weight="bold")
+        self.f_mid = tkfont.Font(family=m.family, size=int(base * 1.5), weight="bold")
+        w1 = 22 + self.f_time.measure("88:88.888") + 20 + self.f_mid.measure("-8.888") + 8          # время и дельта в одну строку
+        w2 = 22 + self.f_nm.measure("#88  VLADIMIR ZINOVIEV") + 18 + self.f_sm.measure("HYPERCAR") + 8
+        self.width = int(max(w1, min(w2, w1 * 1.25), self.cw * 20))
+        self.canvas.config(width=self.width, height=self.height)
+        self.top.attributes("-alpha", 0.0)
+        self._sig = None
+        self._a = 0.0
+
+    def sample(self):
+        return {"time": 98.421, "name": "A. FUOCO", "num": "50", "cls": "HYPERCAR", "mine": False, "prev": 98.733, "lap": 12, "t0": 0.0}
+
+    def tick(self, frame, ver):
+        m = self.main
+        if frame and m.locked and ver != getattr(self, "_ver", None):
+            self._ver = ver
+            bestlap_tracker.update(frame, bool(m.cfg.get("bestlap_class")))
+        ev, a = bestlap_tracker.shown(m.cfg.get("bestlap_hold", bestlap_tracker.HOLD)) if m.locked else (self.sample(), 1.0)
+        if m.hid(self.ON):
+            ev, a = None, 0.0
+        a = round(a * 20) / 20.0
+        key = (ev["time"], ev["name"], ev["mine"]) if ev else None
+        sig = (key, a > 0, m.cfg["font"], m.locked, bool(m.cfg.get("bestlap_plate")))
+        if sig != self._sig:
+            self._sig = sig
+            if ev:
+                self.draw(ev)
+        if a != self._a:
+            self._a = a
+            self.top.attributes("-alpha", a * self.opf())
+
+    def shadow(self, c, x, y, text, fill, font, anchor="w"):
+        for dx, dy in (() if self.main.cfg.get("bestlap_plate") else ((2, 2), (-1, 2), (2, -1), (-1, -1), (0, 2), (2, 0))):
+            c.create_text(x + dx, y + dy, text=text, fill="#000000", anchor=anchor, font=font)
+        c.create_text(x, y, text=text, fill=fill, anchor=anchor, font=font)
+
+    def fit(self, text, font, room):
+        """Обрезаем текст с многоточием, чтобы он не налезал на соседний."""
+        if font.measure(text) <= room:
+            return text
+        while len(text) > 1 and font.measure(text + "…") > room:
+            text = text[:-1]
+        return text.rstrip() + "…"
+
+    def draw(self, ev):
+        c, W, H = self.canvas, self.width, self.height
+        c.delete("all")
+        cc = class_color(ev["cls"]) if ev["cls"] else DIM
+        col = ME_EDGE if ev["mine"] else self.PURPLE
+        x0, x1 = 22, W - 8
+        if self.main.cfg.get("bestlap_plate"):             # вариант с плашкой: обычная карточка в стиле остальных панелей
+            draw_rrect(c, 0, 0, W - 1, H - 1, self.R, fill=HDR_BG, outline=BORDER)
+            c.create_rectangle(10, 10, 14, H - 10, fill=cc, outline="")
+            x0 = 28
+        else:
+            c.create_rectangle(2, 6, 9, H - 6, fill="#000000", outline="")
+            c.create_rectangle(3, 7, 8, H - 7, fill=cc, outline="")
+        lbl = "ТВОЙ ЛУЧШИЙ КРУГ" if ev["mine"] else "ЛУЧШИЙ КРУГ ГОНКИ"
+        self.shadow(c, x0, H * 0.13, lbl, DIM, self.f_lbl)
+        if ev["lap"]:
+            self.shadow(c, x1, H * 0.13, f"круг {ev['lap']}", DIM, self.f_lbl, "e")
+        self.shadow(c, x0, H * 0.46, fmt_lap(ev["time"]), col, self.f_time)
+        if ev["prev"]:
+            self.shadow(c, x1, H * 0.50, f"{ev['time'] - ev['prev']:+.3f}", "#2ee26d", self.f_mid, "e")
+        cls = ev["cls"]
+        cw_ = self.f_sm.measure(cls) + 16 if cls else 0
+        who = f"#{ev['num']}  {ev['name']}" if ev["num"] else ev["name"]
+        self.shadow(c, x0, H * 0.85, self.fit(who, self.f_nm, x1 - x0 - cw_), FG, self.f_nm)
+        if cls:
+            self.shadow(c, x1, H * 0.86, cls, cc, self.f_sm, "e")
+
+
 class Overlay:
     def __init__(self, cfg, logo_dir=None):
         self.cfg = cfg
         for k, v in (("delta", True), ("alerts", True), ("tyres", False), ("pitplan", False), ("gaps", False), ("engine", False),
-                     ("sesstime", False), ("clock", False), ("speedo", False), ("laplog", False), ("micro", False), ("micro_n", 20), ("laplog_count", 5), ("laplog_best", True), ("laplog_delta", True),
+                     ("sesstime", False), ("clock", False), ("speedo", False), ("laplog", False), ("micro", False), ("bestlap", False), ("bestlap_hold", 6), ("bestlap_class", False), ("bestlap_plate", False), ("micro_n", 20), ("laplog_count", 5), ("laplog_best", True), ("laplog_delta", True),
                      ("laplog_temp", True), ("laplog_ref", "prev"), ("laplog_newest", True), ("speedo_view", "arc"), ("speedo_max", 340), ("st_session", True), ("st_timer", True), ("st_clock", True),
                      ("op_bg_only", True), ("lmu_menu_hide", True), ("map_pit", True), ("map_turns", True), ("map_brake", True), ("st_poscol", True), ("st_battle", True), ("st_pitinfo", True), ("st_radio", True),
                      ("delta_show_session", True), ("delta_show_mine", True), ("delta_show_pred", True)):
@@ -5363,7 +5524,7 @@ class Overlay:
         self.canvas.pack()
         self._h = 0
         self.rel = self.ped = self.map = self.radar = self.weather = self.lights = self.limiter = self.fuel = None
-        self.delta = self.alerts = self.tyres = self.pitplan = self.gaps = self.engine = self.sesstime = self.clock = self.speedo = self.laplog = self.micro = None
+        self.delta = self.alerts = self.tyres = self.pitplan = self.gaps = self.engine = self.sesstime = self.clock = self.speedo = self.laplog = self.micro = self.bestlap = None
         self.subs = []                                   # дополнительные окна: релатив, ввод
         self.rebuild()
         cfg.setdefault("rel_x", cfg["x"] + self.width + 24)      # по умолчанию — справа от таблицы
@@ -5442,7 +5603,7 @@ class Overlay:
         self.new_vars = {}
         for key, label in (("delta", "Дельта к лучшему кругу"), ("alerts", "Предупреждения"),
                            ("tyres", "Шины и тормоза"), ("pitplan", "Пит-стоп и стинт"), ("gaps", "Соперники: гэпы и тренд"),
-                           ("engine", "Двигатель и расход"), ("sesstime", "Таймер сессии"), ("clock", "Локальное время"), ("speedo", "Спидометр"), ("laplog", "Журнал кругов"), ("micro", "Микро-сектора")):
+                           ("engine", "Двигатель и расход"), ("sesstime", "Таймер сессии"), ("clock", "Локальное время"), ("speedo", "Спидометр"), ("laplog", "Журнал кругов"), ("micro", "Микро-сектора"), ("bestlap", "Лучший круг гонки")):
             self.new_vars[key] = tk.BooleanVar(value=bool(cfg.get(key)))
             self.menu.add_checkbutton(label=label, variable=self.new_vars[key],
                                       command=lambda k=key: self._toggle_sub(getattr(self, k), self.new_vars[k]))
@@ -5573,8 +5734,12 @@ class Overlay:
         cfg.setdefault("micro_y", cfg["delta_y"] + self.delta.height + 8)
         self.micro = MicroWindow(self)
         self.micro.fit_on_screen()
+        cfg.setdefault("bestlap_x", max(0, int(r.winfo_screenwidth()) // 2 - 200))
+        cfg.setdefault("bestlap_y", 200)
+        self.bestlap = BestLapWindow(self)
+        self.bestlap.fit_on_screen()
         self.subs = [self.rel, self.ped, self.map, self.radar, self.weather, self.lights, self.limiter, self.fuel,
-                     self.delta, self.alerts, self.tyres, self.pitplan, self.gaps, self.engine, self.sesstime, self.clock, self.speedo, self.laplog, self.micro]
+                     self.delta, self.alerts, self.tyres, self.pitplan, self.gaps, self.engine, self.sesstime, self.clock, self.speedo, self.laplog, self.micro, self.bestlap]
         self.perf = None
         if PROFILE:
             self.perf = PerfProbe(PROFILE_GAME)
@@ -5950,7 +6115,8 @@ class Overlay:
                         clock_x=self.cfg["x"] + self.sesstime.width + 16, clock_y=max(0, self.cfg["y"] - 90),
                         speedo_x=self.cfg["x"], speedo_y=max(0, self.cfg["y"] - 330),
                         laplog_x=self.cfg["x"] + 260, laplog_y=max(0, self.cfg["y"] - 330),
-                        micro_x=self.cfg["delta_x"], micro_y=self.cfg["delta_y"] + self.delta.height + 8)
+                        micro_x=self.cfg["delta_x"], micro_y=self.cfg["delta_y"] + self.delta.height + 8,
+                        bestlap_x=max(0, sw // 2 - self.bestlap.width // 2), bestlap_y=200)
         for w in self.subs:
             w.top.geometry(f"+{self.cfg[w.POS[0]]}+{self.cfg[w.POS[1]]}")
             w.fit_on_screen()
@@ -7193,6 +7359,10 @@ def make_demo_source(game="lmu"):
     def source():
         e = time.monotonic() - t0
         cars = []
+        kb = int(e // 22)                                      # каждые ~22 с кто-то из пелотона обновляет лучший круг гонки
+        rec = {}
+        for kk in range(1, kb + 1):
+            rec[(kk * 5) % len(names)] = 95.6 - 0.3 * kk
         for i, (cls, veh, drv) in enumerate(names):
             lap = 96.0 + i * 0.35
             dist_i = e * WARP * (60.0 + i * 0.08) + i * 330.0
@@ -7210,7 +7380,7 @@ def make_demo_source(game="lmu"):
                 "irating": 900 + (i * 733) % 5200, "lic": ("A 4.12", "B 3.40", "C 2.75", "R 0.95")[i % 4],
                 "lic_col": ("0x0153db", "0x00c702", "0xfeec04", "0xfc0706")[i % 4],
                 "number": veh.split("#")[1], "cls": cls, "laps": int(dist_i // LEN) + 20 - i // 3, "finish": 0,
-                "best": lap + 0.2, "last": lap + (0.0 if i % 3 == 0 else 0.7), "place": i + 1,
+                "best": rec.get(i, lap + 0.2), "last": lap + (0.0 if i % 3 == 0 else 0.7), "place": i + 1,
                 "player": drv.startswith("VLADIMIR"), "in_pits": i == 10 and int(e) % 40 > 30,
                 "garage": False, "pit_state": 3 if (i == 10 and int(e) % 40 > 30) else 0,
                 "pitstops": i % 3, "penalties": 1 if i == 5 else 0,

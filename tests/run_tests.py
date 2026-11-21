@@ -471,6 +471,69 @@ class PosEventTests(unittest.TestCase):
 
 
 @unittest.skipUnless(os.environ.get("DISPLAY") or os.name == "nt", "нет экрана — самопроверку панелей пропускаем")
+class BestLapTrackerTests(unittest.TestCase):
+    """Всплывашка «Лучший круг»: срабатывает только когда рекорд гонки реально обновили."""
+
+    @staticmethod
+    def frame(bests, kind="RACE", start=1, me=0):
+        cars = [{"key": i + 1, "driver": f"D{i}", "number": str(10 + i), "cls": "LMP2" if i < 2 else "LMGT3", "laps": 5,
+                 "best": b, "player": i == me} for i, b in enumerate(bests)]
+        return {"kind": kind, "session_start": start, "track": "T", "cars": cars}
+
+    def test_events(self):
+        t = O.BestLapTracker()
+        t.update(self.frame([0.0, 0.0, 0.0]))
+        self.assertIsNone(t.event)
+        t.update(self.frame([100.0, 0.0, 0.0]))                       # первый круг в гонке — уже рекорд
+        self.assertEqual((t.event["name"], t.event["time"], t.event["prev"]), ("D0", 100.0, None))
+        t.event = None
+        t.update(self.frame([100.0, 101.0, 0.0]))                     # хуже рекорда — молчим
+        self.assertIsNone(t.event)
+        t.update(self.frame([100.0, 99.4, 0.0]))
+        self.assertEqual((t.event["name"], t.event["prev"], t.event["mine"]), ("D1", 100.0, False))
+        t.update(self.frame([99.0, 99.4, 0.0]))                       # мой рекорд
+        self.assertTrue(t.event["mine"])
+        ev = t.event
+        t.update(self.frame([99.0, 99.4, 0.0]))                       # без изменений — то же событие, не новое
+        self.assertIs(t.event, ev)
+
+    def test_join_mid_race_is_silent(self):
+        t = O.BestLapTracker()
+        t.update(self.frame([100.0, 99.0, 101.0]))                    # зашли в уже идущую гонку
+        self.assertIsNone(t.event)
+        t.update(self.frame([100.0, 98.5, 101.0]))
+        self.assertEqual(t.event["time"], 98.5)
+
+    def test_only_race_and_session_reset(self):
+        t = O.BestLapTracker()
+        t.update(self.frame([100.0, 99.0, 0.0], kind="QUALIFY"))
+        t.update(self.frame([98.0, 99.0, 0.0], kind="QUALIFY"))
+        self.assertIsNone(t.event)
+        t.update(self.frame([0.0, 0.0, 0.0], start=2))
+        t.update(self.frame([0.0, 90.0, 0.0], start=2))
+        self.assertEqual(t.event["name"], "D1")
+        t.update(self.frame([95.0, 0.0, 0.0], start=3))               # новая сессия: старый рекорд забыт, молча
+        self.assertIsNone(t.event)
+
+    def test_my_class_only(self):
+        t = O.BestLapTracker()
+        t.update(self.frame([0.0, 0.0, 0.0, 0.0], me=2), True)
+        t.update(self.frame([95.0, 96.0, 110.0, 0.0], me=2), True)    # я в LMGT3: LMP2-рекорд не наш
+        self.assertEqual(t.event["name"], "D2")
+        t.update(self.frame([90.0, 96.0, 110.0, 109.0], me=2), True)
+        self.assertEqual(t.event["name"], "D3")
+
+    def test_fade(self):
+        t = O.BestLapTracker()
+        t.event = {"time": 99.0, "name": "X", "num": "1", "cls": "", "mine": False, "prev": None, "lap": 1, "t0": O.time.monotonic()}
+        ev, a = t.shown(6)
+        self.assertTrue(ev and 0.0 <= a <= 1.0)
+        t.event["t0"] -= 3.0
+        self.assertEqual(t.shown(6)[1], 1.0)
+        t.event["t0"] -= 100.0
+        self.assertEqual(t.shown(6), (None, 0.0))
+
+
 class SelfTest(unittest.TestCase):
     def test_all_games(self):
         for g in ("iracing", "lmu", "rf2"):

@@ -75,7 +75,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.10.3"
+APP_VERSION = "3.11.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -93,7 +93,7 @@ ELEMENTS = [("standings", "Таблица (стендинг)"), ("relative", "Р
             ("weather", "Погода"), ("lights", "Стартовые огни"), ("limiter", "Пит-лимитер"),
             ("fuel", "Топливный калькулятор"), ("delta", "Дельта к лучшему кругу"), ("alerts", "Предупреждения"),
             ("tyres", "Шины и тормоза"), ("pitplan", "Пит-стоп и стинт"), ("gaps", "Соперники: гэпы и тренд"),
-            ("engine", "Двигатель и расход"), ("sesstime", "Таймер сессии"), ("clock", "Локальное время"), ("speedo", "Спидометр"), ("laplog", "Журнал кругов"), ("micro", "Микро-сектора дельты")]
+            ("engine", "Двигатель и расход"), ("sesstime", "Таймер сессии"), ("clock", "Локальное время"), ("speedo", "Спидометр"), ("laplog", "Журнал кругов"), ("micro", "Микро-сектора дельты"), ("bestlap", "Лучший круг гонки")]
 PRESETS = [("Эндуро", ("standings", "relative", "trackmap", "weather", "fuel", "delta", "alerts", "tyres", "pitplan", "gaps", "engine", "sesstime", "limiter", "laplog")),
            ("Спринт", ("standings", "relative", "pedals", "shiftlight", "trackmap", "radar", "lights", "limiter", "fuel", "delta", "alerts", "tyres", "laplog")),
            ("Для стрима", ("standings", "pedals", "trackmap", "weather", "delta", "alerts", "sesstime", "clock", "speedo")),
@@ -104,11 +104,11 @@ PAGES = [("general", "Раскладка и вид", None), ("standings", "Та�
          ("weather", "Погода", "weather"), ("lights", "Стартовые огни", "lights"), ("limiter", "Пит-лимитер", "limiter"),
          ("fuel", "Топливо", "fuel"), ("delta", "Дельта", "delta"), ("alerts", "Предупреждения", "alerts"),
          ("tyres", "Шины и тормоза", "tyres"), ("pitplan", "Пит-стоп и стинт", "pitplan"), ("gaps", "Соперники", "gaps"), ("engine", "Двигатель и расход", "engine"),
-         ("laplog", "Журнал кругов", "laplog"), ("micro", "Микро-сектора", "micro"), ("sesstime", "Таймер сессии", "sesstime"), ("clock", "Локальное время", "clock"), ("speedo", "Спидометр", "speedo"),
+         ("laplog", "Журнал кругов", "laplog"), ("micro", "Микро-сектора", "micro"), ("bestlap", "Лучший круг гонки", "bestlap"), ("sesstime", "Таймер сессии", "sesstime"), ("clock", "Локальное время", "clock"), ("speedo", "Спидометр", "speedo"),
          ("apps", "Доп. программы", None)]
 PAGE_GROUPS = [("", ("general",)), ("Таблицы", ("standings", "relative", "gaps")),
                ("Машина", ("pedals", "speedo", "delta", "micro", "fuel", "tyres", "engine", "limiter", "pitplan")),
-               ("Трасса", ("trackmap", "radar", "weather", "lights")), ("Информация", ("laplog", "alerts", "sesstime", "clock"))]
+               ("Трасса", ("trackmap", "radar", "weather", "lights")), ("Информация", ("laplog", "bestlap", "alerts", "sesstime", "clock"))]
 PAGE_WORDS = {"general": "шрифт цвета тема светлая тёмная стиль окон раскладки наборы пресеты эндуро спринт стрим минимум прозрачность",
               "standings": "тайминг стендинг позиции колонки шины ирейтинг лидер круг", "relative": "релатив соседи впереди сзади гэпы",
               "pedals": "руль педали газ тормоз сцепление передача шифт лайт обороты", "trackmap": "карта трасса ветер направление",
@@ -116,7 +116,7 @@ PAGE_WORDS = {"general": "шрифт цвета тема светлая тёмн
               "lights": "старт огни светофор", "limiter": "пит лимитер скорость пит-лейн", "fuel": "топливо бензин расход круги хватит",
               "delta": "дельта лучший круг сектора прогноз", "alerts": "флаги штраф предупреждения жёлтый синий", "tyres": "шины тормоза износ температура",
               "pitplan": "пит-стоп стинт заправка замена", "gaps": "соперники гэпы тренд отрыв", "engine": "двигатель расход энергия температура масла",
-              "sesstime": "таймер сессии до финиша осталось", "clock": "время часы локальное", "speedo": "спидометр скорость циферблат стрелка тахометр дуга", "laplog": "журнал кругов время круга лучший дельта температура лап лог", "micro": "микро сектора плашки куски круга фиолетовый зелёный жёлтый"}
+              "sesstime": "таймер сессии до финиша осталось", "clock": "время часы локальное", "speedo": "спидометр скорость циферблат стрелка тахометр дуга", "laplog": "журнал кругов время круга лучший дельта температура лап лог", "bestlap": "лучший круг гонки рекорд быстрый круг фиолетовый всплывает", "micro": "микро сектора плашки куски круга фиолетовый зелёный жёлтый"}
 STEAM_IDS = {"lmu": "2399420", "rf2": "365960", "iracing": "266410"}           # запуск игр через Steam, если путь к игре не задан
 COMPANIONS = [("racelab", "RaceLab"), ("simhub", "SimHub"), ("crewchief", "Crew Chief"), ("tradingpaints", "Trading Paints")]
 COMPANION_GAMES = {"tradingpaints": ("iracing",)}          # программы, которые есть только для одной игры
@@ -167,7 +167,7 @@ PAGE_COLORS = {"general": list(THEME_NAMES), "standings": ["accent", "text", "di
                "trackmap": ["panel", "border", "text"], "radar": ["accent"], "weather": ["panel", "text", "dim"],
                "lights": [], "limiter": [], "fuel": ["panel", "text", "dim"], "apps": [],
                "delta": ["panel", "text"], "alerts": [], "tyres": ["panel", "text", "dim"], "pitplan": ["panel", "text", "dim"],
-               "gaps": ["panel", "text", "dim"], "engine": ["panel", "text", "dim"], "sesstime": ["panel", "text", "dim"], "clock": ["panel", "text", "dim"], "speedo": ["panel", "text", "dim", "accent"], "laplog": ["panel", "text", "dim", "accent", "background"], "micro": ["panel", "dim"]}
+               "gaps": ["panel", "text", "dim"], "engine": ["panel", "text", "dim"], "sesstime": ["panel", "text", "dim"], "clock": ["panel", "text", "dim"], "speedo": ["panel", "text", "dim", "accent"], "laplog": ["panel", "text", "dim", "accent", "background"], "micro": ["panel", "dim"], "bestlap": ["text", "dim"]}
 PAGE_NOTES = {
     "apps": "Программы, которые запускаются вместе с оверлеем этой игры (например, RaceLab, SimHub, Crew Chief). Для каждой игры свой набор.",
     "standings": "Главная таблица. Колонки включаются и выключаются переключателями ниже, предпросмотр показывает результат.",
@@ -185,6 +185,7 @@ PAGE_NOTES = {
     "engine": "Температура воды и масла, расход топлива и остаток резины по каждому колесу. Виды: обычный, компактный (одна строка), циферблаты.",
     "pitplan": "Стинт, на сколько кругов хватит топлива и энергии, когда заезжать, таймеры пит-лейна и стоянки, время за рулём у каждого пилота.",
     "sesstime": "Название сессии (практика, квалификация, гонка) и таймер: сколько осталось, какой круг или сколько прошло. Те же данные, что в шапке таблицы, но отдельным окном.",
+    "bestlap": "Прозрачная надпись без подложки. Появляется на несколько секунд, когда в гонке кто-то (или ты) обновляет лучший круг: время, пилот, номер, класс и на сколько быстрее прежнего рекорда. Потом плавно исчезает. Работает только в гонке.",
     "micro": "Круг режется на равные куски (по умолчанию 20). Цвета как в F1: фиолетовый — лучший кусок среди всех машин твоего класса, зелёный — твой личный лучший, жёлтый — хуже твоего лучшего. Куски, которых ещё не проехали, показывают результат прошлого круга бледнее. Круги с заездом в боксы не считаются.",
     "laplog": "Таблица последних кругов: номер, время, разница с прошлым (или лучшим) кругом и температура трассы, внизу — лучший круг сессии. Количество кругов, колонки и порядок настраиваются ниже.",
     "speedo": "Скорость, передача и обороты. Виды: дуга оборотов, круглый циферблат со стрелкой, тахометр, лента светодиодов, цифровой и минимальный. Выбор вида ниже.",
@@ -510,13 +511,13 @@ REL_COLS = [("pos", "Позиция"), ("num", "Номер"), ("tag", "Метк�
 WX_CARDS = [("track", "Температура трассы"), ("air", "Температура воздуха"), ("wet", "Влажность трассы"), ("rain", "Осадки")]
 OP_DEFAULT = {"standings": 0.94, "relative": 0.94, "pedals": 0.94, "trackmap": 0.6, "radar": 1.0,
               "weather": 0.94, "lights": 1.0, "limiter": 1.0, "fuel": 0.94, "delta": 0.94, "alerts": 1.0,
-              "tyres": 0.94, "pitplan": 0.94, "gaps": 0.94, "engine": 0.94, "sesstime": 0.94, "clock": 0.94, "speedo": 0.94, "laplog": 0.94, "micro": 0.94}
+              "tyres": 0.94, "pitplan": 0.94, "gaps": 0.94, "engine": 0.94, "sesstime": 0.94, "clock": 0.94, "speedo": 0.94, "laplog": 0.94, "micro": 0.94, "bestlap": 1.0}
 SCALE_KEYS = {"standings": "scale_standings", "relative": "scale_relative", "pedals": "scale_pedals", "weather": "scale_weather", "lights": "scale_lights",
               "limiter": "scale_limiter", "trackmap": "map_scale", "radar": "radar_scale", "fuel": "fuel_scale",
-              "delta": "scale_delta", "alerts": "scale_alerts", "tyres": "scale_tyres", "pitplan": "scale_pitplan", "gaps": "scale_gaps", "engine": "scale_engine", "sesstime": "scale_sesstime", "clock": "scale_clock", "speedo": "scale_speedo", "laplog": "scale_laplog", "micro": "scale_micro"}
+              "delta": "scale_delta", "alerts": "scale_alerts", "tyres": "scale_tyres", "pitplan": "scale_pitplan", "gaps": "scale_gaps", "engine": "scale_engine", "sesstime": "scale_sesstime", "clock": "scale_clock", "speedo": "scale_speedo", "laplog": "scale_laplog", "micro": "scale_micro", "bestlap": "scale_bestlap"}
 SCALE_DEFAULT = {"scale_standings": 1.0, "scale_relative": 1.0, "scale_pedals": 1.0, "scale_weather": 1.0, "scale_lights": 1.0, "scale_limiter": 1.0,
                  "map_scale": 1.0, "radar_scale": 1.0, "fuel_scale": 0.8, "scale_delta": 1.0, "scale_alerts": 1.0,
-                 "scale_tyres": 1.0, "scale_pitplan": 1.0, "scale_gaps": 1.0, "scale_engine": 1.0, "scale_sesstime": 1.0, "scale_clock": 1.0, "scale_speedo": 1.0, "scale_laplog": 1.0, "scale_micro": 1.0}
+                 "scale_tyres": 1.0, "scale_pitplan": 1.0, "scale_gaps": 1.0, "scale_engine": 1.0, "scale_sesstime": 1.0, "scale_clock": 1.0, "scale_speedo": 1.0, "scale_laplog": 1.0, "scale_micro": 1.0, "scale_bestlap": 1.0}
 DEFAULTS = {**{k: True for k, _ in ELEMENTS}, "font": 13, "family": "", "rows": 12,
             "hide_garage": True, "class_only": False, **SCALE_DEFAULT, **{"op_" + k: v for k, v in OP_DEFAULT.items()},
             "radar_range": 40, "fuel_reserve": 0.0, "ve_reserve": 0.0, "fuel_pit_laps": 1.0, "fuel_avg": 5,
@@ -530,12 +531,12 @@ DEFAULTS = {**{k: True for k, _ in ELEMENTS}, "font": 13, "family": "", "rows": 
 DEFAULTS.update({"map_ir_svg": True, "weather_view": "cards", "map_style": "classic", "map_one_color": False, "map_bg": True,
                  **{"hg_" + k: True for k, _ in ELEMENTS if k not in ("standings", "shiftlight")}})
 DEFAULTS.update({"tyres": False, "pitplan": False, "gaps": False, "engine": False, "engine_view": "table", "delta_sec_bar": True,
-                 "sesstime": False, "clock": False, "speedo": False, "laplog": False, "micro": False, "micro_n": 20, "laplog_count": 5, "laplog_best": True, "laplog_delta": True, "laplog_temp": True,
+                 "sesstime": False, "clock": False, "speedo": False, "laplog": False, "micro": False, "bestlap": False, "bestlap_hold": 6, "bestlap_class": False, "bestlap_plate": False, "micro_n": 20, "laplog_count": 5, "laplog_best": True, "laplog_delta": True, "laplog_temp": True,
                  "laplog_ref": "prev", "laplog_newest": True, "speedo_view": "arc", "speedo_max": 340, "clock_seconds": True, "st_session": True, "st_timer": True, "st_clock": True, "st_poscol": True, "st_battle": True, "st_pitinfo": True, "st_radio": True,
                  "win_style": "classic", "theme_mode": "dark", "op_bg_only": True, "op_all": 0.94, "lmu_menu_hide": True})        # эти панели по умолчанию выключены
 POS_KEYS = ["x", "y", "rel_x", "rel_y", "ped_x", "ped_y", "map_x", "map_y", "radar_x", "radar_y",
             "wx_x", "wx_y", "lights_x", "lights_y", "lim_x", "lim_y", "fuel_x", "fuel_y",
-            "delta_x", "delta_y", "alerts_x", "alerts_y", "tyres_x", "tyres_y", "pitplan_x", "pitplan_y", "gaps_x", "gaps_y", "engine_x", "engine_y", "sesstime_x", "sesstime_y", "clock_x", "clock_y", "speedo_x", "speedo_y", "laplog_x", "laplog_y", "micro_x", "micro_y"]
+            "delta_x", "delta_y", "alerts_x", "alerts_y", "tyres_x", "tyres_y", "pitplan_x", "pitplan_y", "gaps_x", "gaps_y", "engine_x", "engine_y", "sesstime_x", "sesstime_y", "clock_x", "clock_y", "speedo_x", "speedo_y", "laplog_x", "laplog_y", "micro_x", "micro_y", "bestlap_x", "bestlap_y"]
 RADAR_RANGES = [15, 20, 30, 40, 60, 80, 120]
 RESERVES = ["0", "0.5", "1", "2"]
 
@@ -1975,7 +1976,7 @@ TIPS = {
 }
 ADV_CARDS = ("Цвета", "Бегущая строка", "Шапка таблицы", "Выделение в таблице", "Оформление")                 # в простом виде эти разделы прячутся (поиск и кнопка «Все настройки» показывают их)
 NAV_ICONS = {"general": "⚙", "standings": "≡", "relative": "⇅", "gaps": "⚔", "pedals": "◔", "speedo": "◎", "delta": "Δ",
-             "micro": "▦", "fuel": "◍", "tyres": "◐", "engine": "✦", "limiter": "⚑", "pitplan": "⏱", "trackmap": "⌖",
+             "micro": "▦", "bestlap": "★", "fuel": "◍", "tyres": "◐", "engine": "✦", "limiter": "⚑", "pitplan": "⏱", "trackmap": "⌖",
              "radar": "◉", "weather": "☁", "lights": "●", "laplog": "☰", "alerts": "⚠", "sesstime": "◷", "clock": "◷"}
 NAV_TIPS = {
     "general": "Шрифт, тема, цвета, готовые наборы и список панелей.", "standings": "Таблица позиций: колонки, строки, режимы.",
@@ -1986,7 +1987,7 @@ NAV_TIPS = {
     "delta": "Разница времени с лучшим кругом по ходу круга.", "alerts": "Флаги, штрафы и последний круг.",
     "tyres": "Износ и температура шин и тормозов.", "pitplan": "План пит-стопа и темп стинта.",
     "gaps": "Отрыв до соперников спереди и сзади и тренд.", "engine": "Температуры двигателя и расход.",
-    "sesstime": "Сколько осталось до конца сессии.", "clock": "Локальное время ПК.", "speedo": "Спидометр: шесть видов приборов.", "laplog": "Последние круги с дельтой и температурой, плюс лучший круг.",
+    "bestlap": "Всплывающий лучший круг гонки: время и кто проехал.", "sesstime": "Сколько осталось до конца сессии.", "clock": "Локальное время ПК.", "speedo": "Спидометр: шесть видов приборов.", "laplog": "Последние круги с дельтой и температурой, плюс лучший круг.",
 }
 
 
@@ -4367,7 +4368,7 @@ class ProfilePanel(ttk.Frame):
             _vis()
             f._r = r_sb + 4
             self.slider(f, None, "Шкала, секунд (±)", self.v["delta_range"], 0.3, 3.0, lambda x: f"{x:.1f} с")
-        elif key in ("alerts", "tyres", "pitplan", "gaps", "engine", "sesstime", "clock", "speedo", "laplog", "micro"):
+        elif key in ("alerts", "tyres", "pitplan", "gaps", "engine", "sesstime", "clock", "speedo", "laplog", "micro", "bestlap"):
             f = main_card()
             self.slider(f, None, "Размер", self.v["scale_" + key], 0.5, 2.5, mult)
             if key == "speedo":
@@ -4380,6 +4381,10 @@ class ProfilePanel(ttk.Frame):
                 self.tg(f, None, "Показывать температуру трассы", self.v["laplog_temp"])
                 self.tg(f, None, "Показывать строку «Лучший круг»", self.v["laplog_best"])
                 self.tg(f, None, "Новые круги сверху", self.v["laplog_newest"])
+            if key == "bestlap":
+                self.spin(f, None, "Показывать, секунд", "bestlap_hold", 2, 15)
+                self.tg(f, None, "Только мой класс", self.v["bestlap_class"])
+                self.tg(f, None, "Плашка под надписью (вместо прозрачного вида)", self.v["bestlap_plate"])
             if key == "micro":
                 self.spin(f, None, "Сколько кусков в круге", "micro_n", 5, 40)
                 ttk.Label(f, text="Фиолетовый — лучший кусок среди всех в твоём классе,\nзелёный — твой личный лучший, жёлтый — хуже твоего лучшего.\nПервый полный круг без боксов — только зелёный, дальше сравнение.",
@@ -5171,6 +5176,7 @@ class ProfilePanel(ttk.Frame):
         self.f_s = mk(max(6, fs // 2), True)
         self.f_t = mk(max(7, fs // 2), True)
         self.f_b = mk(max(9, fs * 0.9), True)
+        self.f_big = mk(max(14, fs * 1.9), True)
 
     def compute_theme(self, key="standings"):
         op = max(0.2, min(1.0, self.num("op_" + key, 0.94))) if key in OP_DEFAULT else 0.94
@@ -5237,7 +5243,7 @@ class ProfilePanel(ttk.Frame):
                 "alerts": ("alerts_x", "alerts_y"), "tyres": ("tyres_x", "tyres_y"), "pitplan": ("pitplan_x", "pitplan_y"),
                 "gaps": ("gaps_x", "gaps_y"), "engine": ("engine_x", "engine_y"), "sesstime": ("sesstime_x", "sesstime_y"),
                 "clock": ("clock_x", "clock_y"), "speedo": ("speedo_x", "speedo_y"), "laplog": ("laplog_x", "laplog_y"),
-                "micro": ("micro_x", "micro_y")}
+                "micro": ("micro_x", "micro_y"), "bestlap": ("bestlap_x", "bestlap_y")}
     SCALE_KEY = {"trackmap": "map_scale", "radar": "radar_scale", "fuel": "fuel_scale"}
 
     def ed_elems(self):
@@ -5246,13 +5252,13 @@ class ProfilePanel(ttk.Frame):
         ra, rb = int(self.num("rel_ahead", 3)), int(self.num("rel_behind", 3))
         nat = {"standings": (330, 34 + n * 20), "relative": (220, 30 + (ra + 1 + rb) * 16), "pedals": (260, 66),
                "trackmap": (190, 190), "radar": (150, 150), "weather": (180, 150), "lights": (220, 54), "limiter": (170, 40),
-               "fuel": (140, 200), "delta": (230, 100), "micro": (230, 26), "alerts": (240, 120),
+               "fuel": (140, 200), "delta": (230, 100), "micro": (230, 26), "bestlap": (310, 76), "alerts": (240, 120),
                "tyres": {"compact": (150, 190), "wear": (260, 92)}.get(self.mode_val("tyres_view"), (200, 160)), "pitplan": (260, 168),
                "gaps": (270, 130), "engine": {"compact": (360, 34), "gauges": (170, 200)}.get(self.mode_val("engine_view"), (230, 200)),
                "sesstime": (190, 52), "clock": (170, 52), "speedo": self.speedo_size(), "laplog": self.laplog_size(True)}
         fns = {"standings": self.d_standings, "relative": self.d_relative, "pedals": self.d_pedals, "trackmap": self.d_map,
                "radar": self.d_radar, "weather": self.d_weather, "lights": self.d_lights, "limiter": self.d_limiter,
-               "fuel": self.d_fuel, "delta": self.d_delta, "micro": self.d_micro, "alerts": self.d_alerts, "tyres": self.d_tyres,
+               "fuel": self.d_fuel, "delta": self.d_delta, "micro": self.d_micro, "bestlap": self.d_bestlap, "alerts": self.d_alerts, "tyres": self.d_tyres,
                "pitplan": self.d_pitplan, "gaps": self.d_gaps, "engine": self.d_engine, "sesstime": self.d_sesstime,
                "clock": self.d_clock, "speedo": self.d_speedo, "laplog": self.d_laplog}
         names = {e: t for _, t, e in self.pages() if e}
@@ -5943,7 +5949,7 @@ class ProfilePanel(ttk.Frame):
         mmode = self.mode_val("map_mode")
         map_size = {"full": (180, 190), "linear": (320, 150), "local": (190, 200)}[mmode]
         sizes = {"delta": ((190, self.delta_th_h()) if self.mode_val("delta_theme") not in ("full", "bar", "sectors") else {"bar": (190, 38), "sectors": (190, 152 if self.v["delta_sec_bar"].get() else 112)}.get(self.mode_val("delta_theme"), (190, 124))), "alerts": (240, 120),
-                 "tyres": {"compact": (150, 190), "wear": (260, 92)}.get(self.mode_val("tyres_view"), (200, 160)), "pitplan": (260, 168), "gaps": (270, 130), "sesstime": (190, 52), "clock": (170, 52), "speedo": self.speedo_size(), "laplog": self.laplog_size(), "micro": (260, 30),
+                 "tyres": {"compact": (150, 190), "wear": (260, 92)}.get(self.mode_val("tyres_view"), (200, 160)), "pitplan": (260, 168), "gaps": (270, 130), "sesstime": (190, 52), "clock": (170, 52), "speedo": self.speedo_size(), "laplog": self.laplog_size(), "micro": (260, 30), "bestlap": (310, 76),
                  "engine": {"compact": (360, 34), "gauges": (170, 200)}.get(self.mode_val("engine_view"), (230, 200)),
                  "standings": stand_size, "relative": (176 + (84 if self.game == "iracing" and self.relc["irat"].get() else 0), 26 + count * 18), "pedals": (290, 76),
                  "trackmap": map_size, "radar": (130, 130), "weather": ((70 * ncards + 10, 56) if self.mode_val("weather_view") == "compact" else (180, 6 + ncards * 46)),
@@ -5954,7 +5960,7 @@ class ProfilePanel(ttk.Frame):
               "trackmap": self.d_map, "radar": self.d_radar, "weather": self.d_weather, "lights": self.d_lights,
               "limiter": self.d_limiter, "fuel": self.d_fuel, "delta": self.d_delta, "alerts": self.d_alerts,
               "tyres": self.d_tyres, "pitplan": self.d_pitplan, "gaps": self.d_gaps, "engine": self.d_engine,
-              "sesstime": self.d_sesstime, "clock": self.d_clock, "speedo": self.d_speedo, "laplog": self.d_laplog, "micro": self.d_micro}[key]
+              "sesstime": self.d_sesstime, "clock": self.d_clock, "speedo": self.d_speedo, "laplog": self.d_laplog, "micro": self.d_micro, "bestlap": self.d_bestlap}[key]
         dw, dh = sizes[key]
         user = 1.0
         if key in SCALE_KEYS:
@@ -6920,6 +6926,27 @@ class ProfilePanel(ttk.Frame):
             c.create_rectangle(x0, top, x0 + bw, bot, fill=col, outline="")
         mx = x + pad + done * (bw + gap) + bw / 2
         c.create_polygon(mx - 4, y + 2, mx + 4, y + 2, mx, y + 2 + h * 0.2, fill=th["text"], outline="")
+
+    def d_bestlap(self, x, y, w, h):
+        c, th = self.canvas, self.th
+        # без подложки: надпись «висит» над картинкой игры; тень вместо плашки
+        plate = bool(self.v["bestlap_plate"].get())
+        if plate:
+            self.panel(x, y, w, h)
+        def sh(px, py, text, fill, font, anchor="w"):
+            for dx, dy in (() if plate else ((2, 2), (-1, 2), (2, -1), (-1, -1))):
+                c.create_text(px + dx, py + dy, text=text, fill="#000000", anchor=anchor, font=font)
+            c.create_text(px, py, text=text, fill=fill, anchor=anchor, font=font)
+        k = 0.5 + 0.5 * math.sin(self.at() * 0.8)
+        t = 98.421 - 0.3 * k
+        if not plate:
+            c.create_rectangle(x + 1, y + 3, x + 6, y + h - 3, fill="#000000", outline="")
+        c.create_rectangle(x + (7 if plate else 2), y + (8 if plate else 4), x + (10 if plate else 5), y + h - (8 if plate else 4), fill="#e53935", outline="")
+        sh(x + 14, y + h * 0.14, "ЛУЧШИЙ КРУГ ГОНКИ", th["dim"], self.f_t)
+        sh(x + w - 6, y + h * 0.14, f"{t - 98.733:+.3f}", "#2ee26d", self.f_t, "e")
+        sh(x + 14, y + h * 0.47, f"{int(t // 60)}:{t - 60 * int(t // 60):06.3f}", "#c77dff", self.f_big)
+        sh(x + 14, y + h * 0.82, "#50  A. FUOCO", th["text"], self.f_t)
+        sh(x + w - 6, y + h * 0.82, "HYPERCAR · круг 12", th["dim"], self.f_t, "e")
 
     def d_clock(self, x, y, w, h):
         c, th = self.canvas, self.th
