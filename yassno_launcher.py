@@ -75,7 +75,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.11.3"
+APP_VERSION = "3.11.4"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -8366,41 +8366,54 @@ class TrackPanel(ttk.Frame):
             h_ = math.hypot(vx, vz) or 1.0
             return (ex + vx / h_ * gw, ez + vz / h_ * gw)
 
+        CA = 3 if mode == "chase" else 6 * step              # длина куска асфальта в точках: длиннее кусок — меньше фигур и швов
+        CG = 6 if mode == "chase" else 12 * step             # кусок газона = одна полоса покоса
+        CK = 2 if mode == "chase" else 6 * step              # кусок поребрика (красный/белый)
+
+        def strip(i, j, E1, E2, o1=None, o2=None):
+            """Полоса между двумя границами на участке точек i..j (по земле) -> (плоский список, глубина) или None."""
+            f1 = (lambda k: edge(E1, k)) if o1 is None else (lambda k: o1(E1, k))
+            f2 = (lambda k: edge(E2, k)) if o2 is None else (lambda k: o2(E2, k))
+            ids = list(range(i, j + 1, step))
+            if ids[-1] != j:
+                ids.append(j)
+            pts = [(f1(k)[0], 0.0, f1(k)[1]) for k in ids] + [(f2(k)[0], 0.0, f2(k)[1]) for k in reversed(ids)]
+            return cam.poly(pts)
+
         quads, grass = [], []
-        for i in range(i0, i1, step):
-            j = min(n - 1, i + step)
-            q = cam.poly([(*(edge(rib["L"], i)[:1]), 0.0, edge(rib["L"], i)[1]), (edge(rib["R"], i)[0], 0.0, edge(rib["R"], i)[1]),
-                          (edge(rib["R"], j)[0], 0.0, edge(rib["R"], j)[1]), (edge(rib["L"], j)[0], 0.0, edge(rib["L"], j)[1])])
+        for i in range(i0, i1, CA):
+            q = strip(i, min(n - 1, i + CA), rib["L"], rib["R"])
             if q:
                 quads.append((q[1], q[0], i))
+        for i in range(i0, i1, CG):
+            j = min(n - 1, i + CG)
             for E in (rib["L"], rib["R"]):
-                a_, b_, ao, bo = edge(E, i), edge(E, j), outer(E, i), outer(E, j)
-                g = cam.poly([(a_[0], 0.0, a_[1]), (ao[0], 0.0, ao[1]), (bo[0], 0.0, bo[1]), (b_[0], 0.0, b_[1])])
+                g = strip(i, j, E, E, None, lambda E_, k: outer(E_, k))
                 if g:
                     grass.append((g[1], g[0], i))
         grass.sort(key=lambda x: -x[0])
         for dep, flat, i in grass:                          # газон вдоль трассы: полосы скошенной травы
-            col = GRASS_A if (i // 6) % 2 else GRASS_B
+            col = GRASS_A if (i // CG) % 2 else GRASS_B
             c.create_polygon(*flat, fill=col, outline=col)
         quads.sort(key=lambda x: -x[0])
         for dep, flat, i in quads:                          # асфальт: чуть «зернистый», тон слегка гуляет от куска к куску
-            col = mix(ASPHALT, ASPHALT_LT, ((i * 37) % 7) / 6.0 * 0.55 + (0.25 if (i // 3) % 2 else 0.0))
+            col = mix(ASPHALT, ASPHALT_LT, ((i * 37) % 7) / 6.0 * 0.55 + (0.25 if (i // CA) % 2 else 0.0))
             c.create_polygon(*flat, fill=col, outline=col)
-        for dep, flat, i in quads:
-            kerb = "#d93a32" if (i // 2) % 2 else "#e8e8e8"
-            j = min(n - 1, i + step)
-            for E in (rib["L"], rib["R"]):
-                a_, b_ = edge(E, i), edge(E, j)
-                s_ = cam.line((a_[0], 0.0, a_[1]), (b_[0], 0.0, b_[1]))
-                if s_:
-                    c.create_line(*s_[0], fill=kerb, width=2)
-                ci = rib["c"][i]
-                cj = rib["c"][j]
-                ai = (a_[0] + (ci[0] - a_[0]) * 0.05, a_[1] + (ci[1] - a_[1]) * 0.05)       # белая линия по краю асфальта
-                bi = (b_[0] + (cj[0] - b_[0]) * 0.05, b_[1] + (cj[1] - b_[1]) * 0.05)
-                s2 = cam.line((ai[0], 0.0, ai[1]), (bi[0], 0.0, bi[1]))
-                if s2:
-                    c.create_line(*s2[0], fill="#aeb4bd", width=1)
+        for E in (rib["L"], rib["R"]):                      # поребрик: цельные ломаные кусками по цвету, поверх — белая линия по краю асфальта
+            for i in range(i0, i1, CK):
+                j = min(n - 1, i + CK)
+                kerb = "#d93a32" if (i // CK) % 2 else "#e8e8e8"
+                pts = []
+                for k in range(i, j + 1, step):
+                    ex, ez = edge(E, k)
+                    pts.append((ex, 0.0, ez))
+                self.polyline(cam, pts, kerb, 2)
+            ln = []
+            for k in range(i0, i1 + 1, step):
+                ex, ez = edge(E, k)
+                cx, cz = rib["c"][min(k, n - 1)]
+                ln.append((ex + (cx - ex) * 0.05, 0.0, ez + (cz - ez) * 0.05))
+            self.polyline(cam, ln, "#aeb4bd", 1)
         # старт/финиш
         for dd in (0.0,):
             j = bisect.bisect_left(rib["d"], dd)
@@ -8429,13 +8442,39 @@ class TrackPanel(ttk.Frame):
                 lo, hi, st = bisect.bisect_left(ds, dref - 150), bisect.bisect_right(ds, dref + 250), 1
             else:
                 lo, hi, st = 0, nn - 1, max(1, nn // 700)
-            for i in range(lo, hi - st, st):
-                s = cam.line((xs[i], 0.03, zs[i]), (xs[i + st], 0.03, zs[i + st]))
-                if s:
-                    c.create_line(*s[0], fill="#ff3b30" if br[i] > 0.1 else col, width=3 if (mode == "chase" or self._cs < 1.9) else 2)
+            tw = 3 if (mode == "chase" or self._cs < 1.9) else 2
+            i = lo
+            while i < hi - st:                             # траектория одной ломаной на участок с одинаковым торможением
+                bk = br[i] > 0.1
+                j = i
+                while j < hi - st and (br[j] > 0.1) == bk:
+                    j += st
+                self.polyline(cam, [(xs[k], 0.03, zs[k]) for k in list(range(i, min(j + st, nn - 1) + 1, st))], "#ff3b30" if bk else col, tw)
+                i = j
         self.marks_3d(cam, mode)
         for car in sorted(cars, key=lambda x: -cam.to(x["x"], 0, x["z"])[2]):
             self.car_3d(cam, car, mode)
+
+    def polyline(self, cam, pts3, fill, width):
+        """Ломаная из мировых точек одним объектом: обрезка по ближней плоскости, скруглённые концы и стыки."""
+        run = []
+
+        def flush():
+            if len(run) >= 2:
+                self.cv.create_line(*run, fill=fill, width=width, capstyle="round", joinstyle="round")
+            run.clear()
+        for k in range(len(pts3) - 1):
+            seg = cam.line(pts3[k], pts3[k + 1])
+            if not seg:
+                flush()
+                continue
+            xy = seg[0]
+            if run and abs(run[-2] - xy[0]) < 0.5 and abs(run[-1] - xy[1]) < 0.5:
+                run.extend(xy[2:])
+            else:
+                flush()
+                run.extend(xy)
+        flush()
 
     def marks_3d(self, cam, mode):
         """Ворота на границах секторов: полоса поперёк дороги, две стойки и перекладина с подписью."""
@@ -8566,7 +8605,7 @@ class TrackPanel(ttk.Frame):
         groups.sort(key=lambda g: -g[0])
         for cd, out in groups:
             for dep, flat, fill in out:
-                c.create_polygon(*flat, fill=fill, outline=_shade(fill, 0.7))
+                c.create_polygon(*flat, fill=fill, outline=fill)
         top = cam.to(car["x"], 1.3 * s + 0.9, car["z"])
         if top[2] > cam.NEAR:
             sx, sy = cam.scr(top)
