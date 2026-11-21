@@ -75,7 +75,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.11.2"
+APP_VERSION = "3.11.3"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -5399,7 +5399,8 @@ class ProfilePanel(ttk.Frame):
                 w, h = dw * sc * k_ * float(vals.get("sx_" + e, 1.0) or 1.0), dh * sc * k_ * float(vals.get("sy_" + e, 1.0) or 1.0)
                 x, y = vals.get(xk), vals.get(yk)
                 if e == "bestlap" and not (isinstance(x, (int, float)) and isinstance(y, (int, float))):
-                    x, y = b[0] + (b[2] - w) / 2, b[1] + b[3] * 0.18      # как в самом оверлее: по центру сверху
+                    pr = self.ed_primary(sig, b) or b                    # как в самом оверлее: по центру сверху основного монитора
+                    x, y = pr[0] + (pr[2] - w) / 2, pr[1] + pr[3] * 0.14
                 elif not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
                     x, y = fx, fy                           # окно ещё ни разу не ставили: раскладываем лесенкой
                     fy += h + 16
