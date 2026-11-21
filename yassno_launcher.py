@@ -71,7 +71,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.7.5"
+APP_VERSION = "3.8.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -7561,6 +7561,510 @@ def import_lap_files(paths, stats_dir=None, tel_dir=None):
 
 
 
+# ---- окно «Трасса»: машины A и B едут по времени, 3 вида ------------------------------------
+def _shade(col, k):
+    r, g, b = (int(col[i:i + 2], 16) for i in (1, 3, 5))
+    return "#%02x%02x%02x" % (min(255, int(r * k)), min(255, int(g * k)), min(255, int(b * k)))
+
+
+class Cam3:
+    """Простая перспективная камера: мир (x, высота, z), курс (fx, fz), наклон вниз pitch."""
+
+    NEAR = 0.6
+
+    def __init__(self, px, py, pz, fx, fz, pitch, W, H, focal):
+        n = math.hypot(fx, fz) or 1.0
+        self.p, self.f, self.r = (px, py, pz), (fx / n, fz / n), (-fz / n, fx / n)
+        self.cp, self.sp = math.cos(pitch), math.sin(pitch)
+        self.W, self.H, self.F = W, H, focal
+        self.horizon = H / 2 - focal * math.tan(pitch)
+
+    def to(self, x, y, z):
+        dx, dy, dz = x - self.p[0], y - self.p[1], z - self.p[2]
+        a = dx * self.r[0] + dz * self.r[1]
+        b = dx * self.f[0] + dz * self.f[1]
+        return (a, b * self.sp + dy * self.cp, b * self.cp - dy * self.sp)
+
+    def scr(self, v):
+        return (self.W / 2 + self.F * v[0] / v[2], self.H / 2 - self.F * v[1] / v[2])
+
+    def clip(self, vs):
+        out, n = [], len(vs)
+        for i in range(n):
+            p, q = vs[i], vs[(i + 1) % n]
+            pin, qin = p[2] >= self.NEAR, q[2] >= self.NEAR
+            if pin != qin:
+                k = (self.NEAR - p[2]) / (q[2] - p[2])
+                if qin:
+                    out.append(tuple(p[j] + (q[j] - p[j]) * k for j in range(3)))
+                    out.append(q)
+                else:
+                    out.append(tuple(p[j] + (q[j] - p[j]) * k for j in range(3)))
+            elif qin:
+                out.append(q)
+        return out
+
+    def poly(self, pts):
+        """Многоугольник из мировых точек -> (плоский список экранных координат, глубина) или None."""
+        vs = self.clip([self.to(*p) for p in pts])
+        if len(vs) < 3:
+            return None
+        flat = []
+        for v in vs:
+            flat += self.scr(v)
+        return flat, sum(v[2] for v in vs) / len(vs)
+
+    def line(self, p, q):
+        vs = [self.to(*p), self.to(*q)]
+        if vs[0][2] < self.NEAR and vs[1][2] < self.NEAR:
+            return None
+        for i in (0, 1):
+            if vs[i][2] < self.NEAR:
+                o = vs[1 - i]
+                k = (self.NEAR - vs[i][2]) / (o[2] - vs[i][2])
+                vs[i] = tuple(vs[i][j] + (o[j] - vs[i][j]) * k for j in range(3))
+        return self.scr(vs[0]) + self.scr(vs[1]), min(vs[0][2], vs[1][2])
+
+
+class TrackWindow(tk.Toplevel):
+    MODES = (("top", "Сверху"), ("chase", "От третьего лица"), ("orbit", "Обзор 3D"))
+    SPEEDS = ("0.25", "0.5", "1", "2", "4")
+    ROAD = 13.0
+
+    def __init__(self, tv):
+        super().__init__(tv)
+        self.tv = tv
+        self.title(tr("Трасса — телеметрия"))
+        self.configure(bg=UI_BG)
+        self.geometry("1040x680")
+        self.minsize(640, 420)
+        self.mode = tk.StringVar(value=tv.app.cfg.get("tel_track_mode", "chase"))
+        self.follow = tk.StringVar(value="A")
+        self.spd = tk.StringVar(value="1")
+        self.t, self.tmax, self.playing, self._last, self._job = 0.0, 1.0, False, 0.0, None
+        self.oy, self.op, self.od = -math.pi / 2, 0.7, 0.85
+        self._drag = None
+        self.data = {}
+        self.rib = None
+        top = ttk.Frame(self)
+        top.pack(fill="x", padx=8, pady=(8, 4))
+        for k, name in self.MODES:
+            ttk.Radiobutton(top, text=tr(name), value=k, variable=self.mode, command=self.on_mode).pack(side="left", padx=(0, 10))
+        ttk.Label(top, text=tr("Камера за:"), style="Dim.TLabel").pack(side="left", padx=(10, 4))
+        self.fol = ttk.Combobox(top, width=3, state="readonly", values=("A", "B"), textvariable=self.follow)
+        self.fol.pack(side="left")
+        self.fol.bind("<<ComboboxSelected>>", lambda e: self.draw())
+        self.cv = tk.Canvas(self, bg="#14191f", highlightthickness=1, highlightbackground=UI_BORDER)
+        self.cv.pack(fill="both", expand=True, padx=8)
+        self.cv.bind("<Configure>", lambda e: self.draw())
+        self.cv.bind("<ButtonPress-1>", self.on_press)
+        self.cv.bind("<B1-Motion>", self.on_drag)
+        self.cv.bind("<MouseWheel>", lambda e: self.on_wheel(1 if e.delta > 0 else -1))
+        self.cv.bind("<Button-4>", lambda e: self.on_wheel(1))
+        self.cv.bind("<Button-5>", lambda e: self.on_wheel(-1))
+        bot = ttk.Frame(self)
+        bot.pack(fill="x", padx=8, pady=8)
+        self.btn = ttk.Button(bot, text="▶", width=3, command=self.toggle)
+        self.btn.pack(side="left")
+        ttk.Button(bot, text="⏮", width=3, command=lambda: self.seek(0.0)).pack(side="left", padx=(4, 8))
+        self.sl = ttk.Scale(bot, from_=0.0, to=1.0, orient="horizontal", command=self.on_slider)
+        self.sl.pack(side="left", fill="x", expand=True)
+        self.lbl = ttk.Label(bot, text="0.0 с", width=18, anchor="e")
+        self.lbl.pack(side="left", padx=8)
+        ttk.Label(bot, text=tr("Скорость ×"), style="Dim.TLabel").pack(side="left")
+        cb = ttk.Combobox(bot, width=5, state="readonly", values=self.SPEEDS, textvariable=self.spd)
+        cb.pack(side="left", padx=(4, 0))
+        self.protocol("WM_DELETE_WINDOW", self.close)
+        self.reload()
+
+    # ---- данные
+    def laps(self):
+        return self.tv.lap(self.tv.A), self.tv.lap(self.tv.B)
+
+    def prep(self, lap):
+        if not lap or lap.n < 10:
+            return None
+        ts, m = [], 0.0
+        for v in lap.c["t"]:
+            m = max(m, v)
+            ts.append(m)
+        ok = any(x or z for x, z in zip(lap.c["x"], lap.c["z"]))
+        return {"lap": lap, "t": ts, "end": ts[-1] if ts else 0.0, "ok": ok}
+
+    def reload(self):
+        a, b = self.laps()
+        self.data = {"A": self.prep(a), "B": self.prep(b)}
+        base = next((self.data[k] for k in ("A", "B") if self.data[k] and self.data[k]["ok"]), None)
+        self.rib = None
+        if base:
+            self.build_ribbon(base["lap"])
+        self.tmax = max([v["end"] for v in self.data.values() if v] or [1.0])
+        self.sl.configure(to=max(1.0, self.tmax))
+        if self.follow.get() == "A" and not self.data["A"] and self.data["B"]:
+            self.follow.set("B")
+        self.t = min(self.t, self.tmax)
+        self.draw()
+
+    def build_ribbon(self, lap):
+        ds, xs, zs, vs = lap.c["d"], lap.c["x"], lap.c["z"], lap.c["spd"]
+        idx, last = [], -1e9
+        for i in range(lap.n):
+            if (xs[i] or zs[i]) and ds[i] - last >= 3.0:
+                idx.append(i)
+                last = ds[i]
+        if len(idx) < 8:
+            return
+        c = [(xs[i], zs[i]) for i in idx]
+        n, hw = len(c), self.ROAD / 2
+        L, R = [], []
+        for j in range(n):
+            p, q = c[max(0, j - 1)], c[min(n - 1, j + 1)]
+            fx, fz = q[0] - p[0], q[1] - p[1]
+            h = math.hypot(fx, fz) or 1.0
+            rx, rz = -fz / h, fx / h
+            L.append((c[j][0] - rx * hw, c[j][1] - rz * hw))
+            R.append((c[j][0] + rx * hw, c[j][1] + rz * hw))
+        sp = [vs[i] for i in idx]
+        self.rib = {"d": [ds[i] for i in idx], "c": c, "L": L, "R": R, "v": sp, "vlo": min(sp), "vhi": max(sp)}
+
+    def car(self, key):
+        dd = self.data.get(key)
+        if not dd or not dd["ok"]:
+            return None
+        lap, ts, ds = dd["lap"], dd["t"], dd["lap"].c["d"]
+        i = bisect.bisect_right(ts, self.t)
+        if i <= 0:
+            d = ds[0]
+        elif i >= lap.n:
+            d = ds[-1]
+        else:
+            t0, t1 = ts[i - 1], ts[i]
+            k = (self.t - t0) / (t1 - t0) if t1 > t0 else 0.0
+            d = ds[i - 1] + (ds[i] - ds[i - 1]) * k
+        x, z = lap.at("x", d), lap.at("z", d)
+        x1, z1 = lap.at("x", d - 4), lap.at("z", d - 4)
+        x2, z2 = lap.at("x", d + 5), lap.at("z", d + 5)
+        hx, hz = x2 - x1, z2 - z1
+        h = math.hypot(hx, hz)
+        if h < 0.05:
+            hx, hz, h = getattr(self, "_h_" + key, (0.0, -1.0)) + (1.0,)
+        hx, hz = hx / h, hz / h
+        setattr(self, "_h_" + key, (hx, hz))
+        return {"key": key, "lap": lap, "d": d, "x": x, "z": z, "hx": hx, "hz": hz,
+                "spd": lap.at("spd", d) or 0.0, "thr": lap.at("thr", d) or 0.0, "brk": lap.at("brk", d) or 0.0,
+                "gear": int(round(lap.at("gear", d) or 0)), "col": COL_A if key == "A" else COL_B}
+
+    # ---- управление
+    def on_mode(self):
+        self.tv.app.cfg["tel_track_mode"] = self.mode.get()
+        self.tv.app.save_cfg()
+        self.draw()
+
+    def toggle(self):
+        self.playing = not self.playing
+        self.btn.configure(text="⏸" if self.playing else "▶")
+        if self.playing:
+            if self.t >= self.tmax - 0.05:
+                self.t = 0.0
+            self._last = time.time()
+            self.tick()
+
+    def seek(self, t):
+        self.t = max(0.0, min(self.tmax, t))
+        self.draw()
+        self.sync_chart()
+
+    def on_slider(self, v):
+        if getattr(self, "_set", False):
+            return
+        self.t = float(v)
+        self.draw()
+        self.sync_chart()
+
+    def tick(self):
+        self._job = None
+        if not self.playing:
+            return
+        now = time.time()
+        self.t += (now - self._last) * float(self.spd.get() or 1)
+        self._last = now
+        if self.t >= self.tmax:
+            self.t = self.tmax
+            self.playing = False
+            self.btn.configure(text="▶")
+        self.draw()
+        self._n = getattr(self, "_n", 0) + 1
+        if self._n % 3 == 0 or not self.playing:
+            self.sync_chart()
+        if self.playing:
+            self._job = self.after(33, self.tick)
+
+    def sync_chart(self):
+        c = self.car("A") or self.car("B")
+        if c:
+            self.tv.cur_d = c["d"]
+            self.tv.draw_cursor()
+
+    def on_chart(self, d):
+        """Курсор на графике сдвинули — ставим время по кругу A (или B)."""
+        if self.playing:
+            return
+        dd = self.data.get("A") or self.data.get("B")
+        if not dd:
+            return
+        t = dd["lap"].at("t", d)
+        if t is not None:
+            self.t = max(0.0, min(self.tmax, t))
+            self.draw()
+
+    def on_press(self, e):
+        self._drag = (e.x, e.y, self.oy, self.op)
+
+    def on_drag(self, e):
+        if not self._drag or self.mode.get() != "orbit":
+            return
+        x0, y0, oy, op = self._drag
+        self.oy = oy - (e.x - x0) * 0.008
+        self.op = max(0.25, min(1.5, op + (e.y - y0) * 0.006))
+        self.draw()
+
+    def on_wheel(self, k):
+        self.od = max(0.35, min(3.0, self.od * (0.88 if k > 0 else 1.14)))
+        self.draw()
+
+    def close(self):
+        self.playing = False
+        if self._job:
+            self.after_cancel(self._job)
+        self.tv.track = None
+        self.destroy()
+
+    # ---- рисование
+    def draw(self):
+        c = self.cv
+        c.delete("all")
+        W, H = max(200, c.winfo_width()), max(150, c.winfo_height())
+        self._set = True
+        try:
+            self.sl.set(self.t)
+        finally:
+            self._set = False
+        self.lbl.configure(text=f"{self.t:6.2f} / {self.tmax:.2f} с")
+        if not self.rib:
+            c.create_text(W / 2, H / 2, text=tr("В этом круге нет координат трассы"), fill=UI_DIM)
+            return
+        cars = [x for x in (self.car("A"), self.car("B")) if x]
+        m = self.mode.get()
+        if m == "top":
+            self.draw_top(W, H, cars)
+        else:
+            self.draw_3d(W, H, cars, m)
+        self.draw_hud(W, H, cars)
+
+    def hud_text(self, cars):
+        a = next((x for x in cars if x["key"] == "A"), None)
+        b = next((x for x in cars if x["key"] == "B"), None)
+        gap = ""
+        if a and b:
+            tb = b["lap"].at("t", a["d"])
+            ta = a["lap"].at("t", a["d"])
+            if tb is not None and ta is not None:
+                g = tb - ta
+                gap = (tr("B позади на ") if g > 0 else tr("B впереди на ")) + f"{abs(g):.3f} с"
+        return gap
+
+    def draw_hud(self, W, H, cars):
+        c = self.cv
+        y = 10
+        for car in cars:
+            txt = f"{car['key']}   {car['spd']:.0f} км/ч   {car['gear']}-я   газ {car['thr'] * 100:.0f}%   тормоз {car['brk'] * 100:.0f}%"
+            c.create_rectangle(10, y, 22, y + 12, fill=car["col"], outline="")
+            c.create_text(30, y + 6, text=txt, fill=UI_FG, anchor="w", font=("Segoe UI Semibold", 10))
+            y += 20
+        gap = self.hud_text(cars)
+        if gap:
+            c.create_text(10, y + 4, text=gap, fill=UI_ACCENT, anchor="w", font=("Segoe UI Semibold", 10))
+
+    def fit_top(self, W, H):
+        rib = self.rib
+        xs = [p[0] for p in rib["c"]]
+        zs = [p[1] for p in rib["c"]]
+        x0, x1, z0, z1 = min(xs), max(xs), min(zs), max(zs)
+        pad = 50
+        k = min((W - 2 * pad) / max(1.0, x1 - x0), (H - 2 * pad) / max(1.0, z1 - z0))
+        ox, oy = (W - (x1 - x0) * k) / 2, (H - (z1 - z0) * k) / 2
+        return k, (lambda x, z: (ox + (x - x0) * k, oy + (z - z0) * k))
+
+    def draw_top(self, W, H, cars):
+        c, rib = self.cv, self.rib
+        k, xf = self.fit_top(W, H)
+        n = len(rib["c"])
+        lw = max(4, self.ROAD * k)
+        pts = [xf(*p) for p in rib["c"]]
+        for i in range(n - 1):
+            c.create_line(*pts[i], *pts[i + 1], fill="#2b2f36", width=lw, capstyle="round")
+        for i in range(n - 1):
+            c.create_line(*pts[i], *pts[i + 1], fill=speed_color(rib["v"][i], rib["vlo"], rib["vhi"]), width=2)
+        for key in ("A", "B"):
+            dd = self.data.get(key)
+            if dd and dd["ok"]:
+                self.trail_top(dd["lap"], xf, COL_A if key == "A" else COL_B)
+        for car in cars:
+            self.car_top(car, k, xf)
+
+    def trail_top(self, lap, xf, col):
+        step = max(1, lap.n // 500)
+        xs, zs, br = lap.c["x"], lap.c["z"], lap.c["brk"]
+        for i in range(0, lap.n - step, step):
+            if not (xs[i] or zs[i]) or not (xs[i + step] or zs[i + step]):
+                continue
+            a, b = xf(xs[i], zs[i]), xf(xs[i + step], zs[i + step])
+            self.cv.create_line(*a, *b, fill="#ff3b30" if br[i] > 0.1 else col, width=1)
+
+    def car_top(self, car, k, xf):
+        sx, sy = xf(car["x"], car["z"])
+        L, Wd = max(9.0, 4.6 * k), max(5.0, 1.9 * k)
+        fx, fz, rx, rz = car["hx"], car["hz"], -car["hz"], car["hx"]
+        pts = []
+        for lf, lr in ((1, -1), (1, 1), (-1, 1), (-1, -1)):
+            pts += [sx + fx * L / 2 * lf + rx * Wd / 2 * lr, sy + fz * L / 2 * lf + rz * Wd / 2 * lr]
+        self.cv.create_polygon(*pts, fill=car["col"], outline="#ffffff", width=2)
+        nx, ny = sx + fx * L * 0.85, sy + fz * L * 0.85
+        self.cv.create_line(sx, sy, nx, ny, fill="#ffffff", width=2)
+        self.cv.create_text(sx - fx * L, sy - fz * L, text=car["key"], fill=car["col"], font=("Segoe UI Semibold", 11))
+
+    def make_cam(self, W, H, cars, mode):
+        if mode == "chase":
+            tgt = next((x for x in cars if x["key"] == self.follow.get()), None) or (cars[0] if cars else None)
+            if not tgt:
+                return None
+            lap, d = tgt["lap"], tgt["d"]
+            x1, z1 = lap.at("x", d - 3), lap.at("z", d - 3)
+            x2, z2 = lap.at("x", d + 28), lap.at("z", d + 28)
+            fx, fz = x2 - x1, z2 - z1
+            if math.hypot(fx, fz) < 0.1:
+                fx, fz = tgt["hx"], tgt["hz"]
+            n = math.hypot(fx, fz) or 1.0
+            fx, fz = fx / n, fz / n
+            return Cam3(tgt["x"] - fx * 14.0, 4.6, tgt["z"] - fz * 14.0, fx, fz, 0.2, W, H, W * 0.95)
+        xs = [p[0] for p in self.rib["c"]]
+        zs = [p[1] for p in self.rib["c"]]
+        cx, cz = (min(xs) + max(xs)) / 2, (min(zs) + max(zs)) / 2
+        R = max(max(xs) - min(xs), max(zs) - min(zs), 200.0) * self.od
+        fx, fz = math.cos(self.oy), math.sin(self.oy)
+        dist = R * 1.25
+        hz_ = dist * math.cos(self.op)
+        return Cam3(cx - fx * hz_, dist * math.sin(self.op), cz - fz * hz_, fx, fz, self.op, W, H, min(W, H * 1.4) * 0.95)
+
+    def draw_3d(self, W, H, cars, mode):
+        c, rib = self.cv, self.rib
+        cam = self.make_cam(W, H, cars, mode)
+        if not cam:
+            return
+        hy = max(0, min(H, cam.horizon))
+        c.create_rectangle(0, 0, W, hy, fill="#1b2633", outline="")
+        c.create_rectangle(0, hy, W, H, fill="#141a14" if mode == "chase" else "#161c22", outline="")
+        n = len(rib["c"])
+        i0, i1 = 0, n - 1
+        if mode == "chase":
+            tgt = next((x for x in cars if x["key"] == self.follow.get()), None) or cars[0]
+            i0 = max(0, bisect.bisect_left(rib["d"], tgt["d"] - 70))
+            i1 = min(n - 1, bisect.bisect_right(rib["d"], tgt["d"] + 420))
+            step = 1
+        else:
+            step = 2 if n > 700 else 1
+        wide = 1.0 if mode == "chase" else 2.4
+
+        def edge(E, i):
+            cx, cz = rib["c"][i]
+            return (cx + (E[i][0] - cx) * wide, cz + (E[i][1] - cz) * wide)
+
+        quads = []
+        for i in range(i0, i1, step):
+            j = min(n - 1, i + step)
+            q = cam.poly([(*(edge(rib["L"], i)[:1]), 0.0, edge(rib["L"], i)[1]), (edge(rib["R"], i)[0], 0.0, edge(rib["R"], i)[1]),
+                          (edge(rib["R"], j)[0], 0.0, edge(rib["R"], j)[1]), (edge(rib["L"], j)[0], 0.0, edge(rib["L"], j)[1])])
+            if q:
+                quads.append((q[1], q[0], i))
+        quads.sort(key=lambda x: -x[0])
+        for dep, flat, i in quads:
+            c.create_polygon(*flat, fill="#2d323a", outline="#2d323a")
+        for dep, flat, i in quads:
+            kerb = "#d93a32" if (i // 2) % 2 else "#e8e8e8"
+            j = min(n - 1, i + step)
+            for E in (rib["L"], rib["R"]):
+                a_, b_ = edge(E, i), edge(E, j)
+                s_ = cam.line((a_[0], 0.0, a_[1]), (b_[0], 0.0, b_[1]))
+                if s_:
+                    c.create_line(*s_[0], fill=kerb, width=2)
+        # старт/финиш
+        for dd in (0.0,):
+            j = bisect.bisect_left(rib["d"], dd)
+            if i0 <= j < i1 or mode != "chase":
+                if j < n - 1:
+                    q = cam.poly([(rib["L"][j][0], 0.01, rib["L"][j][1]), (rib["R"][j][0], 0.01, rib["R"][j][1]),
+                                  (rib["R"][j + 1][0], 0.01, rib["R"][j + 1][1]), (rib["L"][j + 1][0], 0.01, rib["L"][j + 1][1])])
+                    if q:
+                        c.create_polygon(*q[0], fill="#ffffff", outline="")
+        # траектории
+        for key in ("A", "B"):
+            dd = self.data.get(key)
+            if not (dd and dd["ok"]):
+                continue
+            lap = dd["lap"]
+            xs, zs, br, ds = lap.c["x"], lap.c["z"], lap.c["brk"], lap.c["d"]
+            col = COL_A if key == "A" else COL_B
+            if mode == "chase":
+                ref = next((x for x in cars if x["key"] == key), None)
+                dref = ref["d"] if ref else 0.0
+                lo, hi = bisect.bisect_left(ds, dref - 60), bisect.bisect_right(ds, dref + 300)
+                st = max(1, (hi - lo) // 120)
+            else:
+                lo, hi, st = 0, lap.n - 1, max(1, lap.n // 700)
+            for i in range(lo, hi - st, st):
+                if not (xs[i] or zs[i]) or not (xs[i + st] or zs[i + st]):
+                    continue
+                s = cam.line((xs[i], 0.03, zs[i]), (xs[i + st], 0.03, zs[i + st]))
+                if s:
+                    c.create_line(*s[0], fill="#ff3b30" if br[i] > 0.1 else col, width=3 if mode == "chase" else 2)
+        for car in sorted(cars, key=lambda x: -cam.to(x["x"], 0, x["z"])[2]):
+            self.car_3d(cam, car, mode)
+
+    def car_3d(self, cam, car, mode):
+        c = self.cv
+        fx, fz = car["hx"], car["hz"]
+        rx, rz = -fz, fx
+        s = 1.0 if mode == "chase" else 3.0   # на обзорном виде машины крупнее, иначе их не видно
+        col = car["col"]
+        braking = car["brk"] > 0.1
+
+        def box(l0, l1, w, h0, h1, back, top):
+            def pt(lf, lr, h):
+                return (car["x"] + (fx * lf + rx * lr * w) * s, h * s, car["z"] + (fz * lf + rz * lr * w) * s)
+            return [
+                ([pt(l0, -1, h0), pt(l0, 1, h0), pt(l0, 1, h1), pt(l0, -1, h1)], back),
+                ([pt(l1, -1, h0), pt(l1, 1, h0), pt(l1, 1, h1), pt(l1, -1, h1)], _shade(col, 0.9)),
+                ([pt(l0, -1, h0), pt(l1, -1, h0), pt(l1, -1, h1), pt(l0, -1, h1)], _shade(col, 0.68)),
+                ([pt(l0, 1, h0), pt(l1, 1, h0), pt(l1, 1, h1), pt(l0, 1, h1)], _shade(col, 0.68)),
+                ([pt(l0, -1, h1), pt(l0, 1, h1), pt(l1, 1, h1), pt(l1, -1, h1)], top),
+            ]
+
+        faces = box(-2.3, 2.3, 0.95, 0.15, 0.7, "#ff2b2b" if braking else _shade(col, 0.5), col)
+        faces += box(-1.0, 0.6, 0.6, 0.7, 1.15, _shade(col, 0.5), "#1c2430")
+        out = []
+        for pts, fill in faces:
+            q = cam.poly(pts)
+            if q:
+                out.append((q[1], q[0], fill))
+        out.sort(key=lambda x: -x[0])
+        for dep, flat, fill in out:
+            c.create_polygon(*flat, fill=fill, outline="#0e1116")
+        top = cam.to(car["x"], 1.15 * s + 0.9, car["z"])
+        if top[2] > cam.NEAR:
+            sx, sy = cam.scr(top)
+            c.create_text(sx, sy - 6, text=car["key"], fill=col, font=("Segoe UI Semibold", 11))
+
+
 class TelemetryView(ttk.Frame):
     """Просмотр телеметрии как в MoTeC: ряды по дистанции с общим курсором, масштаб колесом, сравнение двух кругов."""
 
@@ -7611,6 +8115,7 @@ class TelemetryView(ttk.Frame):
             self.strip_vars[k] = v
             menu.add_checkbutton(label=tr(", ".join(name.split(", ")[:-1]) or name), variable=v, command=self.strips_changed)
         mb.pack(side="left")
+        ttk.Button(bar, text=tr("Трасса 3D ▸"), command=self.open_track).pack(side="left", padx=(8, 0))
         self.legend = ttk.Label(bar, text=tr("Колесо — масштаб, перетаскивание — сдвиг, двойной щелчок — весь круг"), style="Dim.TLabel")
         self.legend.pack(side="left", padx=12)
         self.cv = tk.Canvas(right, bg=UI_FIELD, highlightthickness=1, highlightbackground=UI_BORDER, height=420)
@@ -7731,6 +8236,19 @@ class TelemetryView(ttk.Frame):
         self.cur_d = None
         self.draw_map()
         self.redraw()
+        if getattr(self, "track", None) is not None:
+            self.track.reload()
+
+    def open_track(self):
+        tw = getattr(self, "track", None)
+        if tw is not None:
+            try:
+                tw.deiconify()
+                tw.lift()
+                return
+            except tk.TclError:
+                pass
+        self.track = TrackWindow(self)
 
     def strips_changed(self):
         self.on = [k for k, _, _, _ in STRIPS if self.strip_vars[k].get()] or ["spd"]
@@ -7902,6 +8420,8 @@ class TelemetryView(ttk.Frame):
                 c.create_text(L + 8, T + i * sh + 8, text=tr(title), fill=UI_DIM, anchor="w", font=("Segoe UI", 8), tags="cur")
             return
         c.create_line(x, T, x, H - Bm, fill=UI_FG, tags="cur")
+        if getattr(self, "track", None) is not None:
+            self.track.on_chart(d)
         for i, (key, title, series, fixed) in enumerate(strips):
             y0 = T + i * sh
             parts = []

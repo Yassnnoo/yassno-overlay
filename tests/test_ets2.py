@@ -818,3 +818,69 @@ class LauncherLook(unittest.TestCase):
         finally:
             L.UI_ANIM = old
             root.destroy()
+
+
+class TrackWindowTests(unittest.TestCase):
+    """Окно «Трасса» в телеметрии: камера и три вида на синтетическом круге."""
+
+    @staticmethod
+    def lap_raw(shift, T, no):
+        import math
+        L = yassno_launcher
+        cols = {k: [0.0] * 600 for k in L.TEL_COLS}
+        for i in range(600):
+            f = i / 599
+            a = 2 * math.pi * f
+            r = 400 + 100 * math.sin(3 * a)
+            cols["x"][i], cols["z"][i] = r * math.cos(a) + shift * math.sin(2 * a), 0.7 * r * math.sin(a)
+            cols["t"][i], cols["d"][i] = T * f, 3000 * f
+            cols["spd"][i] = 150 + 60 * math.sin(5 * a)
+            cols["brk"][i] = 1.0 if math.sin(5 * a) < -0.8 else 0.0
+            cols["gear"][i] = 4
+        return {"lap": no, "time": T, "cols": cols}
+
+    def test_camera_projection(self):
+        L = yassno_launcher
+        cam = L.Cam3(0, 2, 0, 0, -1, 0.0, 800, 600, 800)
+        a = cam.to(0, 2, -10)                      # прямо по курсу, на высоте камеры
+        sx, sy = cam.scr(a)
+        self.assertAlmostEqual(sx, 400, delta=0.5)
+        self.assertAlmostEqual(sy, 300, delta=0.5)
+        r = cam.scr(cam.to(5, 2, -10))             # справа от курса -> правее центра
+        self.assertGreater(r[0], 400)
+        self.assertIsNone(cam.line((0, 0, 5), (0, 0, 8)))   # всё позади камеры
+        self.assertIsNotNone(cam.poly([(-1, 0, -5), (1, 0, -5), (1, 0, 5), (-1, 0, 5)]))  # режется near-плоскостью
+
+    def test_three_views_and_playback(self):
+        import gzip, json, tempfile, tkinter as tk
+        L = yassno_launcher
+        d = tempfile.mkdtemp()
+        fps = []
+        for i, (sh, T) in enumerate(((0.0, 90.0), (6.0, 91.5))):
+            fp = os.path.join(d, f"{i}.json.gz")
+            with gzip.open(fp, "wt") as f:
+                json.dump(self.lap_raw(sh, T, i + 1), f)
+            fps.append(fp)
+        root = tk.Tk()
+        try:
+            h = tk.Frame(root)
+            h.A, h.B, h.lap, h.cur_d, h.track = fps[0], fps[1], L.load_tlap, None, None
+            h.draw_cursor = lambda: None
+            h.app = type("A", (), {"cfg": {}, "save_cfg": lambda s: None})()
+            tw = L.TrackWindow(h)
+            tw.update()
+            self.assertAlmostEqual(tw.tmax, 91.5, delta=0.1)
+            for m in ("top", "chase", "orbit"):
+                tw.mode.set(m)
+                for t in (0.0, 45.0, 91.5):
+                    tw.t = t
+                    tw.draw()
+                    self.assertGreater(len(tw.cv.find_all()), 20, (m, t))
+            tw.t = 45.0
+            a, b = tw.car("A"), tw.car("B")
+            self.assertGreater(a["d"], b["d"])            # A быстрее: к 45 с уже дальше по трассе
+            tw.on_chart(1500)
+            self.assertAlmostEqual(tw.car("A")["d"], 1500, delta=30)
+            tw.close()
+        finally:
+            root.destroy()
