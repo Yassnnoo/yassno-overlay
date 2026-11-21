@@ -75,7 +75,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.11.0"
+APP_VERSION = "3.11.1"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -94,9 +94,9 @@ ELEMENTS = [("standings", "Таблица (стендинг)"), ("relative", "Р
             ("fuel", "Топливный калькулятор"), ("delta", "Дельта к лучшему кругу"), ("alerts", "Предупреждения"),
             ("tyres", "Шины и тормоза"), ("pitplan", "Пит-стоп и стинт"), ("gaps", "Соперники: гэпы и тренд"),
             ("engine", "Двигатель и расход"), ("sesstime", "Таймер сессии"), ("clock", "Локальное время"), ("speedo", "Спидометр"), ("laplog", "Журнал кругов"), ("micro", "Микро-сектора дельты"), ("bestlap", "Лучший круг гонки")]
-PRESETS = [("Эндуро", ("standings", "relative", "trackmap", "weather", "fuel", "delta", "alerts", "tyres", "pitplan", "gaps", "engine", "sesstime", "limiter", "laplog")),
-           ("Спринт", ("standings", "relative", "pedals", "shiftlight", "trackmap", "radar", "lights", "limiter", "fuel", "delta", "alerts", "tyres", "laplog")),
-           ("Для стрима", ("standings", "pedals", "trackmap", "weather", "delta", "alerts", "sesstime", "clock", "speedo")),
+PRESETS = [("Эндуро", ("standings", "relative", "trackmap", "weather", "fuel", "delta", "alerts", "tyres", "pitplan", "gaps", "engine", "sesstime", "limiter", "laplog", "bestlap")),
+           ("Спринт", ("standings", "relative", "pedals", "shiftlight", "trackmap", "radar", "lights", "limiter", "fuel", "delta", "alerts", "tyres", "laplog", "bestlap")),
+           ("Для стрима", ("standings", "pedals", "trackmap", "weather", "delta", "alerts", "sesstime", "clock", "speedo", "bestlap")),
            ("Минимум", ("relative", "delta", "alerts", "limiter", "lights"))]
 # список панелей слева: (ключ страницы, название, ключ включения или None)
 PAGES = [("general", "Раскладка и вид", None), ("standings", "Таблица", "standings"), ("relative", "Релатив", "relative"),
@@ -5398,7 +5398,9 @@ class ProfilePanel(ttk.Frame):
                 sc = self.num(self.SCALE_KEY.get(e, "scale_" + e), 1.0) if (self.SCALE_KEY.get(e, "scale_" + e) in self.v) else 1.0
                 w, h = dw * sc * k_ * float(vals.get("sx_" + e, 1.0) or 1.0), dh * sc * k_ * float(vals.get("sy_" + e, 1.0) or 1.0)
                 x, y = vals.get(xk), vals.get(yk)
-                if not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
+                if e == "bestlap" and not (isinstance(x, (int, float)) and isinstance(y, (int, float))):
+                    x, y = b[0] + (b[2] - w) / 2, b[1] + b[3] * 0.18      # как в самом оверлее: по центру сверху
+                elif not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
                     x, y = fx, fy                           # окно ещё ни разу не ставили: раскладываем лесенкой
                     fy += h + 16
                     if fy > b[1] + b[3] * 0.8:
@@ -7205,6 +7207,8 @@ def tel_files(session_path):
 
 _ROAD_LAPS = {}
 SEC_COLORS = ("#ffffff", "#f5b921", "#5fd37a")
+GRASS_A, GRASS_B, GRASS_FAR = "#3f7a35", "#386f2f", "#2b5426"       # газон вдоль трассы (две полосы покоса) и дальний фон
+ASPHALT, ASPHALT_LT = "#2b2f36", "#3a3f48"
 
 
 def lap_sector_dists(fp, lap=None):
@@ -8231,9 +8235,23 @@ class TrackPanel(ttk.Frame):
             ys_ = [q[1] for q in ps]
             return max(xs_) > -m and min(xs_) < W + m and max(ys_) > -m and min(ys_) < H + m
         on = [vis(Lp[i], Rp[i], Rp[i + 1], Lp[i + 1]) for i in range(n - 1)]
+        c.create_rectangle(0, 0, W, H, fill=GRASS_FAR, outline="")
+        gpx = 26.0 * k                                      # газон вдоль дороги, метры -> пиксели
+
+        def out_pt(P, C):
+            vx, vy = P[0] - C[0], P[1] - C[1]
+            h_ = math.hypot(vx, vy) or 1.0
+            return (P[0] + vx / h_ * gpx, P[1] + vy / h_ * gpx)
+        Lo, Ro = [out_pt(Lp[i], pts[i]) for i in range(n)], [out_pt(Rp[i], pts[i]) for i in range(n)]
         for i in range(n - 1):
             if on[i]:
-                c.create_polygon(*Lp[i], *Rp[i], *Rp[i + 1], *Lp[i + 1], fill="#2b2f36", outline="#2b2f36")
+                gcol = GRASS_A if (i // 6) % 2 else GRASS_B
+                c.create_polygon(*Lp[i], *Lo[i], *Lo[i + 1], *Lp[i + 1], fill=gcol, outline=gcol)
+                c.create_polygon(*Rp[i], *Ro[i], *Ro[i + 1], *Rp[i + 1], fill=gcol, outline=gcol)
+        for i in range(n - 1):
+            if on[i]:
+                acol = mix(ASPHALT, ASPHALT_LT, ((i * 37) % 7) / 6.0 * 0.55 + (0.25 if (i // 3) % 2 else 0.0))
+                c.create_polygon(*Lp[i], *Rp[i], *Rp[i + 1], *Lp[i + 1], fill=acol, outline=acol)
         lw = 1 if k < 1.5 else 2
         for i in range(n - 1):
             if on[i]:
@@ -8318,8 +8336,11 @@ class TrackPanel(ttk.Frame):
         if not cam:
             return
         hy = max(0, min(H, cam.horizon))
-        c.create_rectangle(0, 0, W, hy, fill="#1b2633", outline="")
-        c.create_rectangle(0, hy, W, H, fill="#141a14" if mode == "chase" else "#161c22", outline="")
+        bands = 28                                          # небо: градиент от тёмно-синего к светлому у горизонта
+        for b_ in range(bands):
+            y0, y1 = hy * b_ / bands, hy * (b_ + 1) / bands
+            c.create_rectangle(0, y0, W, y1 + 1, fill=mix("#2d5a8e", "#b4d3ea", (b_ / (bands - 1)) ** 1.3), outline="")
+        c.create_rectangle(0, hy, W, H, fill=GRASS_FAR, outline="")
         n = len(rib["c"])
         i0, i1 = 0, n - 1
         if mode == "chase":
@@ -8330,21 +8351,38 @@ class TrackPanel(ttk.Frame):
         else:
             step = 2 if n > 700 else 1
         wide = 1.0 if mode == "chase" else 1.0 + 1.4 * (self._cs - 1.0) / 2.0      # издали дорога шире, вблизи — как есть
+        gw = 34.0 if mode == "chase" else 22.0 * wide               # ширина газона по обе стороны дороги
 
         def edge(E, i):
             cx, cz = rib["c"][i]
             return (cx + (E[i][0] - cx) * wide, cz + (E[i][1] - cz) * wide)
 
-        quads = []
+        def outer(E, i):
+            (ex, ez), (cx, cz) = edge(E, i), rib["c"][i]
+            vx, vz = ex - cx, ez - cz
+            h_ = math.hypot(vx, vz) or 1.0
+            return (ex + vx / h_ * gw, ez + vz / h_ * gw)
+
+        quads, grass = [], []
         for i in range(i0, i1, step):
             j = min(n - 1, i + step)
             q = cam.poly([(*(edge(rib["L"], i)[:1]), 0.0, edge(rib["L"], i)[1]), (edge(rib["R"], i)[0], 0.0, edge(rib["R"], i)[1]),
                           (edge(rib["R"], j)[0], 0.0, edge(rib["R"], j)[1]), (edge(rib["L"], j)[0], 0.0, edge(rib["L"], j)[1])])
             if q:
                 quads.append((q[1], q[0], i))
+            for E in (rib["L"], rib["R"]):
+                a_, b_, ao, bo = edge(E, i), edge(E, j), outer(E, i), outer(E, j)
+                g = cam.poly([(a_[0], 0.0, a_[1]), (ao[0], 0.0, ao[1]), (bo[0], 0.0, bo[1]), (b_[0], 0.0, b_[1])])
+                if g:
+                    grass.append((g[1], g[0], i))
+        grass.sort(key=lambda x: -x[0])
+        for dep, flat, i in grass:                          # газон вдоль трассы: полосы скошенной травы
+            col = GRASS_A if (i // 6) % 2 else GRASS_B
+            c.create_polygon(*flat, fill=col, outline=col)
         quads.sort(key=lambda x: -x[0])
-        for dep, flat, i in quads:
-            c.create_polygon(*flat, fill="#2d323a", outline="#2d323a")
+        for dep, flat, i in quads:                          # асфальт: чуть «зернистый», тон слегка гуляет от куска к куску
+            col = mix(ASPHALT, ASPHALT_LT, ((i * 37) % 7) / 6.0 * 0.55 + (0.25 if (i // 3) % 2 else 0.0))
+            c.create_polygon(*flat, fill=col, outline=col)
         for dep, flat, i in quads:
             kerb = "#d93a32" if (i // 2) % 2 else "#e8e8e8"
             j = min(n - 1, i + step)
@@ -8353,6 +8391,13 @@ class TrackPanel(ttk.Frame):
                 s_ = cam.line((a_[0], 0.0, a_[1]), (b_[0], 0.0, b_[1]))
                 if s_:
                     c.create_line(*s_[0], fill=kerb, width=2)
+                ci = rib["c"][i]
+                cj = rib["c"][j]
+                ai = (a_[0] + (ci[0] - a_[0]) * 0.05, a_[1] + (ci[1] - a_[1]) * 0.05)       # белая линия по краю асфальта
+                bi = (b_[0] + (cj[0] - b_[0]) * 0.05, b_[1] + (cj[1] - b_[1]) * 0.05)
+                s2 = cam.line((ai[0], 0.0, ai[1]), (bi[0], 0.0, bi[1]))
+                if s2:
+                    c.create_line(*s2[0], fill="#aeb4bd", width=1)
         # старт/финиш
         for dd in (0.0,):
             j = bisect.bisect_left(rib["d"], dd)
@@ -8410,6 +8455,8 @@ class TrackPanel(ttk.Frame):
             mid = cam.to((Lj[0] + Rj[0]) / 2, hgt, (Lj[1] + Rj[1]) / 2)
             if mid[2] > cam.NEAR:
                 sx, sy = cam.scr(mid)
+                for dx, dy in ((1, 1), (-1, 1), (1, -1), (-1, -1)):          # тень, чтобы надпись читалась на светлом небе
+                    c.create_text(sx + dx, sy - 10 + dy, text=label, fill="#0b0e13", font=("Segoe UI Semibold", 11))
                 c.create_text(sx, sy - 10, text=label, fill=col, font=("Segoe UI Semibold", 11))
 
     def model_kind(self):
