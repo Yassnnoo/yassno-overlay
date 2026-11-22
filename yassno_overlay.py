@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "3.11.10"
+APP_VERSION = "3.11.11"
 import argparse
 import bisect
 import collections
@@ -1413,6 +1413,9 @@ class BgCanvas(tk.Canvas):
     def _mirror(self, kind, a, kw):
         """Подложку рисуем в нижнем окне с настоящей полупрозрачностью, а в этом окне она становится «прозрачным» цветом KEY."""
         if self.back is not None and self._surface(kw.get("fill")):
+            if not getattr(self, "_sync_q", False):             # после перерисовки подгоняем окно-подложку под размер и позицию окна
+                self._sync_q = True
+                self.after_idle(self._sync_now)
             kw2 = dict(kw)
             kw2["outline"] = ""
             kw2.pop("stipple", None)
@@ -1511,12 +1514,17 @@ class BgCanvas(tk.Canvas):
         except tk.TclError:
             pass
 
+    def _sync_now(self):
+        self._sync_q = False
+        self.back_sync()
+
     def back_sync(self):
         bt = self.back_top
         if bt is None or self.back is None:
             return
         try:
             top = self.winfo_toplevel()
+            top.update_idletasks()
             w, h = max(1, top.winfo_width()), max(1, top.winfo_height())
             g = f"{w}x{h}+{top.winfo_x()}+{top.winfo_y()}"
             if g != getattr(self, "_back_g", ""):
@@ -6581,12 +6589,14 @@ class Overlay:
             self.root.attributes("-topmost", True)
             self.root.lift()
             if self.canvas.back is not None:
+                self.canvas.back_sync()
                 self.canvas.back_restack()
             for w in self.subs:
                 if self.cfg.get(w.ON, True):
                     w.top.attributes("-topmost", True)
                     w.top.lift()
                     if getattr(w.canvas, "back", None) is not None:
+                        w.canvas.back_sync()
                         w.canvas.back_restack()
             mp = getattr(self, "move_panel", None)
             if mp is not None:                                  # окно режима перемещения — всегда поверх оверлеев
