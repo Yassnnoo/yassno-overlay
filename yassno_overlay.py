@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "3.11.6"
+APP_VERSION = "3.11.7"
 import argparse
 import bisect
 import collections
@@ -1332,11 +1332,46 @@ def parse_hotkey(text):
     return vks + [key] if key and vks else None
 
 
+def _bayer8():
+    """Матрица упорядоченного дизеринга 8×8 (значения 0…63)."""
+    m = [[0, 2], [3, 1]]
+    while len(m) < 8:
+        n = len(m)
+        m = [[4 * m[y % n][x % n] + (0, 2, 3, 1)[(y // n) * 2 + (x // n)] for x in range(2 * n)] for y in range(2 * n)]
+    return m
+
+
+_STIP = {}
+
+
+def _stipple_file(k):
+    """Растр 8×8, где закрашено k из 64 точек (XBM в папке cache рядом с программой); None — если записать не удалось."""
+    try:
+        d = os.path.join(HERE, "cache")
+        os.makedirs(d, exist_ok=True)
+        path = os.path.join(d, f"st{k:02d}.xbm")
+        if not os.path.exists(path):
+            bay = _bayer8()
+            rows = [sum(1 << x for x in range(8) if bay[y][x] < k) for y in range(8)]
+            with open(path, "w", encoding="ascii") as f:
+                f.write("#define st_width 8\n#define st_height 8\nstatic unsigned char st_bits[] = {\n  "
+                        + ", ".join(f"0x{r:02x}" for r in rows) + "};\n")
+        return "@" + path.replace("\\", "/")
+    except OSError:
+        return None
+
+
 def stipple_for(op):
-    """Растр для фона окна при прозрачности op (0.2–1.0): чем меньше, тем реже точки фона; 1.0 — сплошной."""
-    if op >= 0.9:
+    """Растр для фона окна при прозрачности op (0.1–1.0): 64 плавные ступени (упорядоченный дизеринг), у 0.94 и выше — сплошной.
+    Раньше было всего четыре ступени (≥0.9 — сплошной, 0.65–0.9 — «gray75» и т. д.), поэтому 91% и 89% выглядели совсем по-разному."""
+    cov = min(1.0, max(0.0, float(op)) / 0.94)
+    if cov >= 0.985:
         return ""
-    return "gray75" if op >= 0.65 else "gray50" if op >= 0.4 else "gray25" if op >= 0.25 else "gray12"
+    k = max(2, min(63, int(round(cov * 64))))
+    st = _STIP.get(k)
+    if st is None:
+        st = _STIP[k] = _stipple_file(k) or ("gray75" if op >= 0.65 else "gray50" if op >= 0.4 else "gray25" if op >= 0.25 else "gray12")
+    return st
 
 
 class BgCanvas(tk.Canvas):
