@@ -75,7 +75,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.11.15"
+APP_VERSION = "3.11.16"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -5304,8 +5304,9 @@ class ProfilePanel(ttk.Frame):
 
     def ed_state(self):
         st = read_json(os.path.splitext(profile_path(self.game))[0] + ".state")
-        fresh = isinstance(st.get("ts"), (int, float)) and time.time() - st["ts"] < 5 and self.app.runner.running() \
-            and self.app.runner.game == self.game
+        # свежий state значит, что оверлей этой игры жив и пишет данные — даже если его запустил прошлый экземпляр лаунчера
+        # (после перезапуска или обновления лаунчера runner его уже не «помнит», и раньше редактор показывал «Демо — игра не запущена»)
+        fresh = isinstance(st.get("ts"), (int, float)) and time.time() - st["ts"] < 5
         return st if fresh else {}
 
     def ed_mons(self, sig):
