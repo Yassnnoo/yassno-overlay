@@ -75,7 +75,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.11.5"
+APP_VERSION = "3.11.6"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -1525,6 +1525,8 @@ EN.update({
     "зайдите на трассу с оверлеем": "go on track with the overlay", "Подобрать сетап в игру": "Find a setup for the game",
     "HYMO и P1Doks — бесплатные сетапы, авторы разрешили их раздавать.": "HYMO and P1Doks are free setups shared with the authors' permission.",
     "Сетапы пока есть только для Le Mans Ultimate.": "Setups are only available for Le Mans Ultimate for now.",
+    "Личные рекорды": "Personal bests",
+    "Пока нет записанных кругов. Рекорды появятся после первой сессии с оверлеем.": "No laps recorded yet. Records appear after your first session with the overlay.",
     "Для этой игры нет программ-спутников.": "No companion programs for this game.", "своя": "custom",
     "Сам определять игру и запускать оверлей": "Detect the game and start the overlay", "Автозапуск оверлея с игрой": "Auto-start overlay with the game", "Закрывать вместе с игрой": "Close with the game", "ГОТОВО К ГОНКЕ": "READY TO RACE", "Только оверлей": "Overlay only",
     "Настроить панели →": "Set up panels →", "Статус": "Status", "Телеметрия": "Telemetry", "Последняя сессия": "Last session",
@@ -11321,7 +11323,7 @@ class HomePage(tk.Frame):
             self.set_card(2, "Грузовик", "Оверлей ETS 2", self.app.show_ets2)
         else:
             self.set_card(0, "Последняя сессия", "Вся статистика", self.app.show_stats)
-            self.set_card(1, "Сетапы HYMO", "", None)
+            self.set_card(1, "Сетапы HYMO" if g == "lmu" else "Личные рекорды", "", None)
             self.set_card(2, "Запускать вместе с игрой", "Настроить", lambda: self.open_panel("apps"))
         self.c_set_badge.pack_forget()
         try:
@@ -11761,6 +11763,9 @@ class HomePage(tk.Frame):
         for w in body.winfo_children():
             w.destroy()
         badge.pack_forget()
+        if self.app.selected in ("rf2", "iracing"):
+            self.fill_records(body, self.app.selected)
+            return
         if self.app.selected != "lmu" or setups is None:
             tk.Label(body, text=tr("Сетапы пока есть только для Le Mans Ultimate."), bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 10),
                      justify="left", anchor="w", wraplength=320).pack(fill="x")
@@ -11783,6 +11788,32 @@ class HomePage(tk.Frame):
         b.pack(fill="x", pady=(12, 0))
         ttk.Button(b, text="Подобрать сетап в игру", style="Accent.TButton" if fresh else "TButton",
                    command=self.find_setups).pack(side="left")
+
+    def fill_records(self, body, g):
+        """«Личные рекорды»: лучший круг по каждой трассе из записанных сессий этой игры (последние по времени — сверху)."""
+        best = {}                                           # трасса -> (время, машина); порядок — от свежих трасс к старым
+        for _, d in load_sessions():
+            if d.get("game") != g or not d.get("track"):
+                continue
+            times = [x["time"] for x in d.get("laps", []) if isinstance(x, dict) and isinstance(x.get("time"), (int, float)) and x["time"] > 20]
+            cur = best.get(d["track"])
+            if times and (cur is None or min(times) < cur[0]):
+                best[d["track"]] = (min(times), str(d.get("car") or d.get("cls") or ""))
+            elif d["track"] not in best:
+                best[d["track"]] = (None, "")
+        rows = [(t, v) for t, v in best.items() if v[0]][:4]
+        if not rows:
+            tk.Label(body, text=tr("Пока нет записанных кругов. Рекорды появятся после первой сессии с оверлеем."), bg=UI_PANEL, fg=UI_DIM,
+                     font=("Segoe UI", 10), justify="left", anchor="w", wraplength=320).pack(fill="x")
+            return
+        top = min(v[0] for _, v in rows)
+        for track, (t, car) in rows:
+            r = tk.Frame(body, bg=UI_PANEL)
+            r.pack(fill="x")
+            tk.Label(r, text=track, bg=UI_PANEL, fg=UI_FG, font=("Segoe UI", 10), pady=8, anchor="w").pack(side="left")
+            tk.Label(r, text=fmt_time(t), bg=UI_PANEL, fg=UI_ACCENT if t == top and len(rows) > 1 else UI_FG,
+                     font=("Consolas", 11, "bold")).pack(side="right")
+            tk.Frame(body, bg=UI_BORDER, height=1).pack(fill="x")
 
     def find_setups(self):
         self.app.show_setups()
