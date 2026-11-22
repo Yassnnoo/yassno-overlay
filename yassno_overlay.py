@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "3.11.8"
+APP_VERSION = "3.11.9"
 import argparse
 import bisect
 import collections
@@ -1407,15 +1407,115 @@ class BgCanvas(tk.Canvas):
     def _surface(self, fill):
         return fill in (BG, HDR_BG, ROW_A, ROW_B, ME_BG, WeatherWindow.CARD)
 
+    back = None                                                 # холст окна-подложки (режим «настоящей» прозрачности) или None
+    back_top = None
+
+    def _mirror(self, kind, a, kw):
+        """Подложку рисуем в нижнем окне с настоящей полупрозрачностью, а в этом окне она становится «прозрачным» цветом KEY."""
+        if self.back is not None and self._surface(kw.get("fill")):
+            kw2 = dict(kw)
+            kw2["outline"] = ""
+            kw2.pop("stipple", None)
+            getattr(self.back, kind)(*a, **kw2)
+            kw = dict(kw, fill=KEY)
+        return kw
+
     def create_rectangle(self, *a, **kw):
+        kw = self._mirror("create_rectangle", a, kw)
         if self.stipple and "stipple" not in kw and self._surface(kw.get("fill")):
             kw["stipple"] = self.stipple
         return super().create_rectangle(*a, **kw)
 
     def create_polygon(self, *a, **kw):
+        kw = self._mirror("create_polygon", a, kw)
         if self.stipple and "stipple" not in kw and self._surface(kw.get("fill")):
             kw["stipple"] = self.stipple
         return super().create_polygon(*a, **kw)
+
+    def delete(self, *a):
+        if self.back is not None and a and a[0] == "all":
+            try:
+                self.back.delete("all")
+            except tk.TclError:
+                pass
+        return super().delete(*a)
+
+    def back_on(self, alpha):
+        """Включает окно-подложку с прозрачностью alpha (создаёт при первом разе). True — если режим только что включился."""
+        top = self.winfo_toplevel()
+        fresh = self.back is None
+        if self.back_top is None:
+            bt = tk.Toplevel(top)
+            bt.overrideredirect(True)
+            bt.configure(bg=KEY)
+            bt.attributes("-topmost", True)
+            try:
+                bt.attributes("-transparentcolor", KEY)
+            except tk.TclError:
+                pass
+            self._back_cv = tk.Canvas(bt, bg=KEY, highlightthickness=0)
+            self._back_cv.pack(fill="both", expand=True)
+            self.back_top = bt
+            top.bind("<Configure>", lambda e, t=top: self.back_sync() if e.widget is t else None, add="+")
+            top.bind("<Map>", lambda e, t=top: self.back_vis(True) if e.widget is t else None, add="+")
+            top.bind("<Unmap>", lambda e, t=top: self.back_vis(False) if e.widget is t else None, add="+")
+            try:
+                bt.update_idletasks()
+                set_click_through(bt, True)
+            except tk.TclError:
+                pass
+        self.back = self._back_cv
+        try:
+            self.back_top.attributes("-alpha", alpha)
+        except tk.TclError:
+            pass
+        self.back_sync()
+        self.back_vis(True)
+        return fresh
+
+    def back_off(self):
+        if self.back is not None:
+            self.back = None
+            try:
+                self._back_cv.delete("all")
+            except tk.TclError:
+                pass
+        self.back_vis(False)
+
+    def back_vis(self, show):
+        bt = self.back_top
+        if bt is None:
+            return
+        try:
+            if show and self.back is not None and self.winfo_toplevel().state() != "withdrawn":
+                bt.deiconify()
+                self.back_restack()
+            else:
+                bt.withdraw()
+        except tk.TclError:
+            pass
+
+    def back_sync(self):
+        bt = self.back_top
+        if bt is None or self.back is None:
+            return
+        try:
+            top = self.winfo_toplevel()
+            w, h = max(1, top.winfo_width()), max(1, top.winfo_height())
+            g = f"{w}x{h}+{top.winfo_x()}+{top.winfo_y()}"
+            if g != getattr(self, "_back_g", ""):
+                self._back_g = g
+                bt.geometry(g)
+        except tk.TclError:
+            pass
+
+    def back_restack(self):
+        """Подложка — сразу под окном с текстом (обе поверх игры)."""
+        try:
+            self.back_top.attributes("-topmost", True)
+            self.back_top.lower(self.winfo_toplevel())
+        except tk.TclError:
+            pass
 
 
 def draw_rrect(canvas, x1, y1, x2, y2, r, fill="", outline=""):
@@ -5552,7 +5652,7 @@ class Overlay:
         for k, v in (("delta", True), ("alerts", True), ("tyres", False), ("pitplan", False), ("gaps", False), ("engine", False),
                      ("sesstime", False), ("clock", False), ("speedo", False), ("laplog", False), ("micro", False), ("bestlap", False), ("bestlap_hold", 6), ("bestlap_class", False), ("bestlap_plate", False), ("micro_n", 20), ("laplog_count", 5), ("laplog_best", True), ("laplog_delta", True),
                      ("laplog_temp", True), ("laplog_ref", "prev"), ("laplog_newest", True), ("speedo_view", "arc"), ("speedo_max", 340), ("st_session", True), ("st_timer", True), ("st_clock", True),
-                     ("op_bg_only", True), ("text_outline", True), ("lmu_menu_hide", True), ("map_pit", True), ("map_turns", True), ("map_brake", True), ("st_poscol", True), ("st_battle", True), ("st_pitinfo", True), ("st_radio", True),
+                     ("op_bg_only", True), ("text_outline", True), ("true_alpha", True), ("lmu_menu_hide", True), ("map_pit", True), ("map_turns", True), ("map_brake", True), ("st_poscol", True), ("st_battle", True), ("st_pitinfo", True), ("st_radio", True),
                      ("delta_show_session", True), ("delta_show_mine", True), ("delta_show_pred", True)):
             cfg.setdefault(k, v)
         self.logo_dir = logo_dir
@@ -5900,16 +6000,31 @@ class Overlay:
         """Прозрачность окна: либо только фон (растр, текст чёткий), либо старый режим — всё окно целиком."""
         if hidden:
             top.attributes("-alpha", 0.0)
+            canvas.back_vis(False)
             return
         if self.cfg.get("op_bg_only", True) and self.rounded:
-            st = stipple_for(op)
-            ol = bool(st) and bool(self.cfg.get("text_outline", True))
+            cov = min(1.0, op / 0.94)
+            dual = (bool(self.cfg.get("true_alpha", True)) and getattr(self, "locked", True) and cov < 0.985
+                    and (os.name == "nt" or os.environ.get("YASSNO_DUAL")))
+            changed = False
+            if dual:
+                changed = canvas.back_on(max(0.1, cov))
+                st = ""
+            else:
+                if canvas.back is not None:
+                    canvas.back_off()
+                    changed = True
+                st = stipple_for(op)
+            ol = (bool(st) or dual) and bool(self.cfg.get("text_outline", True))
             if st != canvas.stipple or ol != canvas.outline:
                 canvas.stipple, canvas.outline = st, ol
-                if on_change:
-                    on_change()
+                changed = True
+            if changed and on_change:
+                on_change()
             top.attributes("-alpha", 1.0)
         else:
+            if canvas.back is not None:
+                canvas.back_off()
             if canvas.stipple or canvas.outline:
                 canvas.stipple, canvas.outline = "", False
                 if on_change:
@@ -6228,6 +6343,10 @@ class Overlay:
             set_click_through(w.top, self.locked)
         if self.locked and not ok and os.name == "nt":
             print("Не удалось включить сквозные клики — окно останется кликабельным.")
+        try:
+            self.set_alpha()                                    # «настоящая» прозрачность включается только при закреплённых окнах
+        except Exception:
+            pass
 
     def toggle_lock(self):
         self.locked = not self.locked
@@ -6445,10 +6564,14 @@ class Overlay:
         try:
             self.root.attributes("-topmost", True)
             self.root.lift()
+            if self.canvas.back is not None:
+                self.canvas.back_restack()
             for w in self.subs:
                 if self.cfg.get(w.ON, True):
                     w.top.attributes("-topmost", True)
                     w.top.lift()
+                    if getattr(w.canvas, "back", None) is not None:
+                        w.canvas.back_restack()
             mp = getattr(self, "move_panel", None)
             if mp is not None:                                  # окно режима перемещения — всегда поверх оверлеев
                 mp.attributes("-topmost", True)

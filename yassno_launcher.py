@@ -75,7 +75,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.11.8"
+APP_VERSION = "3.11.9"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -533,7 +533,7 @@ DEFAULTS.update({"map_ir_svg": True, "weather_view": "cards", "map_style": "clas
 DEFAULTS.update({"tyres": False, "pitplan": False, "gaps": False, "engine": False, "engine_view": "table", "delta_sec_bar": True,
                  "sesstime": False, "clock": False, "speedo": False, "laplog": False, "micro": False, "bestlap": False, "bestlap_hold": 6, "bestlap_class": False, "bestlap_plate": False, "micro_n": 20, "laplog_count": 5, "laplog_best": True, "laplog_delta": True, "laplog_temp": True,
                  "laplog_ref": "prev", "laplog_newest": True, "speedo_view": "arc", "speedo_max": 340, "clock_seconds": True, "st_session": True, "st_timer": True, "st_clock": True, "st_poscol": True, "st_battle": True, "st_pitinfo": True, "st_radio": True,
-                 "win_style": "classic", "theme_mode": "dark", "op_bg_only": True, "text_outline": True, "op_all": 0.94, "lmu_menu_hide": True})        # эти панели по умолчанию выключены
+                 "win_style": "classic", "theme_mode": "dark", "op_bg_only": True, "text_outline": True, "true_alpha": True, "op_all": 0.94, "lmu_menu_hide": True})        # эти панели по умолчанию выключены
 POS_KEYS = ["x", "y", "rel_x", "rel_y", "ped_x", "ped_y", "map_x", "map_y", "radar_x", "radar_y",
             "wx_x", "wx_y", "lights_x", "lights_y", "lim_x", "lim_y", "fuel_x", "fuel_y",
             "delta_x", "delta_y", "alerts_x", "alerts_y", "tyres_x", "tyres_y", "pitplan_x", "pitplan_y", "gaps_x", "gaps_y", "engine_x", "engine_y", "sesstime_x", "sesstime_y", "clock_x", "clock_y", "speedo_x", "speedo_y", "laplog_x", "laplog_y", "micro_x", "micro_y", "bestlap_x", "bestlap_y"]
@@ -1992,6 +1992,7 @@ TIPS = {
     "Записывать статистику сессий": "Сохраняет итоги сессий в раздел «Статистика» лаунчера.",
     "Тема оверлеев": "Светлая или тёмная палитра для всех панелей сразу. Цвета потом можно подправить вручную.",
     "Стиль окон": "Форма углов и цветная метка у заголовков панелей.",
+    "Плавная прозрачность фона без сетки (когда окна закреплены)": "Smooth background transparency with no dot grid (when the windows are locked)",
     "Чёрная обводка светлого текста при прозрачном фоне": "Black outline on light text when the window background is transparent",
     "Прозрачность только у фона окон (текст чёткий)": "Ползунок «Непрозрачность» меняет только подложку окон (она рисуется мелким растром), текст и значки остаются чёткими. Выключите, если растр не нравится: тогда прозрачным становится всё окно целиком, как раньше.",
     "Раскладки окон": "Запоминать положение и размеры окон отдельно для практики, квалификации, гонки или класса машины.",
@@ -4271,6 +4272,7 @@ class ProfilePanel(ttk.Frame):
             self.mcombo(f, "Стиль окон", "win_style", width=34)
             self.slider(f, None, "Непрозрачность всех панелей", self.v["op_all"], 0.2, 1.0, pct, cmd=self.sync_op_all)
             self.tg(f, None, "Прозрачность только у фона окон (текст чёткий)", self.v["op_bg_only"])
+            self.tg(f, None, "Плавная прозрачность фона без сетки (когда окна закреплены)", self.v["true_alpha"])
             self.tg(f, None, "Чёрная обводка светлого текста при прозрачном фоне", self.v["text_outline"])
             self.mcombo(f, "Раскладки окон", "layout_mode", width=34)
             self.lay_info = ttk.Label(f, text="", style="Dim.TLabel", justify="left", wraplength=440)
