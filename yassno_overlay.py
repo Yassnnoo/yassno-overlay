@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "3.11.7"
+APP_VERSION = "3.11.8"
 import argparse
 import bisect
 import collections
@@ -1378,6 +1378,31 @@ class BgCanvas(tk.Canvas):
     """Холст, у которого прозрачность касается только фона окна: сплошные «подложки» рисуются растром (между точками
     окно прозрачно), а текст, полосы и значки остаются чёткими. Растр задаётся полем stipple."""
     stipple = ""
+    outline = False                                             # чёрная обводка светлого текста (включается при прозрачном фоне)
+    _light = None
+
+    def _is_light(self, fill):
+        if self._light is None:
+            self._light = {}
+        v = self._light.get(fill)
+        if v is None:
+            try:
+                r, g, b = self.winfo_rgb(fill)
+                v = (0.299 * r + 0.587 * g + 0.114 * b) / 65535 > 0.5
+            except (tk.TclError, TypeError):
+                v = False
+            self._light[fill] = v
+        return v
+
+    def create_text(self, *a, **kw):
+        fill = kw.get("fill")
+        if self.outline and fill and len(a) == 2 and kw.get("text") and self._is_light(fill):
+            kw0 = dict(kw)
+            kw0["fill"] = "#000000"
+            x, y = a
+            for dx, dy in ((-1, -1), (1, -1), (-1, 1), (1, 1)):
+                super().create_text(x + dx, y + dy, **kw0)
+        return super().create_text(*a, **kw)
 
     def _surface(self, fill):
         return fill in (BG, HDR_BG, ROW_A, ROW_B, ME_BG, WeatherWindow.CARD)
@@ -5527,7 +5552,7 @@ class Overlay:
         for k, v in (("delta", True), ("alerts", True), ("tyres", False), ("pitplan", False), ("gaps", False), ("engine", False),
                      ("sesstime", False), ("clock", False), ("speedo", False), ("laplog", False), ("micro", False), ("bestlap", False), ("bestlap_hold", 6), ("bestlap_class", False), ("bestlap_plate", False), ("micro_n", 20), ("laplog_count", 5), ("laplog_best", True), ("laplog_delta", True),
                      ("laplog_temp", True), ("laplog_ref", "prev"), ("laplog_newest", True), ("speedo_view", "arc"), ("speedo_max", 340), ("st_session", True), ("st_timer", True), ("st_clock", True),
-                     ("op_bg_only", True), ("lmu_menu_hide", True), ("map_pit", True), ("map_turns", True), ("map_brake", True), ("st_poscol", True), ("st_battle", True), ("st_pitinfo", True), ("st_radio", True),
+                     ("op_bg_only", True), ("text_outline", True), ("lmu_menu_hide", True), ("map_pit", True), ("map_turns", True), ("map_brake", True), ("st_poscol", True), ("st_battle", True), ("st_pitinfo", True), ("st_radio", True),
                      ("delta_show_session", True), ("delta_show_mine", True), ("delta_show_pred", True)):
             cfg.setdefault(k, v)
         self.logo_dir = logo_dir
@@ -5878,14 +5903,15 @@ class Overlay:
             return
         if self.cfg.get("op_bg_only", True) and self.rounded:
             st = stipple_for(op)
-            if st != canvas.stipple:
-                canvas.stipple = st
+            ol = bool(st) and bool(self.cfg.get("text_outline", True))
+            if st != canvas.stipple or ol != canvas.outline:
+                canvas.stipple, canvas.outline = st, ol
                 if on_change:
                     on_change()
             top.attributes("-alpha", 1.0)
         else:
-            if canvas.stipple:
-                canvas.stipple = ""
+            if canvas.stipple or canvas.outline:
+                canvas.stipple, canvas.outline = "", False
                 if on_change:
                     on_change()
             top.attributes("-alpha", op)
