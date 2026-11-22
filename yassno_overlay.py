@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "3.11.18"
+APP_VERSION = "3.11.19"
 import argparse
 import bisect
 import collections
@@ -1394,14 +1394,18 @@ class BgCanvas(tk.Canvas):
             self._light[fill] = v
         return v
 
+    _OUT = ((-1, -1), (1, -1), (-1, 1), (1, 1))
+
     def create_text(self, *a, **kw):
         fill = kw.get("fill")
         if self.outline and fill and len(a) == 2 and kw.get("text") and self._is_light(fill):
             kw0 = dict(kw)
             kw0["fill"] = "#000000"
             x, y = a
-            for dx, dy in ((-1, -1), (1, -1), (-1, 1), (1, 1)):
-                super().create_text(x + dx, y + dy, **kw0)
+            opts = self._options(kw0)                           # опции считаем один раз на все 4 тени
+            call, w = self.tk.call, self._w
+            for dx, dy in self._OUT:
+                call((w, "create", "text", x + dx, y + dy) + opts)
         return super().create_text(*a, **kw)
 
     def _surface(self, fill):
@@ -1411,18 +1415,48 @@ class BgCanvas(tk.Canvas):
     back_top = None
     back_want = True                                            # False — окно сейчас скрыто, подложку показывать нельзя
 
+    _rec = ()                                                   # что нарисовано в этом кадре для подложки
+    _rec_applied = None                                         # что сейчас реально нарисовано в окне-подложке
+
+    def _rec_add(self, item):
+        if not isinstance(self._rec, list):
+            self._rec = []
+        self._rec.append(item)
+        self._rec_queue()
+
+    def _rec_queue(self):
+        if not getattr(self, "_sync_q", False):                 # после перерисовки подгоняем окно-подложку под размер и позицию окна
+            self._sync_q = True
+            self.after_idle(self._sync_now)
+
     def _mirror(self, kind, a, kw):
-        """Подложку рисуем в нижнем окне с настоящей полупрозрачностью, а в этом окне она становится «прозрачным» цветом KEY."""
+        """Подложку рисуем в нижнем окне с настоящей полупрозрачностью, а в этом окне она становится «прозрачным» цветом KEY.
+        Фигуры только запоминаем: окно-подложка перерисовывается лишь когда они реально изменились (иначе лишние перерисовки и лаги)."""
         if self.back is not None and self._surface(kw.get("fill")):
-            if not getattr(self, "_sync_q", False):             # после перерисовки подгоняем окно-подложку под размер и позицию окна
-                self._sync_q = True
-                self.after_idle(self._sync_now)
             kw2 = dict(kw)
             kw2["outline"] = ""
             kw2.pop("stipple", None)
-            getattr(self.back, kind)(*a, **kw2)
+            self._rec_add((kind, tuple(a), kw2))
             kw = dict(kw, fill=KEY)
         return kw
+
+    def _flush_back(self):
+        cv = self.back
+        if cv is None:
+            return
+        rec = list(self._rec) if isinstance(self._rec, list) else []
+        if rec == self._rec_applied:
+            return
+        try:
+            cv.delete("all")
+            for kind, a, kw in rec:
+                if kind in ("scale", "move"):
+                    getattr(cv, kind)(*a)
+                else:
+                    getattr(cv, kind)(*a, **kw)
+            self._rec_applied = rec
+        except tk.TclError:
+            self._rec_applied = None
 
     def create_rectangle(self, *a, **kw):
         kw = self._mirror("create_rectangle", a, kw)
@@ -1446,26 +1480,18 @@ class BgCanvas(tk.Canvas):
 
     def scale(self, *a):
         if self.back is not None:                               # растяжение окна: подложка должна растянуться так же
-            try:
-                self.back.scale(*a)
-            except tk.TclError:
-                pass
+            self._rec_add(("scale", tuple(a), None))
         return super().scale(*a)
 
     def move(self, *a):
         if self.back is not None and a and a[0] == "all":
-            try:
-                self.back.move(*a)
-            except tk.TclError:
-                pass
+            self._rec_add(("move", tuple(a), None))
         return super().move(*a)
 
     def delete(self, *a):
         if self.back is not None and a and a[0] == "all":
-            try:
-                self.back.delete("all")
-            except tk.TclError:
-                pass
+            self._rec = []
+            self._rec_queue()
         return super().delete(*a)
 
     def back_on(self, alpha):
@@ -1493,6 +1519,7 @@ class BgCanvas(tk.Canvas):
             except tk.TclError:
                 pass
         self.back = self._back_cv
+        self._rec_applied = None
         try:
             self.back_top.attributes("-alpha", alpha)
         except tk.TclError:
@@ -1504,6 +1531,7 @@ class BgCanvas(tk.Canvas):
     def back_off(self):
         if self.back is not None:
             self.back = None
+            self._rec, self._rec_applied = [], None
             try:
                 self._back_cv.delete("all")
             except tk.TclError:
@@ -1525,6 +1553,7 @@ class BgCanvas(tk.Canvas):
 
     def _sync_now(self):
         self._sync_q = False
+        self._flush_back()
         self.back_sync()
 
     def back_sync(self):
