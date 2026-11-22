@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "3.11.17"
+APP_VERSION = "3.11.18"
 import argparse
 import bisect
 import collections
@@ -1409,6 +1409,7 @@ class BgCanvas(tk.Canvas):
 
     back = None                                                 # холст окна-подложки (режим «настоящей» прозрачности) или None
     back_top = None
+    back_want = True                                            # False — окно сейчас скрыто, подложку показывать нельзя
 
     def _mirror(self, kind, a, kw):
         """Подложку рисуем в нижнем окне с настоящей полупрозрачностью, а в этом окне она становится «прозрачным» цветом KEY."""
@@ -1514,7 +1515,7 @@ class BgCanvas(tk.Canvas):
         if bt is None:
             return
         try:
-            if show and self.back is not None and self.winfo_toplevel().state() != "withdrawn":
+            if show and self.back_want and self.back is not None and self.winfo_toplevel().state() != "withdrawn":
                 bt.deiconify()
                 self.back_restack()
             else:
@@ -6181,8 +6182,10 @@ class Overlay:
         """Прозрачность окна: либо только фон (растр, текст чёткий), либо старый режим — всё окно целиком."""
         if hidden:
             top.attributes("-alpha", 0.0)
+            canvas.back_want = False
             canvas.back_vis(False)
             return
+        canvas.back_want = True
         if self.cfg.get("op_bg_only", True) and self.rounded:
             cov = min(1.0, op / 0.94)
             dual = (bool(self.cfg.get("true_alpha", True)) and getattr(self, "locked", True) and cov < 0.985
@@ -6746,6 +6749,7 @@ class Overlay:
             self.root.attributes("-topmost", True)
             self.root.lift()
             if self.canvas.back is not None:
+                self.canvas.back_vis(True)                      # подложка видна только пока видно её окно
                 self.canvas.back_sync()
                 self.canvas.back_restack()
             for w in self.subs:
@@ -6753,6 +6757,7 @@ class Overlay:
                     w.top.attributes("-topmost", True)
                     w.top.lift()
                     if getattr(w.canvas, "back", None) is not None:
+                        w.canvas.back_vis(True)
                         w.canvas.back_sync()
                         w.canvas.back_restack()
             mp = getattr(self, "move_panel", None)
