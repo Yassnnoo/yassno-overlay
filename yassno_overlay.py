@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "3.11.14"
+APP_VERSION = "3.11.15"
 import argparse
 import bisect
 import collections
@@ -7528,7 +7528,7 @@ class Overlay:
 
         # ---------- подвал ----------
         fy = y + self.h_foot // 2
-        self.panel_part(y, y + self.h_foot, HDR_BG, bottom=True)
+        self.panel_part(y, H - 1, HDR_BG, bottom=True)                 # подложка футера до самой рамки (раньше не доходила на 4 px)
         with lock:
             now_t = time.time()
             rate = sum(1 for t in state["changes"] if now_t - t <= 2.0) / 2.0
