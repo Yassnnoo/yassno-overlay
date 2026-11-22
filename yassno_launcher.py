@@ -75,7 +75,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.11.11"
+APP_VERSION = "3.11.12"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -6325,11 +6325,11 @@ class ProfilePanel(ttk.Frame):
         if show["wheel"] and wheels is not None and style in wheels.STYLES:
             try:
                 from PIL import ImageTk
-                wk = (style, 51)
+                wk = (style, 45)
                 cache = self.__dict__.setdefault("_wpv", {})
                 wpic = cache.get(wk)
                 if wpic is None:
-                    wpic = cache[wk] = ImageTk.PhotoImage(wheels.render(style, 51, 12))
+                    wpic = cache[wk] = ImageTk.PhotoImage(wheels.render(style, 45, 12))
                 c.create_image(wx, mid, image=wpic)
             except Exception:
                 wpic = None
@@ -6945,7 +6945,6 @@ class ProfilePanel(ttk.Frame):
         self.panel(x, y, w, h)
         self.mark(c, x + 6, y + 6, x + 9, y + 18)
         c.create_text(x + 14, y + 12, text="RACE 1", fill=th["text"], anchor="w", font=self.f_t)
-        c.create_text(x + w - 8, y + 12, text="ОСТАЛОСЬ", fill=th["dim"], anchor="e", font=self.f_t)
         c.create_text(x + w / 2, y + h * 0.68, text="1:23:45", fill=th["text"], font=self.f_b)
 
     def d_micro(self, x, y, w, h):

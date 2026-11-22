@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "3.11.11"
+APP_VERSION = "3.11.12"
 import argparse
 import bisect
 import collections
@@ -2110,7 +2110,7 @@ class PedalsWindow(RelativeWindow):
         self.led_h = int(u * 0.62) if m.cfg.get("shiftlight", True) else 0
         self.height = int(u * 3.7) + self.led_h
         self.gear_w, self.speed_w = int(u * 1.7), int(u * 2.5)
-        self.wheel_d = int(self.height * 0.86)
+        self.wheel_d = int(self.height * 0.76)
         self.graph_w = int(u * 8.2)
         self.bar_w, self.bar_gap = int(u * 0.55), int(u * 0.14)
         hide = m.cfg.get("ped_hide", [])
@@ -4709,14 +4709,14 @@ def session_clock(frame):
         lead_laps = max((x["laps"] for x in frame["cars"]), default=0)
         return session, f"{min(lead_laps + 1, frame['max_laps'])}/{frame['max_laps']}", "КРУГ"
     if 0 < end < 1e7:
-        return session, fmt_hms(min(end, end - now)), "ОСТАЛОСЬ"
+        return session, fmt_hms(min(end, end - now)), ""
     return session, fmt_hms(now), "ПРОШЛО"
 
 
 class _TimeCard(SimpleWindow):
     """Крупные часы в рамке: таймер сессии и локальное время. Размер подгоняется под шрифт."""
     WIDTH, HEIGHT, HZ = 17.0, 4.6, 4
-    SAMPLE, TITLES = "0:00:00", ("PRACTICE 1", "ОСТАЛОСЬ")
+    SAMPLE, TITLES = "0:00:00", ("PRACTICE 1", "")
 
     def build(self):
         super().build()
@@ -4741,7 +4741,7 @@ class SessionTimerWindow(_TimeCard):
         m = self.main
         session, timer, caption = session_clock(frame)
         if not frame or not m.locked:
-            session, timer, caption = ("RACE 1", "1:23:45", "ОСТАЛОСЬ") if not m.locked else ("", "", "")
+            session, timer, caption = ("RACE 1", "1:23:45", "") if not m.locked else ("", "", "")
         c, cy = _card(self, session or "СЕССИЯ", caption)
         if timer:
             self.big_text(c, timer)
@@ -5174,7 +5174,7 @@ class TyresWindow(SimpleWindow):
             cy = int(rh * 2.3) + (i // 2) * int(rh * 2.2)
             pct = max(0.0, min(1.0, w["wear"]))
             wc = "#2ee26d" if pct > 0.5 else "#ffc107" if pct > 0.25 else "#ff3b30"
-            vw = int(cw * 4.6)
+            vw = max(int(cw * 4.6), self.f_mid.measure("100.0") + 10)       # «100.0» в крупном шрифте шире прежней колонки
             c.create_text(x0, cy, text=f"{pct * 100:.1f}", fill=wc, anchor="w", font=self.f_mid)
             bx0, bx1 = x0 + vw, x0 + cell - int(cw * 5.4)
             bh = max(6, int(rh * 0.55))
@@ -7208,8 +7208,9 @@ class Overlay:
             if show_t:
                 c.create_text(W - 14, cy, text=timer, fill=FG, anchor="e", font=self.big)
                 xl = W - 14 - self.big.measure(timer) - 12
-                c.create_text(xl, cy + 2, text=caption, fill=DIM, anchor="e", font=self.small)
-                xl -= self.small.measure(caption) + 14
+                if caption:
+                    c.create_text(xl, cy + 2, text=caption, fill=DIM, anchor="e", font=self.small)
+                    xl -= self.small.measure(caption) + 14
                 if frame and not (0 < frame["max_laps"] < 100_000):      # при гонке «на круги» номер круга уже в таймере
                     if race_like:
                         nl = max((x["laps"] for x in cars), default=0)

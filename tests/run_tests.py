@@ -126,7 +126,7 @@ class Misc(unittest.TestCase):
         old = O.game_now
         O.game_now = lambda: None
         try:
-            self.assertEqual(O.session_clock(fr), ("PRACTICE", "0:13:20", "ОСТАЛОСЬ"))
+            self.assertEqual(O.session_clock(fr), ("PRACTICE", "0:13:20", ""))
         finally:
             O.game_now = old
 
