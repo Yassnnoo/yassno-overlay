@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "3.11.19"
+APP_VERSION = "3.11.20"
 import argparse
 import bisect
 import collections
@@ -2054,7 +2054,7 @@ class RelativeWindow:
         self.canvas.create_text(x, y, text=s, fill=fill, anchor=anchor, font=font or self.main.font)
 
     def tick(self, frame, ver):
-        sig = (ver // 3, self.main.cfg["font"], self.main.locked, int(time.time() * 4))
+        sig = (self.main.cfg["font"], self.main.locked, int(time.time() * 6))
         if sig != self._sig:
             self._sig = sig
             self.draw(frame)
@@ -3658,7 +3658,7 @@ class FuelWindow(RelativeWindow):
             pass
 
     def tick(self, frame, ver):
-        sig = (int(time.time() * 10), self.main.cfg["font"], self.main.cfg.get("fuel_reserve", 0.0), self.main.cfg.get("ve_reserve", 0.0), self.main.cfg.get("fuel_scale", 0.8))
+        sig = (int(time.time() * 5), self.main.cfg["font"], self.main.cfg.get("fuel_reserve", 0.0), self.main.cfg.get("ve_reserve", 0.0), self.main.cfg.get("fuel_scale", 0.8))
         if sig != self._sig:
             self._sig = sig
             self.draw(frame)
@@ -7700,8 +7700,8 @@ class Overlay:
             gn = game_now()
             self.check_layout(frame)
             self.check_screen()
-            fast = 60 if self.stand_mode() == "ticker" else 4
-            sig = (ver // 6, int(gn) if gn is not None else 0, int(time.time() * fast), self.locked,
+            fast = 60 if self.stand_mode() == "ticker" else 5      # таблица обновляется ~5 раз/с: чаще не нужно, а перерисовка у неё самая дорогая
+            sig = (0 if fast < 60 else ver // 6, int(gn) if gn is not None else 0, int(time.time() * fast), self.locked,
                    self.cfg["rows"], self.cfg["font"], self.cfg.get("class_only", False))
             if sig != self._sig:
                 self._sig = sig
