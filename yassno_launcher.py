@@ -75,7 +75,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.11.16"
+APP_VERSION = "3.11.17"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -5579,7 +5579,8 @@ class ProfilePanel(ttk.Frame):
         num = lambda k, f, d: f.format(lv[k]) if isinstance(lv.get(k), (int, float)) else d
         val = {"fuel": num("fuel", "{:.1f} л", "47.3 л"), "delta": num("delta", "{:+.2f}", "+0.35"),
                "speedo": num("spd", "{:.0f}", "247"), "standings": ("P" + str(lv["place"])) if lv.get("place") else "P4",
-               "relative": "±3", "sesstime": "1:12:40", "clock": time.strftime("%H:%M")}.get(e)
+               "relative": "±3", "sesstime": "1:12:40", "clock": time.strftime("%H:%M"),
+               "pedals": (f"{lv.get('gear', 'N')} · {int(lv['spd'])}" if isinstance(lv.get("spd"), (int, float)) else None)}.get(e)
         if val and H > 30 and W > 40:
             col = th["text"]
             if e == "delta":
