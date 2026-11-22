@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "3.11.13"
+APP_VERSION = "3.11.14"
 import argparse
 import bisect
 import collections
@@ -1435,6 +1435,14 @@ class BgCanvas(tk.Canvas):
             kw["stipple"] = self.stipple
         return super().create_polygon(*a, **kw)
 
+    def configure(self, *a, **kw):
+        r = super().configure(*a, **kw)
+        if self.back is not None and ("width" in kw or "height" in kw):
+            self.back_sync()                                    # окно сменило размер — подложка сразу следом
+        return r
+
+    config = configure
+
     def scale(self, *a):
         if self.back is not None:                               # растяжение окна: подложка должна растянуться так же
             try:
@@ -1524,9 +1532,12 @@ class BgCanvas(tk.Canvas):
             return
         try:
             top = self.winfo_toplevel()
-            top.update_idletasks()
-            w, h = max(1, top.winfo_width()), max(1, top.winfo_height())
-            g = f"{w}x{h}+{top.winfo_x()}+{top.winfo_y()}"
+            try:                                                # размер берём из размера холста: он известен сразу, а размер окна обновляется с задержкой
+                w, h = int(float(self.cget("width"))), int(float(self.cget("height")))
+            except (tk.TclError, ValueError):
+                top.update_idletasks()
+                w, h = top.winfo_width(), top.winfo_height()
+            g = f"{max(1, w)}x{max(1, h)}+{top.winfo_x()}+{top.winfo_y()}"
             if g != getattr(self, "_back_g", ""):
                 self._back_g = g
                 bt.geometry(g)
