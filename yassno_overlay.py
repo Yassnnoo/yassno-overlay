@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "3.11.12"
+APP_VERSION = "3.11.13"
 import argparse
 import bisect
 import collections
@@ -2090,6 +2090,41 @@ def wheel_geometry(cx, cy, r, angle_deg):
             "mark": (pt(a, 0.80), pt(a, 1.0))}
 
 
+_WHEEL_PIL = {}                                          # (вид, размер, угол) -> готовая PIL-картинка руля
+_WHEEL_WARM = set()
+
+
+def wheel_pil(style, size, ang):
+    """Картинка руля для угла: из набора, который считается в фоне, а если ещё не готова — прямо сейчас."""
+    key = (style, size, ang)
+    im = _WHEEL_PIL.get(key)
+    if im is None:
+        im = _WHEEL_PIL[key] = wheels.render(style, size, ang)
+    return im
+
+
+def wheel_warm(style, size):
+    """Один раз на (вид, размер): в фоновом потоке считаем руль для всех углов, начиная с близких к прямому положению.
+    Иначе каждый новый угол при вращении рендерился в главном потоке (~20 мс) — руль заметно отставал."""
+    k = (style, size)
+    if k in _WHEEL_WARM or wheels is None:
+        return
+    _WHEEL_WARM.add(k)
+    if len(_WHEEL_PIL) > 2400:
+        _WHEEL_PIL.clear()
+
+    def work():
+        for a in sorted(range(360), key=lambda v: min(v, 360 - v)):
+            if (style, size, a) in _WHEEL_PIL:
+                continue
+            try:
+                _WHEEL_PIL[(style, size, a)] = wheels.render(style, size, a)
+            except Exception:
+                return
+            time.sleep(0.002)                                   # не отбираем процессор у отрисовки
+    threading.Thread(target=work, daemon=True).start()
+
+
 class PedalsWindow(RelativeWindow):
     """Окно ввода: передача, скорость, руль, график газа/тормоза, столбики педалей."""
     POS, ON = ("ped_x", "ped_y"), "pedals"
@@ -2281,9 +2316,10 @@ class PedalsWindow(RelativeWindow):
                 cache = self.__dict__.setdefault("_wimgs", {})
                 photo = cache.get(key)
                 if photo is None:
-                    if len(cache) > 400:
+                    wheel_warm(self.style, size)
+                    if len(cache) > 800:
                         cache.clear()
-                    photo = cache[key] = ImageTk.PhotoImage(wheels.render(self.style, size, key[2]))
+                    photo = cache[key] = ImageTk.PhotoImage(wheel_pil(self.style, size, key[2]))
                 c.create_image(x + r + 2, cy, image=photo)
                 return
             except Exception as _e:
@@ -2946,6 +2982,7 @@ class RadarWindow(RelativeWindow):
         self.width = self.height = self.diam + 8
         self.canvas.config(width=self.width, height=self.height)
         self._sig = None
+        self._rimg = None
         self._alpha = 0.0
         self._ws_alpha = None
         self._hist, self._last_h = getattr(self, "_hist", {}), getattr(self, "_last_h", {})
@@ -2988,6 +3025,22 @@ class RadarWindow(RelativeWindow):
                 self._last_h[key] = (dx / n, dz / n)
         return self._last_h.get(key)
 
+    def _pos_now(self, key, pos, now):
+        """Позиция машины «сейчас»: данные игры приходят реже, чем мы рисуем, поэтому между обновлениями продолжаем движение
+        по скорости, посчитанной по следу (не дольше 0,12 с). Так машины на радаре едут плавно, а не прыжками."""
+        h = self._hist.get(key)
+        if not h or len(h) < 2:
+            return pos
+        t1, x1, z1 = h[-1]
+        e = now - t1
+        if e <= 0 or e > 0.12:
+            return pos
+        ref = next((p for p in h if p[0] <= t1 - 0.12), None)
+        if ref is None:
+            return pos
+        dt = t1 - ref[0]
+        return (x1 + (x1 - ref[1]) / dt * e, z1 + (z1 - ref[2]) / dt * e)
+
     def scan(self, frame):
         """Соперники в системе координат моей машины: направление «вперёд» берём из моего движения."""
         if not frame:
@@ -3003,10 +3056,12 @@ class RadarWindow(RelativeWindow):
         lx, lz = -fz, fx                                    # лево в левосторонней системе rF2 (x вправо, z вперёд)
         flip = 1.0
         items = []
+        mp = self._pos_now(me["key"], me["pos"], now)
         for car in frame["cars"]:
             if car["player"] or car["garage"] or car["pos"] == (0.0, 0.0):
                 continue
-            dx, dz = car["pos"][0] - me["pos"][0], car["pos"][1] - me["pos"][1]
+            cp = self._pos_now(car["key"], car["pos"], now)
+            dx, dz = cp[0] - mp[0], cp[1] - mp[1]
             fwd = dx * fx + dz * fz
             left = dx * lx + dz * lz
             d = math.hypot(fwd, left)
@@ -3121,6 +3176,97 @@ class RadarWindow(RelativeWindow):
         return pts
 
     def draw(self, me, items):
+        """Радар рисуем с двойной детализацией и сглаживанием (PIL); нет PIL или ошибка — прежняя отрисовка фигурами."""
+        if not getattr(self, "_pil_bad", False):
+            try:
+                return self.draw_aa(me, items)
+            except Exception as e:
+                self._pil_bad = True
+                try:
+                    os.makedirs(os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs"), exist_ok=True)
+                    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs", "radar.log"), "a", encoding="utf-8") as fh:
+                        fh.write(f"{time.strftime('%H:%M:%S')} сглаженный радар выключен: {e!r}\n")
+                except OSError:
+                    pass
+        return self.draw_canvas(me, items)
+
+    def draw_aa(self, me, items):
+        from PIL import Image, ImageDraw, ImageTk
+        c, W = self.canvas, self.width
+        locked = bool(self.main.locked)
+        S = 2
+        N = W * S
+        cx = cy = N / 2
+        rr = self.diam / 2 * S
+        rng = self.range_m()
+        k = (rr - 6 * S) / rng
+        ring, faint = "#7c8696", "#3b4350"
+        bg = getattr(self, "_aa_bg", None)
+        if bg is None or bg[0] != (N, self.diam, locked):              # неподвижный фон (кольца, пунктир) рисуем один раз
+            base = Image.new("RGBA", (N, N), (0, 0, 0, 0))
+            d = ImageDraw.Draw(base)
+            if not locked:                                              # подложка, чтобы окно можно было схватить мышью
+                d.ellipse((cx - rr, cy - rr, cx + rr, cy + rr), fill="#10151d")
+            d.ellipse((cx - rr + 3 * S, cy - rr + 3 * S, cx + rr - 3 * S, cy + rr - 3 * S), outline=ring, width=2 * S)
+            for f in (1 / 3, 2 / 3):                                    # пунктирные круги
+                r = (rr - 3 * S) * f
+                step = 7 * S / r * 180 / math.pi
+                a0 = 0.0
+                while a0 < 360:
+                    d.arc((cx - r, cy - r, cx + r, cy + r), a0, a0 + step * 2 / 7, fill=faint, width=S)
+                    a0 += step
+            for t in range(int(6 * S), int(2 * rr - 6 * S), 8 * S):         # пунктирный крест
+                d.line((cx - rr + t, cy, cx - rr + t + 2 * S, cy), fill=faint, width=S)
+                d.line((cx, cy - rr + t, cx, cy - rr + t + 2 * S), fill=faint, width=S)
+            box0 = (cx - rr + 3 * S, cy - rr + 3 * S, cx + rr - 3 * S, cy + rr - 3 * S)
+            arcs = {}
+            for nm, (a1, a2) in (("L", (142, 218)), ("R", (-38, 38))):      # красные дуги сбоку тоже готовим заранее (толстая дуга считается долго)
+                lay = Image.new("RGBA", (N, N), (0, 0, 0, 0))
+                ImageDraw.Draw(lay).arc(box0, a1, a2, fill="#ff3b30", width=7 * S)
+                arcs[nm] = lay
+            bg = self._aa_bg = ((N, self.diam, locked), base, arcs)
+        im = bg[1].copy()
+        d = ImageDraw.Draw(im)
+        left_busy = any(it["side"] and it["x"] < 0 for it in items)
+        right_busy = any(it["side"] and it["x"] > 0 for it in items)
+        if left_busy and self.main.cfg.get("radar_arcs", True):
+            im.alpha_composite(bg[2]["L"])
+        if right_busy and self.main.cfg.get("radar_arcs", True):
+            im.alpha_composite(bg[2]["R"])
+        for it in sorted(items, key=lambda t: -t["d"]):
+            if it["d"] > rng * 1.05:
+                continue
+            sx, sy = cx + it["x"] * k, cy - it["y"] * k
+            t = it["d"] / rng
+            col = _mix("#ff3b30", "#ffd23a", t * 2) if t < 0.5 else _mix("#ffd23a", "#2ee26d", (t - 0.5) * 2)
+            hx, hy = it["dx"], it["dy"]
+            n = math.hypot(hx, hy)
+            ux, uy = (hx / n, -hy / n) if n > 0.2 else (0.0, -1.0)
+            pts = self._car_poly(sx, sy, k, ux, uy, self.CAR_L / 2, self.CAR_W / 2)
+            xy = [(pts[i], pts[i + 1]) for i in range(0, 8, 2)]
+            d.polygon(xy, fill=col)
+            d.line(xy + [xy[0]], fill="#0d1117", width=S, joint="curve")
+            d.line((xy[0], xy[1]), fill="#0d1117", width=2 * S)       # передняя кромка
+        pts = self._car_poly(cx, cy, k, 0.0, -1.0, self.CAR_L / 2, self.CAR_W / 2)
+        xy = [(pts[i], pts[i + 1]) for i in range(0, 8, 2)]
+        d.polygon(xy, fill="#ffffff")
+        d.line(xy + [xy[0]], fill=ACCENT, width=2 * S, joint="curve")
+        d.line((xy[0], xy[1]), fill=ACCENT, width=3 * S)
+        small = im.reduce(S)
+        pi = getattr(self, "_rimg", None)
+        if pi is None or pi.width() != W or not c.find_withtag("rimg"):
+            c.delete("all")
+            self._rimg = pi = ImageTk.PhotoImage(small)
+            c.create_image(0, 0, image=pi, anchor="nw", tags="rimg")
+        else:
+            pi.paste(small)                                             # обновляем ту же картинку: заметно быстрее, чем создавать новую
+        c.delete("rtxt")
+        if not locked:
+            c.create_text(W / 2, W / 2 - self.diam / 2 * 0.55, text="тяните мышью", fill=DIM, font=self.main.small, tags="rtxt")
+        if me is None:
+            c.create_text(W / 2, W / 2 + self.diam / 2 * 0.45, text="радар", fill=DIM, font=self.main.small, tags="rtxt")
+
+    def draw_canvas(self, me, items):
         c, W = self.canvas, self.width
         c.delete("all")
         cx = cy = W / 2
