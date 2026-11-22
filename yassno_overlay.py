@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "3.11.20"
+APP_VERSION = "3.11.21"
 import argparse
 import bisect
 import collections
@@ -1869,6 +1869,42 @@ class PerfProbe:
         if now - self.t0 >= self.PERIOD:
             self.flush(now)
 
+    root = None
+
+    def resources(self):
+        """Расход ресурсов процесса: если за долгую сессию что-то растёт, это видно по строке (память, GDI/USER-объекты, потоки, картинки и команды Tk)."""
+        parts = []
+        try:
+            if os.name == "nt":
+                class PMC(ctypes.Structure):
+                    _fields_ = [("cb", ctypes.c_ulong), ("pf", ctypes.c_ulong), ("peak", ctypes.c_size_t), ("ws", ctypes.c_size_t),
+                                ("a", ctypes.c_size_t), ("b", ctypes.c_size_t), ("c", ctypes.c_size_t), ("d", ctypes.c_size_t),
+                                ("pagefile", ctypes.c_size_t), ("peakpf", ctypes.c_size_t)]
+                k32, u32 = ctypes.windll.kernel32, ctypes.windll.user32
+                k32.GetCurrentProcess.restype = ctypes.c_void_p
+                k32.K32GetProcessMemoryInfo.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_ulong]
+                u32.GetGuiResources.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+                h = k32.GetCurrentProcess()
+                pmc = PMC()
+                pmc.cb = ctypes.sizeof(PMC)
+                if k32.K32GetProcessMemoryInfo(h, ctypes.byref(pmc), pmc.cb):
+                    parts.append(f"память {pmc.ws / 1048576:.0f} МБ")
+                parts.append(f"GDI {u32.GetGuiResources(h, 0)} USER {u32.GetGuiResources(h, 1)}")
+        except Exception:                                # noqa: BLE001
+            pass
+        try:
+            import gc as _gc
+            parts.append(f"потоков {threading.active_count()}, объектов Python {len(_gc.get_objects())}")
+        except Exception:                                # noqa: BLE001
+            pass
+        try:
+            tk_ = self.root.tk
+            n = lambda *a: len(tk_.splitlist(tk_.call(*a)))
+            parts.append(f"Tk: картинок {n('image', 'names')}, команд {n('info', 'commands')}, шрифтов {n('font', 'names')}")
+        except Exception:                                # noqa: BLE001
+            pass
+        return "ресурсы: " + "; ".join(parts) if parts else ""
+
     def report(self, span):
         rows = sorted(self.stats.items(), key=lambda kv: -kv[1][1])
         n, busy, gap = self.ticks
@@ -1876,6 +1912,9 @@ class PerfProbe:
                f"{'окно':<22}{'кадров/с':>9}{'сред. мс':>10}{'макс. мс':>10}{'доля, %':>9}"]
         for name, (c, tot, mx) in rows:
             out.append(f"{name:<22}{c / span:>9.1f}{tot / c * 1000:>10.2f}{mx * 1000:>10.1f}{tot / span * 100:>9.1f}")
+        res = self.resources()
+        if res:
+            out.append(res)
         return "\n".join(out) + "\n"
 
     def flush(self, now):
@@ -6114,6 +6153,7 @@ class Overlay:
         self.perf = None
         if PROFILE:
             self.perf = PerfProbe(PROFILE_GAME)
+            self.perf.root = self.root
             for w in self.subs:
                 nm = type(w).__name__
                 for meth in ("draw", "draw_ir"):
@@ -7875,8 +7915,44 @@ def fine_timer():
         return False
 
 
+def tune_process():
+    """Лаги в долгой сессии: (1) главный поток tkinter на каждом вызове рисования отдаёт GIL и ждёт его обратно — при интервале
+    переключения 5 мс любой фоновый поток (чтение игры) растягивает кадр; (2) сборщик мусора на частых мелких порогах
+    будит себя постоянно; (3) Windows 11 сама переводит «фоновые» процессы в экономный режим (EcoQoS) — оверлей не должен."""
+    try:
+        sys.setswitchinterval(0.001)
+    except Exception:                                    # noqa: BLE001
+        pass
+    try:
+        import gc
+        gc.collect()
+        gc.freeze()                                      # всё созданное при запуске в сборщик не попадает
+        gc.set_threshold(20000, 20, 20)
+    except Exception:                                    # noqa: BLE001
+        pass
+    if os.name != "nt":
+        return
+    try:
+        k32 = ctypes.windll.kernel32
+        k32.GetCurrentProcess.restype = ctypes.c_void_p
+        h = k32.GetCurrentProcess()
+
+        class THROTTLE(ctypes.Structure):
+            _fields_ = [("Version", ctypes.c_ulong), ("ControlMask", ctypes.c_ulong), ("StateMask", ctypes.c_ulong)]
+        t = THROTTLE(1, 1, 0)                            # PROCESS_POWER_THROTTLING_EXECUTION_SPEED: управляю сам, экономный режим выключен
+        k32.SetProcessInformation.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_ulong]
+        k32.SetProcessInformation(h, 4, ctypes.byref(t), ctypes.sizeof(t))        # ProcessPowerThrottling
+        t2 = THROTTLE(1, 4, 0)                           # PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION: таймер 1 мс не сбрасывать
+        k32.SetProcessInformation(h, 4, ctypes.byref(t2), ctypes.sizeof(t2))
+        k32.SetPriorityClass.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+        k32.SetPriorityClass(h, 0x00008000)              # ABOVE_NORMAL: игра, занимающая все ядра, не должна душить оверлей
+    except Exception:                                    # noqa: BLE001
+        pass
+
+
 def main():
     fine_timer()
+    tune_process()
     ap = argparse.ArgumentParser(description="LMU standings overlay")
     ap.add_argument("--config", help="файл профиля настроек (по умолчанию yassno_overlay.json рядом со скриптом)")
     ap.add_argument("--rows", type=int)
