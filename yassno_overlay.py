@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "3.11.9"
+APP_VERSION = "3.11.10"
 import argparse
 import bisect
 import collections
@@ -1431,6 +1431,22 @@ class BgCanvas(tk.Canvas):
         if self.stipple and "stipple" not in kw and self._surface(kw.get("fill")):
             kw["stipple"] = self.stipple
         return super().create_polygon(*a, **kw)
+
+    def scale(self, *a):
+        if self.back is not None:                               # растяжение окна: подложка должна растянуться так же
+            try:
+                self.back.scale(*a)
+            except tk.TclError:
+                pass
+        return super().scale(*a)
+
+    def move(self, *a):
+        if self.back is not None and a and a[0] == "all":
+            try:
+                self.back.move(*a)
+            except tk.TclError:
+                pass
+        return super().move(*a)
 
     def delete(self, *a):
         if self.back is not None and a and a[0] == "all":
