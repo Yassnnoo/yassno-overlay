@@ -657,6 +657,62 @@ class ZLiveProfileTests(unittest.TestCase):
         self.assertEqual(self.ov.applied, [["font"]])
 
 
+class ZRetainedCanvasTests(unittest.TestCase):
+    """Холст, который переиспользует элементы между кадрами, должен выглядеть точно так же, как обычный."""
+
+    def test_same_as_plain_canvas(self):
+        import random
+        import tkinter as tk
+        try:
+            root = tk.Tk()
+        except tk.TclError:
+            self.skipTest("нет дисплея")
+        try:
+            a, b = O.BgCanvas(root, width=300, height=200), tk.Canvas(root, width=300, height=200)
+            rnd = random.Random(7)
+            cols = ["#ff0000", "#00ff00", "#222222", "#eeeeee"]
+
+            def item():
+                k, x, y = rnd.choice(["rectangle", "text", "line", "polygon", "oval"]), rnd.randint(0, 250), rnd.randint(0, 150)
+                if k == "text":
+                    return k, (x, y), {"text": rnd.choice(["a", "bb", "12.3"]), "fill": rnd.choice(cols), "anchor": rnd.choice(["w", "e"])}
+                if k == "polygon":
+                    return k, (x, y, x + 10, y, x + 5, y + 9), {"fill": rnd.choice(cols)}
+                return k, (x, y, x + 20, y + 10), {"fill": rnd.choice(cols)}
+
+            def state(cv):
+                out = []
+                for i in cv.find_all():
+                    o = {}
+                    for n in ("fill", "text", "anchor"):
+                        try:
+                            o[n] = cv.itemcget(i, n)
+                        except tk.TclError:
+                            pass
+                    out.append((cv.type(i), tuple(round(float(c), 3) for c in cv.coords(i)), tuple(sorted(o.items()))))
+                return out
+            spec = [item() for _ in range(40)]
+            for n in range(150):
+                m = rnd.random()
+                if m < 0.5:
+                    spec = [item() if rnd.random() < 0.05 else it for it in spec]
+                elif m < 0.7:
+                    spec = spec[:rnd.randint(5, 40)] + [item() for _ in range(rnd.randint(0, 8))]
+                elif m < 0.85:
+                    spec.insert(rnd.randint(0, len(spec)), item())
+                elif m < 0.9:
+                    a.move("all", 1, 1)
+                    b.move("all", 1, 1)
+                for cv in (a, b):
+                    cv.delete("all")
+                    for k, co, kw in spec:
+                        getattr(cv, "create_" + k)(*co, **kw)
+                root.update()
+                self.assertEqual(state(a), state(b), f"кадр {n}")
+        finally:
+            root.destroy()
+
+
 class LeaderLapsAndVE(unittest.TestCase):
     def _cars(self):
         mk = lambda k, laps, lg: {"key": k, "laps": laps, "laps_leader": 0, "gap_leader": lg, "best": 100.0}

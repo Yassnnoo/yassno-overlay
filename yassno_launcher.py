@@ -75,7 +75,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.11.22"
+APP_VERSION = "3.11.23"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -2080,7 +2080,7 @@ def shadow_image(master, w, h, r, m, bg):
     Картинки кэшируются по размеру: одинаковые карточки не пересчитываются."""
     if not valid_hex(bg):
         return None
-    key = (w, h, r, m, bg.lower(), UI_THEME_NAME)
+    key = (id(master.tk), w, h, r, m, bg.lower(), UI_THEME_NAME)        # картинка живёт в интерпретаторе Tk своего окна
     img = _SHADOW_CACHE.get(key)
     if img is not None:
         return img

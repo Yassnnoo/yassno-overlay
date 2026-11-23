@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "3.11.22"
+APP_VERSION = "3.11.23"
 import argparse
 import bisect
 import collections
@@ -1402,10 +1402,8 @@ class BgCanvas(tk.Canvas):
             kw0 = dict(kw)
             kw0["fill"] = "#000000"
             x, y = a
-            opts = self._options(kw0)                           # опции считаем один раз на все 4 тени
-            call, w = self.tk.call, self._w
             for dx, dy in self._OUT:
-                call((w, "create", "text", x + dx, y + dy) + opts)
+                self._create("text", (x + dx, y + dy), kw0)
         return super().create_text(*a, **kw)
 
     def _surface(self, fill):
@@ -1470,6 +1468,96 @@ class BgCanvas(tk.Canvas):
             kw["stipple"] = self.stipple
         return super().create_polygon(*a, **kw)
 
+    # ---------- «удерживаемый» режим ----------
+    # Окно каждый кадр делает delete("all") и создаёт сотни элементов заново — это главная статья расхода. Здесь delete("all")
+    # ничего не удаляет: элементы кадра запоминаются, и в следующем кадре i-й create получает прежний i-й элемент. Если у него то же
+    # самое — Tk не трогаем вообще; изменилось — меняем только изменившееся. Расхождение типа: хвост старых элементов удаляем и дальше
+    # создаём заново (порядок наложения сохраняется). Любое постороннее вмешательство (coords, itemconfig, delete по тегу, scale,
+    # move, tag_raise) помечает холст «грязным», и следующий кадр честно перестраивается с нуля.
+    retain = True
+    _r_prev = _r_cur = ()
+    _r_i = 0
+    _r_dirty = False
+    _r_fl = False
+
+    def _create(self, itemType, args, kw):
+        if not self.retain or (args and isinstance(args[-1], dict)):
+            self._r_dirty = True
+            return super()._create(itemType, args, kw)
+        if not isinstance(self._r_cur, list):
+            self._r_prev, self._r_cur = [], []
+        flat = tuple(tk._flatten(args))
+        i, prev = self._r_i, self._r_prev
+        if i < len(prev):
+            pid, ptype, pargs, pkw = prev[i]
+            if ptype == itemType and all(k in kw for k in pkw):
+                if pargs != flat:
+                    tk.Canvas.coords(self, pid, *flat)
+                diff = {k: v for k, v in kw.items() if k not in pkw or pkw[k] != v}
+                if diff:
+                    tk.Canvas.itemconfigure(self, pid, **diff)
+                self._r_cur.append((pid, itemType, flat, dict(kw)))
+                self._r_i = i + 1
+                return pid
+            tk.Canvas.delete(self, *[p[0] for p in prev[i:]])    # дальше всё создаём заново — порядок наложения не нарушится
+            del prev[i:]
+        new = super()._create(itemType, args, kw)
+        self._r_cur.append((new, itemType, flat, dict(kw)))
+        self._r_i = i + 1
+        return new
+
+    def _r_begin(self):
+        """Начало кадра (delete("all")): True — удерживаем элементы, False — удалили всё по-настоящему."""
+        if not self.retain or self._r_dirty or not isinstance(self._r_cur, list):
+            tk.Canvas.delete(self, "all")
+            self._r_prev, self._r_cur, self._r_i, self._r_dirty = [], [], 0, False
+            return False
+        left = self._r_prev[self._r_i:]
+        if left:
+            tk.Canvas.delete(self, *[p[0] for p in left])
+        self._r_prev, self._r_cur, self._r_i = self._r_cur, [], 0
+        if not self._r_fl:
+            self._r_fl = True
+            self.after_idle(self._r_flush)                      # то, что в этом кадре не воссоздали, убираем сразу после кадра
+        return True
+
+    def _r_flush(self):
+        self._r_fl = False
+        try:
+            left = self._r_prev[self._r_i:]
+            if left:
+                tk.Canvas.delete(self, *[p[0] for p in left])
+            self._r_prev = []
+        except tk.TclError:
+            self._r_dirty = True
+
+    def _r_touch(self):
+        self._r_dirty = True
+
+    def coords(self, *a, **kw):
+        if a and len(a) > 1:
+            self._r_dirty = True
+        return super().coords(*a, **kw)
+
+    def itemconfigure(self, *a, **kw):
+        if kw or len(a) > 1:
+            self._r_dirty = True
+        return super().itemconfigure(*a, **kw)
+
+    itemconfig = itemconfigure
+
+    def tag_raise(self, *a):
+        self._r_dirty = True
+        return super().tag_raise(*a)
+
+    tkraise = lift = tag_raise
+
+    def tag_lower(self, *a):
+        self._r_dirty = True
+        return super().tag_lower(*a)
+
+    lower = tag_lower
+
     def configure(self, *a, **kw):
         r = super().configure(*a, **kw)
         if self.back is not None and ("width" in kw or "height" in kw):
@@ -1479,19 +1567,26 @@ class BgCanvas(tk.Canvas):
     config = configure
 
     def scale(self, *a):
+        self._r_dirty = True
         if self.back is not None:                               # растяжение окна: подложка должна растянуться так же
             self._rec_add(("scale", tuple(a), None))
         return super().scale(*a)
 
     def move(self, *a):
+        self._r_dirty = True
         if self.back is not None and a and a[0] == "all":
             self._rec_add(("move", tuple(a), None))
         return super().move(*a)
 
     def delete(self, *a):
-        if self.back is not None and a and a[0] == "all":
+        allitems = bool(a) and a[0] == "all"
+        if self.back is not None and allitems:
             self._rec = []
             self._rec_queue()
+        if allitems and len(a) == 1:
+            self._r_begin()
+            return None
+        self._r_dirty = True
         return super().delete(*a)
 
     def back_on(self, alpha):
