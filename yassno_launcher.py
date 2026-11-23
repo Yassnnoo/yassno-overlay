@@ -75,7 +75,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.11.21"
+APP_VERSION = "3.11.22"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -1516,6 +1516,8 @@ EN.update({
     "Какие панели показывать": "Panels to show", "Строк в таблице": "Rows in the table", "Только мой класс": "My class only",
     "Скрывать, когда машина в гараже": "Hide while the car is in the garage", "Колонки таблицы": "Table columns",
     "Сохранено, оверлей перезапущен.": "Saved, overlay restarted.",
+    "Сохранить и применить": "Save and apply", "Перезапустить оверлей": "Restart overlay", "Оверлей перезапущен.": "Overlay restarted.",
+    "Сохранено и применено — оверлей обновился на лету.": "Saved and applied — the overlay updated live.",
     "Сохранено. Изменения применятся при следующем запуске оверлея.": "Saved. Changes apply the next time the overlay starts.",
     "Нет файла": "File missing", "Положение сброшено — применится при следующем запуске.": "Positions reset — applies on the next start.",
     "Карты трасс": "Track maps", "Стереть все сохранённые карты трасс?\nОни нарисуются заново за пару кругов.":
@@ -3963,11 +3965,12 @@ class ProfilePanel(ttk.Frame):
         mm.add_command(label=tr("Журнал"), command=self.show_log)
         mm.add_separator()
         mm.add_command(label=tr("Сбросить положение окон"), command=self.reset_pos)
+        mm.add_command(label=tr("Перезапустить оверлей"), command=self.restart_overlay)
         if self.game == "rf2":
             mm.add_command(label=tr("Настроить плагин rF2"), command=self.setup_rf2_plugin)
         more.configure(menu=mm)
         more.pack(side="right")
-        ttk.Button(bar, text="Сохранить и перезапустить оверлей", style="Accent.TButton", command=self.save_apply).pack(side="right", padx=(0, 8))
+        ttk.Button(bar, text="Сохранить и применить", style="Accent.TButton", command=self.save_apply).pack(side="right", padx=(0, 8))
         self.btn_save = ttk.Button(bar, text="Сохранить", command=self.save)
         self.btn_save.pack(side="right", padx=(0, 8))
         self.btn_run = ttk.Button(bar, text=f"Запустить оверлей ({GAMES[self.game]})", command=self.run_or_stop, style="Ghost.TButton")
@@ -4650,20 +4653,32 @@ class ProfilePanel(ttk.Frame):
             mb_error("Не удалось сохранить", str(e))
             return False
         if not quiet:
-            self.say(f"Сохранено: {profile_path(self.game)}")
+            self.say(f"Сохранено: {profile_path(self.game)}" + (" — оверлей применит на лету" if self.overlay_here() else ""))
             flash_saved(self.btn_save, self.show_save_btn)
         return True
 
     def save_apply(self):
+        """Сохраняем профиль; запущенный оверлей подхватывает его на лету (команда reload), перезапуск не нужен."""
         if not self.save(quiet=True):
             return
         flash_saved(self.btn_save, self.show_save_btn)
-        r = self.app.runner
-        if r.running() and r.game == self.game and r.mode != "demo":
-            r.start(self.game, r.mode, r.auto)
-            self.say("Сохранено, оверлей перезапущен.")
+        if self.overlay_here():
+            send_cmd(self.game, "reload")
+            self.say("Сохранено и применено — оверлей обновился на лету.")
         else:
             self.say("Сохранено. Изменения применятся при следующем запуске оверлея.")
+        self.app.refresh_status()
+
+    def restart_overlay(self):
+        """Полный перезапуск (на случай, если что-то зависло): настройки на лету его не требуют."""
+        if not self.save(quiet=True):
+            return
+        r = self.app.runner
+        if r.running() and r.game == self.game:
+            r.start(self.game, r.mode, r.auto)
+            self.say("Оверлей перезапущен.")
+        else:
+            self.launch("")
         self.app.refresh_status()
 
     def setup_rf2_plugin(self):

@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Проверки логики оверлея. Запуск из папки оверлея:  python tests/run_tests.py
 Без экрана тесты с окнами пропускаются; полная самопроверка (все панели, три игры) идёт, если есть дисплей."""
+import json
 import os
 import struct
 import subprocess
 import sys
+import time
 import types
 import unittest
 
@@ -592,6 +594,67 @@ class PerfProbeTests(unittest.TestCase):
         self.assertTrue(os.path.isfile(pr.path))
         self.assertEqual(pr.stats, {})                      # после записи счётчики сбрасываются
         self.assertFalse(O.PROFILE)                         # по умолчанию замер выключен
+
+
+class ZLiveProfileTests(unittest.TestCase):
+    """Настройки на лету: оверлей применяет только то, что лаунчер реально поменял в профиле, и не трогает своё (положения окон)."""
+
+    def setUp(self):
+        import tempfile
+        self.path = os.path.join(tempfile.mkdtemp(), "p.json")
+        self.old = O.CFG_PATH
+        O.CFG_PATH = self.path
+        self.disk = {"font": 13, "rel_x": 100, "alpha": 0.9, "locked": True}
+        self.write(self.disk)
+
+        class Stub:
+            LIVE_SKIP = O.Overlay.LIVE_SKIP
+            prof_sig, prof_mark, poll_profile = O.Overlay.prof_sig, O.Overlay.prof_mark, O.Overlay.poll_profile
+
+            def __init__(s):
+                s.cfg, s.applied = dict(self.disk), []
+                s.cfg["rel_x"] = 555                       # окно подвинули в оверлее, на диск ещё не сохранили
+                s.prof_mark(from_disk=True)
+
+            def apply_live(s, keys):
+                s.applied.append(sorted(keys))
+        self.ov = Stub()
+
+    def tearDown(self):
+        O.CFG_PATH = self.old
+
+    def write(self, d):
+        with open(self.path, "w", encoding="utf-8") as f:
+            json.dump(d, f)
+        t = time.time() + getattr(self, "_n", 0) + 2
+        self._n = getattr(self, "_n", 0) + 2
+        os.utime(self.path, (t, t))
+
+    def test_only_changed_keys_are_applied(self):
+        self.write(dict(self.disk, font=18))
+        self.ov.poll_profile()
+        self.assertEqual(self.ov.applied, [["font"]])
+        self.assertEqual(self.ov.cfg["font"], 18)
+        self.assertEqual(self.ov.cfg["rel_x"], 555)         # свои положения не затираются
+        self.ov.poll_profile()
+        self.assertEqual(len(self.ov.applied), 1)           # файл не менялся — ничего не делаем
+
+    def test_removed_key_and_skip_list(self):
+        d = dict(self.disk, locked=False)
+        del d["alpha"]
+        self.write(d)
+        self.ov.poll_profile()
+        self.assertEqual(self.ov.applied, [["alpha"]])      # locked оверлей ведёт сам
+        self.assertNotIn("alpha", self.ov.cfg)
+
+    def test_broken_file_is_retried(self):
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write('{"font": ')
+        self.ov.poll_profile(force=True)
+        self.assertEqual(self.ov.applied, [])
+        self.write(dict(self.disk, font=20))
+        self.ov.poll_profile()
+        self.assertEqual(self.ov.applied, [["font"]])
 
 
 class LeaderLapsAndVE(unittest.TestCase):

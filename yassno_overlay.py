@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "3.11.21"
+APP_VERSION = "3.11.22"
 import argparse
 import bisect
 import collections
@@ -6164,6 +6164,7 @@ class Overlay:
         r.update_idletasks()
         self.apply_lock()
         self._sig = None
+        self.prof_mark(from_disk=True)
         self.poll_keys()
         self.keep_on_top()
         self.tick()
@@ -6761,6 +6762,7 @@ class Overlay:
             self._state_written = True                     # лаунчер показывает «телеметрия идёт / жду игру» по этому файлу,
             self._state_t = now                            # а редактор раскладки — окна и живые числа (раз в секунду)
             self.write_state()
+        self.poll_profile()
         path = os.path.splitext(CFG_PATH)[0] + ".cmd"
         if not os.path.exists(path):
             return
@@ -6770,6 +6772,8 @@ class Overlay:
             os.remove(path)
         except OSError:
             return
+        if cmd == "reload":
+            self.poll_profile(force=True)
         if cmd == "toggle" or (cmd == "unlock" and self.locked) or (cmd == "lock" and not self.locked):
             self.toggle_lock()
 
@@ -7160,7 +7164,103 @@ class Overlay:
             sub.build()
             sub._sig = None
 
+    # ---------- настройки на лету: лаунчер сохранил профиль — применяем без перезапуска ----------
+    LIVE_SKIP = ("locked", "ver", "screen_layouts", "screen_last")      # это оверлей ведёт сам
+
+    def prof_sig(self):
+        try:
+            st = os.stat(CFG_PATH)
+            return (st.st_mtime_ns, st.st_size)
+        except OSError:
+            return None
+
+    def prof_mark(self, from_disk=False):
+        """Запоминаем, какой профиль сейчас на диске: изменения считаем относительно него, поэтому положения окон,
+        которые вы двигали в оверлее, настройки из лаунчера не затирают."""
+        self._prof_sig = self.prof_sig()
+        snap = None
+        if from_disk:
+            try:
+                with open(CFG_PATH, encoding="utf-8") as f:
+                    snap = json.load(f)
+            except (OSError, ValueError):
+                snap = None
+        self._prof_snap = snap if isinstance(snap, dict) else json.loads(json.dumps(self.cfg, default=str))
+
+    def poll_profile(self, force=False):
+        if getattr(self, "_prof_snap", None) is None:
+            return
+        sig = self.prof_sig()
+        if sig is None or (sig == self._prof_sig and not force):
+            return
+        try:
+            with open(CFG_PATH, encoding="utf-8") as f:
+                new = json.load(f)
+        except (OSError, ValueError):
+            return                                           # лаунчер пишет файл прямо сейчас — подождём следующей проверки
+        if not isinstance(new, dict):
+            return
+        self._prof_sig = sig
+        snap = self._prof_snap
+        keys = [k for k in new if k not in self.LIVE_SKIP and new[k] != snap.get(k)]
+        keys += [k for k in snap if k not in new and k not in self.LIVE_SKIP]
+        self._prof_snap = new
+        if not keys:
+            return
+        for k in keys:
+            if k in new:
+                self.cfg[k] = new[k]
+            else:
+                self.cfg.pop(k, None)
+        try:
+            self.apply_live(keys)
+        except Exception as e:                               # noqa: BLE001  не даём ошибке настройки уронить оверлей
+            print("Настройки на лету: не удалось применить —", e)
+
+    def apply_live(self, keys):
+        """Применяем изменённые настройки к уже работающим окнам."""
+        ks, cf = set(keys), self.cfg
+        if ks & {"theme", "win_style", "theme_mode"}:
+            apply_theme(cf.get("theme"), cf.get("win_style", "classic"), cf.get("theme_mode", "dark"))
+            self.rounded = getattr(self, "rounded", True)
+            for top, cv, rounded in [(self.root, self.canvas, self.rounded)] + [(w.top, w.canvas, getattr(w, "rounded", True)) for w in self.subs]:
+                if not rounded:
+                    try:
+                        top.configure(bg=BG)
+                        cv.configure(bg=BG)
+                    except tk.TclError:
+                        pass
+        if "family" in ks:
+            self.family = pick_family(self.root, cf.get("family"))
+        if ks & {"hotkeys"}:
+            self._hk = None
+        self.rebuild()                                       # шрифты, колонки, размеры и содержимое всех окон
+        for w in self.subs:
+            if w.ON in ks:
+                try:
+                    if cf.get(w.ON, True):
+                        w.top.deiconify()
+                    else:
+                        w.top.withdraw()
+                except tk.TclError:
+                    pass
+            if w.POS[0] in ks or w.POS[1] in ks:
+                try:
+                    w.top.geometry(f"+{int(cf[w.POS[0]])}+{int(cf[w.POS[1]])}")
+                except (KeyError, TypeError, ValueError, tk.TclError):
+                    pass
+        if "x" in ks or "y" in ks:
+            try:
+                self.root.geometry(f"+{int(cf['x'])}+{int(cf['y'])}")
+            except (KeyError, TypeError, ValueError, tk.TclError):
+                pass
+        self.apply_lock()                                    # прозрачность, сквозные клики, подложки
+        self._sig = None
+        for w in self.subs:
+            w._sig = None
+
     def save(self):
+        self.poll_profile()                                  # сначала подхватываем то, что лаунчер успел сохранить
         self.cfg["x"], self.cfg["y"] = self.root.winfo_x(), self.root.winfo_y()
         for w in self.subs:
             self.cfg[w.POS[0]], self.cfg[w.POS[1]] = w.top.winfo_x(), w.top.winfo_y()
@@ -7172,6 +7272,7 @@ class Overlay:
         try:
             with open(CFG_PATH, "w", encoding="utf-8") as f:
                 json.dump(self.cfg, f)
+            self.prof_mark()
         except OSError:
             pass
 
