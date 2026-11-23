@@ -241,6 +241,127 @@ def job_view(j):
     return v
 
 
+# ---------------------------------------------------------------------------------------------------- маршрут рейса
+_WORLD = (-94621.8047, -80209.1641, 79370.13 + 94621.8047, 93782.77 + 80209.1641)     # x1, y1, ширина, высота карты в игровых метрах
+_Z6 = 512 * 64
+_cities = {"v": None}
+
+
+def _norm(s):
+    import unicodedata
+    s = unicodedata.normalize("NFKD", s or "").encode("ascii", "ignore").decode().lower()
+    return "".join(ch for ch in s if ch.isalnum())
+
+
+def _is_subseq(a, b):
+    it = iter(b)
+    return all(ch in it for ch in a)
+
+
+_PRETTY = {
+    "andorralavella": "Andorra la Vella", "badoeynhausen": "Bad Oeynhausen", "banskabystrica": "Banská Bystrica", "bielskobiaa": "Bielsko-Biała",
+    "burgafehmarn": "Burg auf Fehmarn", "clujnapoca": "Cluj-Napoca", "fortwilliam": "Fort William", "frankfurtammain": "Frankfurt am Main",
+    "gorzowwlkp": "Gorzów Wlkp.", "hallesaale": "Halle (Saale)", "keflavikairport": "Keflavík", "klagenfurtamworthersee": "Klagenfurt",
+    "kristiinankaupunki": "Kristiinankaupunki", "lajonquera": "La Jonquera", "lehavre": "Le Havre", "lemans": "Le Mans",
+    "newcastleupontyne": "Newcastle", "piatraneamt": "Piatra Neamț", "sansebastiandonostia": "San Sebastián", "sthelier": "St Helier",
+    "kobenhavn": "København", "koln": "Köln", "munchen": "München", "nurnberg": "Nürnberg", "zurich": "Zürich", "geneve": "Genève",
+    "gdansk": "Gdańsk", "krakow": "Kraków", "lodz": "Łódź", "wroclaw": "Wrocław", "poznan": "Poznań", "szczecin": "Szczecin",
+    "goteborg": "Göteborg", "malmo": "Malmö", "linkoping": "Linköping", "jonkoping": "Jönköping", "orebro": "Örebro", "umea": "Umeå",
+    "dusseldorf": "Düsseldorf", "osnabruck": "Osnabrück", "furth": "Fürth", "liege": "Liège", "brussel": "Brussel", "ijmuiden": "IJmuiden",
+    "orleans": "Orléans", "ostroleka": "Ostrołęka", "plock": "Płock", "suwalki": "Suwałki", "rzeszow": "Rzeszów", "zamosc": "Zamość",
+    "swinoujscie": "Świnoujście", "przemysl": "Przemyśl", "bialystok": "Białystok", "torshavn": "Tórshavn", "hofn": "Höfn",
+}
+
+
+def _pretty(key):
+    return _PRETTY.get(key) or key[:1].upper() + key[1:]
+
+
+def city_table(path=None):
+    """Города карты: список (x, z, имя, {нормализованные псевдонимы}) в игровых метрах. Один город = одна точка (псевдонимы склеены)."""
+    if _cities["v"] is not None and path is None:
+        return _cities["v"]
+    path = path or os.path.join(os.path.dirname(os.path.abspath(__file__)), "ets2_cities.txt")
+    try:
+        with open(path, encoding="utf-8") as f:
+            raw = json.load(f)
+    except (OSError, ValueError):
+        raw = {}
+    groups = {}
+    for k, v in raw.items():
+        groups.setdefault((int(v[0]), int(v[1])), []).append(k)
+    x1, y1, w, h = _WORLD
+    out = []
+    for (px, py), keys in groups.items():
+        # нормальное имя — то, в котором остальные (обрезанные/без диакритики) лежат подпоследовательностью; иначе самое длинное
+        best = max(keys, key=lambda k: (sum(1 for o in keys if _is_subseq(o, k)), len(k)))
+        out.append((x1 + px / _Z6 * w, y1 + py / _Z6 * h, _pretty(best), frozenset(keys)))
+    if path is not None and _cities["v"] is None:
+        _cities["v"] = out
+    return out
+
+
+def job_track(j, folder=None, pad=15.0):
+    """Точки трека, относящиеся к рейсу: (время, x, z, y, км/ч, курс)."""
+    sid = j.get("session")
+    t0, t1 = float(j.get("t0") or 0), float(j.get("t1") or 0)
+    if not sid or t1 <= 0:
+        return []
+    pts = load_track(sid, folder)
+    return [p for p in pts if t0 - pad <= p[0] <= t1 + pad]
+
+
+def route_cities(pts, src="", dst="", radius=2000.0, table=None):
+    """Города, через которые прошёл трек, по порядку проезда: [(имя, x, z)]. Начало и конец называются по рейсу.
+    radius — игровые метры от центра города."""
+    table = table if table is not None else city_table()
+    if len(pts) < 2:
+        return []
+    if len(pts) > 3000:
+        pts = pts[::len(pts) // 3000 + 1] + [pts[-1]]
+    names = {}
+    for key, nm in ((_norm(src), src), (_norm(dst), dst)):
+        if key and nm:
+            names[key] = nm
+    r2 = radius * radius
+    xs = [p[1] for p in pts]
+    zs = [p[2] for p in pts]
+    bx0, bx1, bz0, bz1 = min(xs) - radius, max(xs) + radius, min(zs) - radius, max(zs) + radius
+    cand = [c for c in table if bx0 <= c[0] <= bx1 and bz0 <= c[1] <= bz1]
+    seen, order = {}, []
+    for i, p in enumerate(pts):
+        for c in cand:
+            d = (p[1] - c[0]) ** 2 + (p[2] - c[1]) ** 2
+            if d <= r2:
+                cur = seen.get(c[2])
+                if cur is None:
+                    seen[c[2]] = [i, d]
+                    order.append(c)
+                elif d < cur[1]:
+                    cur[1] = d
+    # порядок — по моменту, ближайшему к центру города (проезд по касательной не должен переставлять города)
+    order.sort(key=lambda c: seen[c[2]][0])
+    res = []
+    first = last = None
+    for c in order:
+        nm = c[2]
+        for k in c[3]:
+            if k in names:
+                nm = names[k]
+        item = (nm, c[0], c[1])
+        if _norm(src) in c[3]:
+            first = item
+        elif _norm(dst) in c[3]:
+            last = item
+        else:
+            res.append(item)
+    if first is not None:                                  # рейс начинается в городе отправления и кончается в городе назначения
+        res.insert(0, first)
+    if last is not None:
+        res.append(last)
+    return res
+
+
 def summarize(sessions, jobs):
     """Общий свод за всё время + рекорды."""
     accs = [s["acc"] for s in sessions]

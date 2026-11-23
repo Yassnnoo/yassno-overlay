@@ -75,7 +75,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.11.23"
+APP_VERSION = "3.11.24"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -1645,6 +1645,12 @@ EN.update({
         "Preview background: night or day track — check how the overlay reads on a dark and a light picture.",
     "Фон предпросмотра: ночное или дневное шоссе — проверить, как окна читаются на тёмной и светлой картинке.":
         "Preview background: night or day highway — check how the windows read on a dark and a light picture.",
+})
+EN.update({
+    "Города по пути": "Cities on the way", "Маршрут": "Route", "Трека нет": "No track",
+    "Для этого рейса нет записанного трека.": "No track was recorded for this trip.",
+    "Рядом с трассой нет известных городов.": "No known cities near the route.",
+    "Топливо": "Fuel",
 })
 EN.update({
     "✔ Режим перемещения ВКЛ — нажмите, чтобы закрепить": "✔ Move mode ON — click to lock the windows",
@@ -10622,9 +10628,9 @@ class Ets2StatsPage(ScrollPage):
         return f"{float(v) * 100:.0f}%"
 
     # ---- элементы
-    def card(self, parent, title, row, col, colspan=1, sub=""):
+    def card(self, parent, title, row, col, colspan=1, sub="", rowspan=1):
         box = RoundBox(parent, radius=14, fill=UI_PANEL, border=UI_BORDER, outer=UI_BG, autow=False, fillh=True)
-        box.grid(row=row, column=col, columnspan=colspan, sticky="nsew", padx=6, pady=6)
+        box.grid(row=row, column=col, columnspan=colspan, rowspan=rowspan, sticky="nsew", padx=6, pady=6)
         f = tk.Frame(box.inner, bg=UI_PANEL)
         f.pack(fill="both", expand=True, padx=14, pady=10)
         hd = tk.Frame(f, bg=UI_PANEL)
@@ -10891,17 +10897,139 @@ class Ets2StatsPage(ScrollPage):
                 ("Средняя скорость", f"{self.n0(v['avg_kmh'])} {tr('км/ч')}" if v["avg_kmh"] else ""),
                 ("Топливо", f"{self.n0(v['fuel_l'])} {tr('л')} · {self.n1(v['l100'])} {tr('л/100 км')}" if v["fuel_l"] else ""),
                 ("Грузовик", f"{v['truck']} {v['plate']}".strip()), ("Прицеп", v["trailer"])])
-            self.kv(self.card(det, "Качество", 0, 2), [
+            self.kv(self.card(det, "Качество", 1, 0), [
                 ("Повреждение груза", f"{v['cargo_damage'] * 100:.1f}%"), ("Удары", str(v["collisions"])),
                 ("Резких торможений", str(v["hard_brakes"])), ("Штрафы", f"{v['fines']} · {self.money(v['fine_total'])}" if v["fines"] else "0"),
                 ("Дорожные сборы", self.money(v["tolls"]) if v["tolls"] else ""),
                 ("Стиль вождения", f"{v['style']:.0f} / 100" if v["style"] is not None else ""),
                 ("Автопарковка / автозагрузка", f"{tr('да') if v['auto_park'] else tr('нет')} / {tr('да') if v['auto_load'] else tr('нет')}")])
+            self.route_view(det, v, js[idx])
         tree.bind("<<TreeviewSelect>>", show)
         first = str(min(self.sel["jobs"], len(views) - 1))
         tree.selection_set(first)
         tree.see(first)
         show()
+
+    # ---- карта рейса: маршрут, города по пути, расход
+    def route_data(self, j):
+        """Трек рейса и города по пути (кэш на последние рейсы)."""
+        cache = self.__dict__.setdefault("_route_cache", {})
+        key = (j.get("session"), j.get("t0"), j.get("t1"))
+        if key not in cache:
+            pts = ETS2STATS.job_track(j, self.snap.get("folder"))
+            cities = ETS2STATS.route_cities(pts, j.get("src_city", ""), j.get("dst_city", "")) if pts else []
+            if len(cache) > 12:
+                cache.pop(next(iter(cache)))
+            cache[key] = (pts, cities)
+        return cache[key]
+
+    def route_view(self, det, v, j):
+        pts, cities = self.route_data(j)
+        # список городов под таблицей
+        body = self.card(det, "Города по пути", 1, 1, sub=str(len(cities)) if cities else "")
+        if cities:
+            tk.Label(body, text="  →  ".join(c[0] for c in cities), bg=UI_PANEL, fg=UI_FG, font=("Segoe UI", 10), justify="left", anchor="nw",
+                     wraplength=250).pack(fill="x", anchor="w")
+            if v["fuel_l"]:
+                tk.Label(body, text=f"{tr('Топливо')}: {self.n0(v['fuel_l'])} {tr('л')}" + (f" · {self.n1(v['l100'])} {tr('л/100 км')}" if v["l100"] else ""),
+                         bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 9)).pack(anchor="w", pady=(8, 0))
+        else:
+            tk.Label(body, text=tr("Для этого рейса нет записанного трека.") if not pts else tr("Рядом с трассой нет известных городов."),
+                     bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 10), wraplength=250, justify="left").pack(anchor="w")
+        # карта справа
+        mb = self.card(det, "Маршрут", 0, 2, rowspan=2, sub=f"{self.n0(v['km'])} {tr('км')}" if v["km"] else "")
+        cv = tk.Canvas(mb, width=300, height=330, bg=MOCK_BG, highlightthickness=0)
+        cv.pack(fill="both", expand=True)
+        st = {"w": 0, "h": 0, "job": None}
+        if ETS2 is not None and ETS2.HAVE_PIL and getattr(self, "_route_tm", None) is None:
+            self._route_tm = ETS2.TileMap()
+
+        def draw(e=None):
+            try:
+                if not cv.winfo_exists():
+                    return
+                w, h = max(160, cv.winfo_width()), max(160, cv.winfo_height())
+                if e is not None and (w, h) == (st["w"], st["h"]):
+                    return
+                st["w"], st["h"] = w, h
+                self.draw_route(cv, pts, cities, getattr(self, "_route_tm", None), st)
+            except tk.TclError:
+                pass
+
+        def poll():                                      # докачались тайлы — перерисовать
+            try:
+                if not cv.winfo_exists():
+                    return
+                tm = getattr(self, "_route_tm", None)
+                if tm is not None and tm.dirty:
+                    tm.dirty = False
+                    draw()
+                cv.after(900, poll)
+            except tk.TclError:
+                pass
+        cv.bind("<Configure>", draw)
+        cv.after(60, draw)
+        cv.after(900, poll)
+
+    @staticmethod
+    def route_box(pts, cities, w, h):
+        """Центр и размах (игровые метры в ширину) так, чтобы маршрут и города целиком влезли."""
+        xs = [p[1] for p in pts] + [c[1] for c in cities]
+        zs = [p[2] for p in pts] + [c[2] for c in cities]
+        cx, cz = (min(xs) + max(xs)) / 2.0, (min(zs) + max(zs)) / 2.0
+        dx, dz = max(max(xs) - min(xs), 1500.0), max(max(zs) - min(zs), 1500.0)
+        span = max(dx, dz * w / float(h)) * 1.28
+        return cx, cz, span
+
+    def draw_route(self, cv, pts, cities, tm, st):
+        w, h = st["w"], st["h"]
+        cv.delete("all")
+        if len(pts) < 2:
+            cv.create_text(w / 2, h / 2, text=tr("Трека нет"), fill=UI_DIM)
+            return
+        cx, cz, span = self.route_box(pts, cities, w, h)
+        sc = w / span
+        if tm is not None:
+            try:
+                img = tm.render(cx, cz, span, w, h)
+                from PIL import ImageEnhance
+                img = ImageEnhance.Brightness(img).enhance(0.62)         # карту приглушаем, чтобы маршрут читался
+                st["photo"] = ETS2.ImageTk.PhotoImage(img, master=cv)
+                cv.create_image(0, 0, image=st["photo"], anchor="nw")
+            except Exception:                            # noqa: BLE001
+                pass
+
+        def P(x, z):
+            return w / 2 + (x - cx) * sc, h / 2 + (z - cz) * sc
+        if len(pts) > 1500:
+            pts = pts[::len(pts) // 1500 + 1] + [pts[-1]]
+        segs = []
+        for a, b in zip(pts, pts[1:]):
+            if b[0] - a[0] > 60 or abs(b[1] - a[1]) > 1500 or abs(b[2] - a[2]) > 1500:      # пауза/телепорт — линию не тянем
+                continue
+            segs.append((P(a[1], a[2]), P(b[1], b[2]), a[4]))
+        for (xa, ya), (xb, yb), _ in segs:                              # тёмная подложка
+            cv.create_line(xa, ya, xb, yb, fill="#0b0f14", width=6, capstyle="round")
+        for (xa, ya), (xb, yb), kmh in segs:
+            cv.create_line(xa, ya, xb, yb, fill=mix("#2ee26d", "#ff3b30", max(0.0, min(1.0, (kmh - 30) / 70.0))), width=3, capstyle="round")
+        placed = []
+        for i, (nm, x, z) in enumerate(cities):
+            X, Y = P(x, z)
+            end = i in (0, len(cities) - 1)
+            r = 4 if end else 3
+            cv.create_oval(X - r, Y - r, X + r, Y + r, fill=UI_FG, outline="#0b0f14", width=1)
+            left = X > w - 8 - 7 * len(nm)                                  # у правого края подпись уходит влево от точки
+            tx, ty = (X - 7 if left else X + 7), Y - 8
+            if any(abs(tx - px) < 60 and abs(ty - py) < 12 for px, py in placed):     # метки не должны слипаться
+                continue
+            placed.append((tx, ty))
+            an = "e" if left else "w"
+            cv.create_text(tx + 1, ty + 1, text=nm, fill="#0b0f14", anchor=an, font=("Segoe UI Semibold", 9))
+            cv.create_text(tx, ty, text=nm, fill="#ffffff", anchor=an, font=("Segoe UI Semibold", 9))
+        sx, sy = P(pts[0][1], pts[0][2])
+        ex, ey = P(pts[-1][1], pts[-1][2])
+        cv.create_oval(sx - 6, sy - 6, sx + 6, sy + 6, fill="#ffffff", outline="#0b0f14", width=2)
+        cv.create_oval(ex - 7, ey - 7, ex + 7, ey + 7, fill=UI_ACCENT, outline="#ffffff", width=2)
 
     # ---- вкладка «Сессии»
     SESS_COLS = (("when", "Запуск игры", 120, "w"), ("dur", "В игре", 80, "e"), ("km", "Км", 64, "e"), ("avg", "Ср. км/ч", 64, "e"),

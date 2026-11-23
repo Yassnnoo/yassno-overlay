@@ -117,3 +117,53 @@ class Ets2StatsFiles(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class Ets2RouteTests(unittest.TestCase):
+    """Маршрут рейса: срез трека по времени и города по пути."""
+
+    def _track(self, names, per=120, t0=1000.0):
+        tab = {c[2]: c for c in ST.city_table()}
+        cs = [tab[n] for n in names]
+        pts, t = [], t0
+        for a, b in zip(cs, cs[1:]):
+            for i in range(per):
+                f = i / per
+                pts.append((t, a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, 0.0, 80.0, 0.0))
+                t += 2
+        return pts, t
+
+    def test_city_table_names(self):
+        names = {c[2] for c in ST.city_table()}
+        self.assertTrue({"Calais", "Frankfurt am Main", "Łódź", "København", "Le Mans"} <= names)
+        self.assertGreater(len(names), 250)
+
+    def test_route_cities_order_and_names(self):
+        pts, _ = self._track(["Calais", "Brussel", "Antwerpen", "Amsterdam"])
+        got = [c[0] for c in ST.route_cities(pts, "Calais", "Amsterdam")]
+        self.assertEqual(got[0], "Calais")
+        self.assertEqual(got[-1], "Amsterdam")
+        self.assertLess(got.index("Brussel"), got.index("Antwerpen"))
+        self.assertEqual(len(got), len(set(got)))                              # город один раз, даже если трасса вернулась
+
+    def test_route_job_name_wins(self):
+        pts, _ = self._track(["Antwerpen", "Rotterdam"])
+        got = [c[0] for c in ST.route_cities(pts, "Antwerp", "Rotterdam")]
+        self.assertEqual(got[0], "Antwerp")                                    # название из рейса, а не из таблицы
+
+    def test_route_far_city_not_included(self):
+        pts, _ = self._track(["Calais", "Brussel"])
+        got = [c[0] for c in ST.route_cities(pts)]
+        self.assertNotIn("Amsterdam", got)
+        self.assertEqual(ST.route_cities(pts[:1]), [])
+
+    def test_job_track_slice(self):
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, "tracks"))
+            with open(os.path.join(d, "tracks", "s1.csv"), "w") as f:
+                for t in range(0, 1000, 10):
+                    f.write(f"{t},{t},0,0,50,0\n")
+            tr = ST.job_track({"session": "s1", "t0": 200.0, "t1": 400.0}, d, pad=0)
+            self.assertEqual((tr[0][0], tr[-1][0]), (200.0, 400.0))
+            self.assertEqual(ST.job_track({"t0": 1, "t1": 2}, d), [])          # рейс без сессии
+            self.assertEqual(ST.job_track({"session": "nope", "t0": 1, "t1": 2}, d), [])
