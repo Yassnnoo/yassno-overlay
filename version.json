@@ -1,6 +1,6 @@
 {
- "version": "3.11.24",
- "notes": "ETS2: в статистике по клику на рейс справа открывается карта маршрута, города по пути и расход топлива",
+ "version": "3.11.25",
+ "notes": "rFactor 2: на «Главной» вместо личных рекордов — таблица сил машин Ace Of Speed 1994",
  "files": [
   "README.txt",
   "diagnose.cmd",
@@ -65,6 +65,7 @@
   "yassno_launcher.py",
   "yassno_overlay.py",
   "yassno_readers.py",
+  "yassno_rf2_cars.py",
   "yassno_route.py",
   "yassno_setups.py",
   "yassno_svgmap.py",

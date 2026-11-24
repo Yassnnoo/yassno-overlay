@@ -40,6 +40,10 @@ try:
 except Exception:                                      # noqa: BLE001
     ETS2SAVE = None
 try:
+    import yassno_rf2_cars as RF2CARS                   # таблица сил машин AOS 1994 для rFactor 2
+except Exception:                                      # noqa: BLE001
+    RF2CARS = None
+try:
     import yassno_ets2_stats as ETS2STATS             # плагин-логгер статистики ETS 2 (dll) и чтение его файлов
 except Exception:                                      # noqa: BLE001
     ETS2STATS = None
@@ -75,7 +79,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.11.24"
+APP_VERSION = "3.11.25"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -1554,7 +1558,7 @@ EN.update({
     "зайдите на трассу с оверлеем": "go on track with the overlay", "Подобрать сетап в игру": "Find a setup for the game",
     "HYMO и P1Doks — бесплатные сетапы, авторы разрешили их раздавать.": "HYMO and P1Doks are free setups shared with the authors' permission.",
     "Сетапы пока есть только для Le Mans Ultimate.": "Setups are only available for Le Mans Ultimate for now.",
-    "Личные рекорды": "Personal bests",
+    "Личные рекорды": "Personal bests", "Силы машин · AOS 94": "Car strengths · AOS 94", "Команда": "Team", "Пилот": "Driver", "Масса": "Mass", "Диффуз.": "Diffuser", "Прижим": "Downforce", "На кг": "Per kg",
     "Пока нет записанных кругов. Рекорды появятся после первой сессии с оверлеем.": "No laps recorded yet. Records appear after your first session with the overlay.",
     "Для этой игры нет программ-спутников.": "No companion programs for this game.", "своя": "custom",
     "Сам определять игру и запускать оверлей": "Detect the game and start the overlay", "Автозапуск оверлея с игрой": "Auto-start overlay with the game", "Закрывать вместе с игрой": "Close with the game", "ГОТОВО К ГОНКЕ": "READY TO RACE", "Только оверлей": "Overlay only",
@@ -11498,7 +11502,7 @@ class HomePage(tk.Frame):
             self.set_card(2, "Грузовик", "Оверлей ETS 2", self.app.show_ets2)
         else:
             self.set_card(0, "Последняя сессия", "Вся статистика", self.app.show_stats)
-            self.set_card(1, "Сетапы HYMO" if g == "lmu" else "Личные рекорды", "", None)
+            self.set_card(1, "Сетапы HYMO" if g == "lmu" else ("Силы машин · AOS 94" if g == "rf2" and RF2CARS else "Личные рекорды"), "", None)
             self.set_card(2, "Запускать вместе с игрой", "Настроить", lambda: self.open_panel("apps"))
         self.c_set_badge.pack_forget()
         try:
@@ -11938,6 +11942,9 @@ class HomePage(tk.Frame):
         for w in body.winfo_children():
             w.destroy()
         badge.pack_forget()
+        if self.app.selected == "rf2" and RF2CARS is not None:
+            self.fill_aos(body)
+            return
         if self.app.selected in ("rf2", "iracing"):
             self.fill_records(body, self.app.selected)
             return
@@ -11963,6 +11970,49 @@ class HomePage(tk.Frame):
         b.pack(fill="x", pady=(12, 0))
         ttk.Button(b, text="Подобрать сетап в игру", style="Accent.TButton" if fresh else "TButton",
                    command=self.find_setups).pack(side="left")
+
+    AOS_COLS = (("n", "№", 30, "e"), ("team", "Команда", 92, "w"), ("driver", "Пилот", 104, "w"), ("mass", "Масса", 44, "e"),
+                ("diffuser", "Диффуз.", 50, "e"), ("tc", "TC", 30, "center"), ("downforce", "Прижим", 52, "e"), ("per_kg", "На кг", 46, "e"))
+
+    def fill_aos(self, body):
+        """Таблица сил машин Ace Of Speed 1994: клик по заголовку сортирует; сильнейшие по прижиму на кг — сверху."""
+        cars = RF2CARS.cars()
+        tree = ttk.Treeview(body, columns=[c[0] for c in self.AOS_COLS], show="headings", height=min(len(cars), 17), selectmode="browse")
+        sb = ttk.Scrollbar(body, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=sb.set)
+        state = {"key": "per_kg", "rev": True}
+        low_first = ("mass", "team", "driver")              # у массы лучше меньшее; текст — по алфавиту
+
+        def fill():
+            key = state["key"]
+            rows = sorted(cars, key=lambda c: (int(c[key]) if key == "n" else (str(c[key]).lower() if key in ("team", "driver") else c[key]), int(c["n"])),
+                          reverse=state["rev"])
+            tree.delete(*tree.get_children())
+            top = max(c["per_kg"] for c in cars)
+            low = min(c["per_kg"] for c in cars)
+            for c in rows:
+                tag = ("top",) if c["per_kg"] >= top - 0.06 else (("low",) if c["per_kg"] <= low + 0.001 else ())
+                tree.insert("", "end", tags=tag, values=(
+                    c["n"], c["team"].split("-")[0].split(" ")[0], RF2CARS.short_name(c["driver"]), c["mass"], f"−{c['diffuser']:.2f}", "✓" if c["tc"] else "", c["downforce"], f"{c['per_kg']:.2f}"))
+            for k, name, w, an in self.AOS_COLS:
+                mark = (" ▼" if state["rev"] else " ▲") if k == state["key"] else ""
+                tree.heading(k, text=tr(name) + mark, command=lambda k=k: sort(k))
+
+        def sort(k):
+            if state["key"] == k:
+                state["rev"] = not state["rev"]
+            else:
+                state["key"], state["rev"] = k, k not in low_first and k != "n"
+            fill()
+        for k, name, w, an in self.AOS_COLS:
+            tree.column(k, width=w, minwidth=w, anchor=an, stretch=(k == "driver"))
+        tree.tag_configure("top", foreground="#3ecf8e")
+        tree.tag_configure("low", foreground=UI_DIM)
+        fill()
+        tk.Label(body, text=tr("Мод Ace Of Speed 1994, по .hdv: масса, крылья, диффузор. Прижим — кгс, «на кг» — на килограмм массы. Зелёные — сильнейшие по аэро. Это прикидка, не время круга."),
+                 bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 9), justify="left", anchor="w", wraplength=440).pack(side="bottom", fill="x", pady=(8, 0))
+        tree.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
 
     def fill_records(self, body, g):
         """«Личные рекорды»: лучший круг по каждой трассе из записанных сессий этой игры (последние по времени — сверху)."""
