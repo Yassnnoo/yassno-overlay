@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "3.11.28"
+APP_VERSION = "3.11.29"
 import argparse
 import bisect
 import collections
@@ -8271,8 +8271,10 @@ def main():
                 far = ov.snap_pos(ov.ped.top, 400, 300)
                 ox = ov.root.winfo_x() + ov.root.winfo_width()
                 near = ov.snap_pos(ov.ped.top, ox + 6, 300)[0]
-                if near != ox and not (abs(far[0] - 400) > 0):
-                    SELFTEST.append("магнит окон: к соседнему окну не прилип (%s вместо %s)" % (near, ox))
+                # рядом с краем окна магнит обязан сработать; к какой именно линии — зависит от раскладки (рядом может быть
+                # край другого окна ближе), поэтому проверяем сам факт прилипания, а не точную координату
+                if near == ox + 6:
+                    SELFTEST.append("магнит окон: к соседнему окну не прилип (%s, край окна на %s)" % (near, ox))
             except Exception:
                 import traceback
                 SELFTEST.append(traceback.format_exc(limit=-3).strip())
