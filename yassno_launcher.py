@@ -83,7 +83,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.11.30"
+APP_VERSION = "3.11.31"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -672,7 +672,7 @@ def default_launcher():
     return {"autostart": True, "close_with_game": True, "theme": "dark", "lang": "ru", "win_start": False,
             "start_min": False, "min_tray": False, "close_tray": False, "stop_on_exit": False, "poll_sec": 2.5,
             "apps_close": True, "launch_with_game": True, "telemetry": True, "i2_path": "", "tel_strips": [],
-            "auto_update": True, "shortcut_asked": False, "last_view": "", "intro_anim": True, "ui_anim": True, "accent_by_game": True, "shadows": True, "pv_bg": "dark", "perf_log": False}
+            "auto_update": True, "shortcut_asked": False, "last_view": "", "intro_anim": True, "ui_anim": True, "accent_by_game": True, "shadows": True, "pv_bg": "dark", "perf_log": False, "rf2_dir": ""}
 
 
 def load_launcher():
@@ -1686,7 +1686,7 @@ EN.update({
     "Собираю повтор…": "Building replay…", "машин": "cars", "кругов": "laps", "МБ": "MB", "Откройте его в игре: Мониторинг → Повторы.": "Open it in the game: Monitor → Replays.",
     "Готово: ": "Done: ", "Не получилось открыть повтор: ": "Could not open the replay: ", "Не получилось сохранить: ": "Could not save: ",
     "Отметьте круги слева (двойной клик или кнопка) и сохраните новый повтор.": "Pick laps on the left (double-click or the button) and save the new replay.",
-    "Выберите повтор .Vcr из UserData\\Replays (он появляется там после гонки или сохранения повтора в игре).": "Choose a .Vcr replay from UserData\\Replays (it appears there after a race or when you save a replay in the game).",
+    "Повторы берутся из UserData\\Replays игры, новые сохраняются туда же. Другой файл — «Открыть повтор…».": "Choose a .Vcr replay from UserData\\Replays (it appears there after a race or when you save a replay in the game).",
     "(повторы не найдены — нажмите «Открыть повтор…»)": "(no replays found — press “Open replay…”)",
     "Нельзя сохранять поверх исходного повтора: выберите другое имя.": "You cannot overwrite the source replay: pick another name.",
     "Повтор": "Replay", "Повторы rFactor 2": "rFactor 2 replays", "Все файлы": "All files",
@@ -11268,10 +11268,25 @@ class ReplayEditor:
         self.build()
 
     # --- интерфейс -------------------------------------------------------------------------------------------
-    def replays_dir(self):
-        rf = find_rf2_dir()
-        d = os.path.join(rf, "UserData", "Replays") if rf else ""
-        return d if d and os.path.isdir(d) else ""
+    def replays_dir(self, ask=False):
+        """UserData\\Replays игры: папка rFactor 2 берётся из библиотек Steam или из того, что вы указали раньше."""
+        root = self.app.cfg.get("rf2_dir") or find_rf2_dir()
+        if not root and ask:
+            root = filedialog.askdirectory(parent=self.app.root, title=tr("Папка rFactor 2 (где лежат Bin64 и UserData)")) or ""
+            if root:
+                self.app.cfg["rf2_dir"] = root
+                try:
+                    write_json(LAUNCHER_CFG, self.app.cfg)
+                except Exception:                        # noqa: BLE001
+                    pass
+        if not root or not os.path.isdir(os.path.join(root, "UserData")):
+            return ""
+        d = os.path.join(root, "UserData", "Replays")
+        try:
+            os.makedirs(d, exist_ok=True)
+        except OSError:
+            return ""
+        return d
 
     def build(self):
         body = self.body
@@ -11412,6 +11427,7 @@ class ReplayEditor:
                     self.busy = False
                     self.refresh_out()
                     self.status.config(text=m[1])
+                    self.fill_files()
                 elif m[0] == "save_error":
                     self.busy = False
                     self.refresh_out()
@@ -11525,9 +11541,17 @@ class ReplayEditor:
         if self.busy or not self.picks or self.rep is None:
             return
         base = os.path.splitext(os.path.basename(self.path))[0]
-        out = filedialog.asksaveasfilename(parent=self.app.root, title=tr("Сохранить новый повтор"), defaultextension=".Vcr",
-                                           initialdir=os.path.dirname(self.path), initialfile=base + "_laps.Vcr",
-                                           filetypes=[(tr("Повторы rFactor 2"), "*.Vcr"), (tr("Все файлы"), "*.*")])
+        d = self.replays_dir(ask=True)
+        if d:                                            # кладём прямо в UserData\\Replays, чтобы повтор сразу был виден в игре
+            out = os.path.join(d, base + "_laps.Vcr")
+            n = 2
+            while os.path.exists(out):
+                out = os.path.join(d, base + "_laps" + str(n) + ".Vcr")
+                n += 1
+        else:
+            out = filedialog.asksaveasfilename(parent=self.app.root, title=tr("Сохранить новый повтор"), defaultextension=".Vcr",
+                                               initialdir=os.path.dirname(self.path), initialfile=base + "_laps.Vcr",
+                                               filetypes=[(tr("Повторы rFactor 2"), "*.Vcr"), (tr("Все файлы"), "*.*")])
         if not out:
             return
         if os.path.abspath(out).lower() == os.path.abspath(self.path).lower():
