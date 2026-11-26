@@ -79,7 +79,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.11.26"
+APP_VERSION = "3.11.27"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -1558,7 +1558,7 @@ EN.update({
     "зайдите на трассу с оверлеем": "go on track with the overlay", "Подобрать сетап в игру": "Find a setup for the game",
     "HYMO и P1Doks — бесплатные сетапы, авторы разрешили их раздавать.": "HYMO and P1Doks are free setups shared with the authors' permission.",
     "Сетапы пока есть только для Le Mans Ultimate.": "Setups are only available for Le Mans Ultimate for now.",
-    "Личные рекорды": "Personal bests", "Силы машин · AOS 94": "Car strengths · AOS 94", "Команда": "Team", "Пилот": "Driver", "Масса": "Mass", "Диффуз.": "Diffuser", "Прижим": "Downforce", "На кг": "Per kg",
+    "Личные рекорды": "Personal bests", "Силы машин · AOS 94": "Car strengths · AOS 94", "Гран при Италии": "Italian GP", "Гран при Бельгии": "Belgian GP", "Команда": "Team", "Пилот": "Driver", "Масса": "Mass", "Диффуз.": "Diffuser", "Прижим": "Downforce", "На кг": "Per kg",
     "Пока нет записанных кругов. Рекорды появятся после первой сессии с оверлеем.": "No laps recorded yet. Records appear after your first session with the overlay.",
     "Для этой игры нет программ-спутников.": "No companion programs for this game.", "своя": "custom",
     "Сам определять игру и запускать оверлей": "Detect the game and start the overlay", "Автозапуск оверлея с игрой": "Auto-start overlay with the game", "Закрывать вместе с игрой": "Close with the game", "ГОТОВО К ГОНКЕ": "READY TO RACE", "Только оверлей": "Overlay only",
@@ -11971,19 +11971,40 @@ class HomePage(tk.Frame):
         ttk.Button(b, text="Подобрать сетап в игру", style="Accent.TButton" if fresh else "TButton",
                    command=self.find_setups).pack(side="left")
 
-    AOS_COLS = (("n", "№", 30, "e"), ("team", "Команда", 92, "w"), ("driver", "Пилот", 104, "w"), ("mass", "Масса", 44, "e"),
-                ("diffuser", "Диффуз.", 50, "e"), ("tc", "TC", 30, "center"), ("downforce", "Прижим", 52, "e"), ("per_kg", "На кг", 46, "e"))
+    AOS_COLS = (("n", "№", 28, "e"), ("team", "Команда", 76, "w"), ("driver", "Пилот", 96, "w"), ("mass", "Масса", 54, "e"),
+                ("diffuser", "Диффуз.", 60, "e"), ("tc", "TC", 30, "center"), ("downforce", "Прижим", 62, "e"), ("per_kg", "На кг", 52, "e"))
 
     def fill_aos(self, body):
         """Таблица сил машин Ace Of Speed 1994: клик по заголовку сортирует; сильнейшие по прижиму на кг — сверху."""
-        cars = RF2CARS.cars()
+        ntab = len(RF2CARS.TABLES)
+        tab = {"i": getattr(self, "_aos_tab", ntab - 1) % ntab}          # по умолчанию — самая свежая таблица
+        cars = RF2CARS.cars(tab["i"])
+        nav = tk.Frame(body, bg=UI_PANEL)
+        nav.pack(side="top", fill="x", pady=(0, 6))
+        arrows = []
+        for sym, step in (("◀", -1), ("▶", 1)):
+            a = tk.Label(nav, text=sym, bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 11), cursor="hand2", padx=8)
+            a.bind("<Enter>", lambda e, a=a: a.config(fg=UI_FG))
+            a.bind("<Leave>", lambda e, a=a: a.config(fg=UI_DIM))
+            arrows.append((a, step))
+        arrows[0][0].pack(side="left")
+        nav_title = tk.Label(nav, text="", bg=UI_PANEL, fg=UI_FG, font=("Segoe UI Semibold", 10))
+        nav_title.pack(side="left", expand=True)
+        arrows[1][0].pack(side="right")
         tree = ttk.Treeview(body, columns=[c[0] for c in self.AOS_COLS], show="headings", height=min(len(cars), 17), selectmode="browse")
         sb = ttk.Scrollbar(body, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=sb.set)
         state = {"key": "per_kg", "rev": True}
         low_first = ("mass", "team", "driver")              # у массы лучше меньшее; текст — по алфавиту
 
+        def flip(step):
+            tab["i"] = (tab["i"] + step) % ntab
+            self._aos_tab = tab["i"]
+            cars[:] = RF2CARS.cars(tab["i"])
+            fill()
+
         def fill():
+            nav_title.config(text=f"{tr(RF2CARS.TABLES[tab['i']][0])}   ·   {tab['i'] + 1}/{ntab}")
             key = state["key"]
             rows = sorted(cars, key=lambda c: (int(c[key]) if key == "n" else (str(c[key]).lower() if key in ("team", "driver") else c[key]), int(c["n"])),
                           reverse=state["rev"])
@@ -12008,8 +12029,10 @@ class HomePage(tk.Frame):
             tree.column(k, width=w, minwidth=w, anchor=an, stretch=(k == "driver"))
         tree.tag_configure("top", foreground="#3ecf8e")
         tree.tag_configure("low", foreground=UI_DIM)
+        for a, step in arrows:
+            a.bind("<Button-1>", lambda e, st=step: flip(st))
         fill()
-        tk.Label(body, text=tr("Мод Ace Of Speed 1994, по .hdv: масса, крылья, диффузор. Прижим — кгс, «на кг» — на килограмм массы. Зелёные — сильнейшие по аэро. Это прикидка, не время круга."),
+        tk.Label(body, text=tr("Мод Ace Of Speed 1994, по .hdv: масса, крылья, диффузор. Стрелками сверху — таблицы по этапам. Прижим — кгс, «на кг» — на килограмм массы. Зелёные — сильнейшие по аэро. Это прикидка, не время круга."),
                  bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 9), justify="left", anchor="w", wraplength=440).pack(side="bottom", fill="x", pady=(8, 0))
         tree.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")

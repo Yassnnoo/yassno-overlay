@@ -170,12 +170,18 @@ class Ets2RouteTests(unittest.TestCase):
 
 
 class Rf2CarsTests(unittest.TestCase):
-    def test_table(self):
+    def test_tables(self):
         import yassno_rf2_cars as R
-        cs = R.cars()
-        self.assertEqual(len(cs), 26)
-        self.assertEqual(len({c["n"] for c in cs}), 26)
-        self.assertEqual(cs[0]["n"], "7")                                      # сильнейший по прижиму на кг — McLaren #7
-        self.assertTrue(all(abs(c["downforce"] / c["mass"] - c["per_kg"]) < 0.002 for c in cs))
+        self.assertEqual([n for n, _ in R.TABLES], ["Гран при Италии", "Гран при Бельгии"])
+        for i in range(len(R.TABLES)):
+            cs = R.cars(i)
+            self.assertEqual(len(cs), 26)
+            self.assertEqual(len({c["n"] for c in cs}), 26)
+            self.assertEqual(cs[0]["n"], "7")                                  # сильнейший по прижиму на кг — McLaren #7
+            self.assertTrue(all(abs(c["downforce"] / c["mass"] - c["per_kg"]) < 0.002 for c in cs))
+        self.assertEqual(R.cars(2)[0], R.cars(0)[0])                            # индекс по кругу
+        it, be = {c["n"]: c for c in R.cars(0)}, {c["n"]: c for c in R.cars(1)}
+        self.assertEqual((it["4"]["mass"], be["4"]["mass"]), (615, 605))        # Tyrrell #4 стал легче
+        self.assertTrue(it["4"]["tc"] and not be["4"]["tc"])
         self.assertEqual(R.short_name("Vladimir Zinoviev"), "V. Zinoviev")
         self.assertEqual(R.short_name("MaX / OldWolf"), "MaX / OldWolf")
