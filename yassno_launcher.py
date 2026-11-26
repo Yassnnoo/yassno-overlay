@@ -79,7 +79,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.11.27"
+APP_VERSION = "3.11.28"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -1558,7 +1558,7 @@ EN.update({
     "зайдите на трассу с оверлеем": "go on track with the overlay", "Подобрать сетап в игру": "Find a setup for the game",
     "HYMO и P1Doks — бесплатные сетапы, авторы разрешили их раздавать.": "HYMO and P1Doks are free setups shared with the authors' permission.",
     "Сетапы пока есть только для Le Mans Ultimate.": "Setups are only available for Le Mans Ultimate for now.",
-    "Личные рекорды": "Personal bests", "Силы машин · AOS 94": "Car strengths · AOS 94", "Гран при Италии": "Italian GP", "Гран при Бельгии": "Belgian GP", "Команда": "Team", "Пилот": "Driver", "Масса": "Mass", "Диффуз.": "Diffuser", "Прижим": "Downforce", "На кг": "Per kg",
+    "Личные рекорды": "Personal bests", "Силы машин · AOS 94": "Car strengths · AOS 94", "Гран при Италии": "Italian GP", "Гран при Бельгии": "Belgian GP", "Команда": "Team", "Пилот": "Driver", "Масса": "Mass", "Диф.": "Diff.", "Приж.": "DF", "На кг": "Per kg",
     "Пока нет записанных кругов. Рекорды появятся после первой сессии с оверлеем.": "No laps recorded yet. Records appear after your first session with the overlay.",
     "Для этой игры нет программ-спутников.": "No companion programs for this game.", "своя": "custom",
     "Сам определять игру и запускать оверлей": "Detect the game and start the overlay", "Автозапуск оверлея с игрой": "Auto-start overlay with the game", "Закрывать вместе с игрой": "Close with the game", "ГОТОВО К ГОНКЕ": "READY TO RACE", "Только оверлей": "Overlay only",
@@ -11971,8 +11971,8 @@ class HomePage(tk.Frame):
         ttk.Button(b, text="Подобрать сетап в игру", style="Accent.TButton" if fresh else "TButton",
                    command=self.find_setups).pack(side="left")
 
-    AOS_COLS = (("n", "№", 28, "e"), ("team", "Команда", 76, "w"), ("driver", "Пилот", 96, "w"), ("mass", "Масса", 54, "e"),
-                ("diffuser", "Диффуз.", 60, "e"), ("tc", "TC", 30, "center"), ("downforce", "Прижим", 62, "e"), ("per_kg", "На кг", 52, "e"))
+    AOS_COLS = (("n", "№", 26, "e"), ("team", "Команда", 74, "w"), ("driver", "Пилот", 78, "w"), ("mass", "Масса", 48, "e"),
+                ("diffuser", "Диф.", 52, "e"), ("tc", "TC", 24, "center"), ("downforce", "Приж.", 48, "e"), ("per_kg", "На кг", 46, "e"))
 
     def fill_aos(self, body):
         """Таблица сил машин Ace Of Speed 1994: клик по заголовку сортирует; сильнейшие по прижиму на кг — сверху."""
@@ -12032,7 +12032,7 @@ class HomePage(tk.Frame):
         for a, step in arrows:
             a.bind("<Button-1>", lambda e, st=step: flip(st))
         fill()
-        tk.Label(body, text=tr("Мод Ace Of Speed 1994, по .hdv: масса, крылья, диффузор. Стрелками сверху — таблицы по этапам. Прижим — кгс, «на кг» — на килограмм массы. Зелёные — сильнейшие по аэро. Это прикидка, не время круга."),
+        tk.Label(body, text=tr("Мод Ace Of Speed 1994, по .hdv: масса, крылья, диффузор. Стрелками сверху — таблицы по этапам. Диф. — диффузор, Приж. — прижим в кгс, «на кг» — на килограмм массы. Зелёные — сильнейшие по аэро. Это прикидка, не время круга."),
                  bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 9), justify="left", anchor="w", wraplength=440).pack(side="bottom", fill="x", pady=(8, 0))
         tree.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")

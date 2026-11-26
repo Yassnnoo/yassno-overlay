@@ -183,5 +183,7 @@ class Rf2CarsTests(unittest.TestCase):
         it, be = {c["n"]: c for c in R.cars(0)}, {c["n"]: c for c in R.cars(1)}
         self.assertEqual((it["4"]["mass"], be["4"]["mass"]), (615, 605))        # Tyrrell #4 стал легче
         self.assertTrue(it["4"]["tc"] and not be["4"]["tc"])
+        self.assertEqual((it["5"]["driver"], be["5"]["driver"]), ("Alexey Kapustin", "Andrei Rudei"))   # пилоты поменялись между командами
+        self.assertEqual(be["9"]["driver"], "Test Pilot 1")
         self.assertEqual(R.short_name("Vladimir Zinoviev"), "V. Zinoviev")
         self.assertEqual(R.short_name("MaX / OldWolf"), "MaX / OldWolf")
