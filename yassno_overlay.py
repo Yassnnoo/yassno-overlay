@@ -38,7 +38,7 @@ Standings Overlay (v5) — таблица результатов поверх Le
     Ctrl+Shift+Y  — вид шин (подробная / компактная / износ)
 Нужен режим игры «Окно без рамки» (Borderless) или «В окне».
 """
-APP_VERSION = "3.11.25"
+APP_VERSION = "3.11.26"
 import argparse
 import bisect
 import collections
@@ -182,6 +182,14 @@ def fmt_gap(sec, laps):
         m = int(sec // 60)
         return f"+{m}:{sec - m * 60:04.1f}"
     return f"+{sec:.1f}" if sec >= 10 else f"+{sec:.2f}"
+
+
+def laps_word(n):
+    """КРУГ / КРУГА / КРУГОВ по числу: 1 круг, 2–4 круга, 5–20 кругов, 21 круг, 22 круга, 111 кругов."""
+    n = abs(int(n))
+    if 10 < n % 100 < 15:
+        return "КРУГОВ"
+    return "КРУГ" if n % 10 == 1 else "КРУГА" if 1 < n % 10 < 5 else "КРУГОВ"
 
 
 def group_gaps(group, timed):
@@ -7645,9 +7653,10 @@ class Overlay:
                         nl = next((x["laps"] for x in cars if x["player"]), 0)
                     if nl > 0:
                         lt = str(nl)
-                        c.create_text(xl, cy + 2, text="КРУГОВ", fill=DIM, anchor="e", font=self.small)
-                        c.create_text(xl - self.small.measure("КРУГОВ") - 8, cy, text=lt, fill=FG, anchor="e", font=self.big)
-                        xl -= self.small.measure("КРУГОВ") + self.big.measure(lt) + 22
+                        lw = laps_word(nl)
+                        c.create_text(xl, cy + 2, text=lw, fill=DIM, anchor="e", font=self.small)
+                        c.create_text(xl - self.small.measure(lw) - 8, cy, text=lt, fill=FG, anchor="e", font=self.big)
+                        xl -= self.small.measure(lw) + self.big.measure(lt) + 22
             if session and show_s:
                 self.pill(xl, cy, session, ACCENT)
         elif not ok:

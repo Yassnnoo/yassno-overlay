@@ -42,6 +42,14 @@ def run_reader(steps, car=1):
     return [c for c in out["cars"] if c["key"] == car]
 
 
+class LapsWord(unittest.TestCase):
+    def test_plural(self):
+        w = {1: "КРУГ", 2: "КРУГА", 4: "КРУГА", 5: "КРУГОВ", 11: "КРУГОВ", 12: "КРУГОВ", 14: "КРУГОВ", 20: "КРУГОВ",
+             21: "КРУГ", 22: "КРУГА", 25: "КРУГОВ", 101: "КРУГ", 111: "КРУГОВ", 112: "КРУГОВ", 122: "КРУГА", 0: "КРУГОВ"}
+        for n, word in w.items():
+            self.assertEqual(O.laps_word(n), word, n)
+
+
 class IracingRadio(unittest.TestCase):
     def test_radio_flag_on_talking_car(self):
         r = O.IracingReader(source=lambda: None)
