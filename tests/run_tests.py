@@ -850,6 +850,7 @@ class SetupHubPack(unittest.TestCase):
 
 
 from test_ets2_stats import *  # noqa: E402,F401,F403  (статистика ETS 2 из dll-плагина)
+from test_vcr import *  # noqa: E402,F401,F403  (повторы rFactor 2: разбор и пересборка .vcr)
 from test_ets2 import *  # noqa: E402,F401,F403  (проверки ETS2: структура телеметрии, карта, конвой, масштаб)
 
 

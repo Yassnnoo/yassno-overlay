@@ -1,6 +1,6 @@
 {
- "version": "3.11.29",
- "notes": "Внутренняя самопроверка магнита окон больше не ложно срабатывает (на работу оверлея не влияет)",
+ "version": "3.11.30",
+ "notes": "rFactor 2: редактор повторов — собери новый повтор из выбранных кругов любых пилотов (вкладка «Повторы»)",
  "files": [
   "README.txt",
   "diagnose.cmd",
@@ -69,6 +69,7 @@
   "yassno_route.py",
   "yassno_setups.py",
   "yassno_svgmap.py",
+  "yassno_vcr.py",
   "yassno_wheels.py"
  ]
 }

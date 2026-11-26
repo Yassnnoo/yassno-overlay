@@ -44,6 +44,10 @@ try:
 except Exception:                                      # noqa: BLE001
     RF2CARS = None
 try:
+    import yassno_vcr as VCR                            # пересборка повторов rFactor 2 (.vcr) из выбранных кругов
+except Exception:                                      # noqa: BLE001
+    VCR = None
+try:
     import yassno_ets2_stats as ETS2STATS             # плагин-логгер статистики ETS 2 (dll) и чтение его файлов
 except Exception:                                      # noqa: BLE001
     ETS2STATS = None
@@ -79,7 +83,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.11.29"
+APP_VERSION = "3.11.30"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -1672,6 +1676,22 @@ EN.update({
     "Не удалось удалить": "Could not delete",
     "Записывать статистику сессий (вкладка «Статистика»)": "Record session statistics (the “Statistics” tab)",
     "Круг": "Lap", "Время": "Time", "Топливо, л": "Fuel, L", "Остаток, л": "Left, L", "Износ/круг, %": "Wear/lap, %", "Пит": "Pit",
+})
+EN.update({
+    "Повторы": "Replays", "Повторы rFactor 2": "rFactor 2 replays", "Исходный повтор": "Source replay", "Круги в повторе": "Laps in the replay",
+    "Новый повтор": "New replay", "Открыть повтор…": "Open replay…", "Пилот:": "Driver:", "Все": "All", "только с временем": "timed laps only",
+    "Пилот": "Driver", "Машина": "Car", "Круг": "Lap", "Время": "Time", "Добавить выбранные →": "Add selected →",
+    "Лучшие круги всех пилотов": "Best laps of all drivers", "Убрать": "Remove", "Очистить": "Clear",
+    "Сохранить новый повтор…": "Save new replay…", "Сохранить новый повтор": "Save new replay", "Читаю повтор…": "Reading replay…",
+    "Собираю повтор…": "Building replay…", "машин": "cars", "кругов": "laps", "МБ": "MB", "Откройте его в игре: Мониторинг → Повторы.": "Open it in the game: Monitor → Replays.",
+    "Готово: ": "Done: ", "Не получилось открыть повтор: ": "Could not open the replay: ", "Не получилось сохранить: ": "Could not save: ",
+    "Отметьте круги слева (двойной клик или кнопка) и сохраните новый повтор.": "Pick laps on the left (double-click or the button) and save the new replay.",
+    "Выберите повтор .Vcr из UserData\\Replays (он появляется там после гонки или сохранения повтора в игре).": "Choose a .Vcr replay from UserData\\Replays (it appears there after a race or when you save a replay in the game).",
+    "(повторы не найдены — нажмите «Открыть повтор…»)": "(no replays found — press “Open replay…”)",
+    "Нельзя сохранять поверх исходного повтора: выберите другое имя.": "You cannot overwrite the source replay: pick another name.",
+    "Повтор": "Replay", "Повторы rFactor 2": "rFactor 2 replays", "Все файлы": "All files",
+    "Соберите свой повтор: откройте любой повтор гонки, отметьте круги нужных пилотов — лаунчер запишет новый файл, где эти круги едут одновременно. Исходный повтор не меняется.":
+        "Build your own replay: open any race replay, pick the laps you want — the launcher writes a new file where those laps run together. The source replay is not changed.",
 })
 EN_PREFIX.extend([
     ("Запустить оверлей (", "Start overlay ("), ("Сохранено: ", "Saved: "), ("Стёрто карт: ", "Maps erased: "),
@@ -11222,12 +11242,331 @@ class Ets2StatsPage(ScrollPage):
         return ""
 
 
+def lap_str(t):
+    """время круга для таблиц: 1:23.456, пусто — «—»"""
+    return fmt_time(t) if isinstance(t, (int, float)) and t > 0 else "—"
+
+
+class ReplayEditor:
+    """rF2: редактор повторов. Открываем .Vcr, видим круги всех пилотов, отмечаем нужные — лаунчер собирает новый повтор
+    (каждый круг — отдельная машина, все стартуют вместе), который можно открыть в игре. Как rF2 Replay Office."""
+    LAP_COLS = (("name", "Пилот", 170, "w"), ("veh", "Машина", 150, "w"), ("num", "Круг", 46, "e"), ("time", "Время", 82, "e"),
+                ("s1", "S1", 72, "e"), ("s2", "S2", 72, "e"), ("s3", "S3", 72, "e"))
+    ALL = "Все"
+
+    def __init__(self, body, app):
+        self.app, self.body = app, body
+        self.rep = None
+        self.path = ""
+        self.laps = []
+        self.picks = []
+        self._rows = {}
+        self.busy = False
+        self._q = queue.Queue()
+        self._sort = ("name", False)
+        self.after_id = None
+        self.build()
+
+    # --- интерфейс -------------------------------------------------------------------------------------------
+    def replays_dir(self):
+        rf = find_rf2_dir()
+        d = os.path.join(rf, "UserData", "Replays") if rf else ""
+        return d if d and os.path.isdir(d) else ""
+
+    def build(self):
+        body = self.body
+        src = section(body, "Исходный повтор")
+        src.pack(fill="x", pady=(0, 10))
+        r = ttk.Frame(src)
+        r.pack(fill="x", padx=6, pady=(0, 4))
+        ttk.Button(r, text="Открыть повтор…", style="Accent.TButton", command=self.pick).pack(side="left")
+        self.files = ttk.Combobox(r, state="readonly", width=44)
+        self.files.pack(side="left", padx=(10, 0))
+        self.files.bind("<<ComboboxSelected>>", lambda e: self.open_listed())
+        self._listed = []
+        self.fill_files()
+        self.info = ttk.Label(src, text="Выберите повтор .Vcr из UserData\\Replays (он появляется там после гонки или сохранения повтора в игре).",
+                              style="Dim.TLabel", justify="left", wraplength=820)
+        self.info.pack(anchor="w", padx=6, pady=(2, 4))
+
+        cols = ttk.Frame(body)
+        cols.pack(fill="both", expand=True)
+        cols.columnconfigure(0, weight=3)
+        cols.columnconfigure(1, weight=2)
+        left = section(cols, "Круги в повторе")
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        right = section(cols, "Новый повтор")
+        right.grid(row=0, column=1, sticky="nsew")
+        # левая часть: фильтры и таблица кругов
+        fl = ttk.Frame(left)
+        fl.pack(fill="x", padx=6, pady=(0, 4))
+        ttk.Label(fl, text="Пилот:", style="Dim.TLabel").pack(side="left")
+        self.f_name = ttk.Combobox(fl, state="readonly", width=24, values=[tr(self.ALL)])
+        self.f_name.set(tr(self.ALL))
+        self.f_name.pack(side="left", padx=(6, 12))
+        self.f_name.bind("<<ComboboxSelected>>", lambda e: self.refresh_laps())
+        self.f_valid = tk.BooleanVar(value=True)
+        ttk.Checkbutton(fl, text="только с временем", variable=self.f_valid, command=self.refresh_laps).pack(side="left")
+        tf = ttk.Frame(left)
+        tf.pack(fill="both", expand=True, padx=6)
+        self.tree = ttk.Treeview(tf, columns=[c[0] for c in self.LAP_COLS], show="headings", selectmode="extended", height=14)
+        for k, name, w, an in self.LAP_COLS:
+            self.tree.heading(k, text=tr(name), command=lambda k=k: self.sort_by(k))
+            self.tree.column(k, width=w, minwidth=40, anchor=an, stretch=(k == "name"))
+        sb = ttk.Scrollbar(tf, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=sb.set)
+        self.tree.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+        self.tree.tag_configure("best", foreground="#b57bff")
+        self.tree.bind("<Double-1>", lambda e: self.add_selected())
+        bl = ttk.Frame(left)
+        bl.pack(fill="x", padx=6, pady=(6, 4))
+        ttk.Button(bl, text="Добавить выбранные →", command=self.add_selected).pack(side="left")
+        ttk.Button(bl, text="Лучшие круги всех пилотов", command=self.add_best).pack(side="left", padx=(8, 0))
+        # правая часть: что попадёт в новый повтор
+        tf2 = ttk.Frame(right)
+        tf2.pack(fill="both", expand=True, padx=6)
+        self.out = ttk.Treeview(tf2, columns=("n", "name", "num", "time"), show="headings", selectmode="extended", height=14)
+        for k, name, w, an in (("n", "№", 30, "e"), ("name", "Пилот", 150, "w"), ("num", "Круг", 44, "e"), ("time", "Время", 80, "e")):
+            self.out.heading(k, text=tr(name))
+            self.out.column(k, width=w, minwidth=30, anchor=an, stretch=(k == "name"))
+        sb2 = ttk.Scrollbar(tf2, orient="vertical", command=self.out.yview)
+        self.out.configure(yscrollcommand=sb2.set)
+        self.out.pack(side="left", fill="both", expand=True)
+        sb2.pack(side="right", fill="y")
+        br = ttk.Frame(right)
+        br.pack(fill="x", padx=6, pady=(6, 2))
+        ttk.Button(br, text="▲", width=3, command=lambda: self.move(-1)).pack(side="left")
+        ttk.Button(br, text="▼", width=3, command=lambda: self.move(1)).pack(side="left", padx=(4, 0))
+        ttk.Button(br, text="Убрать", command=self.remove).pack(side="left", padx=(8, 0))
+        ttk.Button(br, text="Очистить", command=self.clear).pack(side="left", padx=(4, 0))
+        self.save_btn = ttk.Button(right, text="Сохранить новый повтор…", style="Accent.TButton", command=self.save)
+        self.save_btn.pack(anchor="w", padx=6, pady=(6, 2))
+        self.status = ttk.Label(right, text="", style="Dim.TLabel", justify="left", wraplength=330)
+        self.status.pack(anchor="w", padx=6, pady=(2, 6))
+        self.refresh_out()
+
+    def fill_files(self):
+        d = self.replays_dir()
+        items = []
+        if d:
+            try:
+                for fn in os.listdir(d):
+                    if fn.lower().endswith(".vcr"):
+                        fp = os.path.join(d, fn)
+                        items.append((os.path.getmtime(fp), fp))
+            except OSError:
+                pass
+        items.sort(reverse=True)
+        self._listed = [p for _, p in items[:40]]
+        names = [os.path.basename(p) + "  ·  " + str(round(os.path.getsize(p) / 1048576)) + " МБ" for p in self._listed]
+        self.files.configure(values=names)
+        if not names:
+            self.files.set(tr("(повторы не найдены — нажмите «Открыть повтор…»)"))
+
+    def open_listed(self):
+        i = self.files.current()
+        if 0 <= i < len(self._listed):
+            self.load(self._listed[i])
+
+    def pick(self):
+        path = filedialog.askopenfilename(parent=self.app.root, title=tr("Повтор rFactor 2"), initialdir=self.replays_dir() or None,
+                                          filetypes=[(tr("Повторы rFactor 2"), "*.vcr *.Vcr *.VCR"), (tr("Все файлы"), "*.*")])
+        if path:
+            self.load(path)
+
+    # --- загрузка повтора ------------------------------------------------------------------------------------
+    def say(self, text):
+        try:
+            self.status.config(text=tr(text))
+        except tk.TclError:
+            pass
+
+    def load(self, path):
+        if self.busy:
+            return
+        self.busy = True
+        self.info.config(text=tr("Читаю повтор…") + " " + os.path.basename(path))
+        threading.Thread(target=self._load_job, args=(path,), daemon=True).start()
+        self.after_id = self.body.after(150, self._poll)
+
+    def _load_job(self, path):
+        try:
+            self._q.put(("loaded", path, VCR.open_replay(path)))
+        except Exception as e:                           # noqa: BLE001
+            self._q.put(("error", str(e) or e.__class__.__name__))
+
+    def _poll(self):
+        try:
+            while True:
+                m = self._q.get_nowait()
+                if m[0] == "loaded":
+                    self.busy = False
+                    self.on_loaded(m[1], m[2])
+                elif m[0] == "error":
+                    self.busy = False
+                    self.info.config(text=tr("Не получилось открыть повтор: ") + m[1])
+                elif m[0] == "progress":
+                    self.say(m[1])
+                elif m[0] == "saved":
+                    self.busy = False
+                    self.refresh_out()
+                    self.status.config(text=m[1])
+                elif m[0] == "save_error":
+                    self.busy = False
+                    self.refresh_out()
+                    self.status.config(text=tr("Не получилось сохранить: ") + m[1])
+        except queue.Empty:
+            pass
+        except tk.TclError:
+            return
+        if self.busy:
+            self.after_id = self.body.after(150, self._poll)
+
+    def on_loaded(self, path, rep):
+        self.rep, self.path = rep, path
+        self.laps = list(rep.laps)
+        self.picks = []
+        names = sorted({L.name for L in self.laps})
+        self.f_name.configure(values=[tr(self.ALL)] + names)
+        self.f_name.set(tr(self.ALL))
+        self.info.config(text=os.path.basename(path) + "  ·  " + str(len(rep.drivers)) + " " + tr("машин") + "  ·  " +
+                         str(len(self.laps)) + " " + tr("кругов"))
+        self.refresh_laps()
+        self.refresh_out()
+        self.say("Отметьте круги слева (двойной клик или кнопка) и сохраните новый повтор.")
+
+    # --- таблица кругов --------------------------------------------------------------------------------------
+    def lap_values(self, L):
+        s1 = L.s1
+        s2 = (L.s2 - L.s1) if (L.s2 and L.s1) else None
+        s3 = (L.time - L.s2) if (L.time and L.s2) else None
+        return (L.name, L.veh.replace(".VEH", "").replace(".veh", ""), L.num, lap_str(L.time), lap_str(s1), lap_str(s2), lap_str(s3))
+
+    def sort_by(self, key):
+        col, rev = self._sort
+        self._sort = (key, (not rev) if col == key else False)
+        self.refresh_laps()
+
+    def refresh_laps(self):
+        t = self.tree
+        t.delete(*t.get_children())
+        who = self.f_name.get()
+        rows = [L for L in self.laps if (who == tr(self.ALL) or L.name == who) and (L.time or not self.f_valid.get())]
+        key, rev = self._sort
+        idx = {c[0]: i for i, c in enumerate(self.LAP_COLS)}
+
+        def k(L):
+            if key == "time":
+                return (L.time is None, L.time or 0.0)
+            if key == "num":
+                return (False, L.num)
+            return (False, self.lap_values(L)[idx[key]])
+        rows.sort(key=k, reverse=rev)
+        best = {}
+        for L in self.laps:
+            if L.time and (L.driver not in best or L.time < best[L.driver]):
+                best[L.driver] = L.time
+        self._rows = {}
+        for i, L in enumerate(rows):
+            iid = str(i)
+            self._rows[iid] = L
+            t.insert("", "end", iid=iid, values=self.lap_values(L), tags=(("best",) if L.time and best.get(L.driver) == L.time else ()))
+
+    def refresh_out(self):
+        o = self.out
+        o.delete(*o.get_children())
+        for i, L in enumerate(self.picks):
+            o.insert("", "end", iid=str(i), values=(i + 1, L.name, L.num, lap_str(L.time)))
+        self.save_btn.config(state="normal" if self.picks and not self.busy else "disabled")
+
+    # --- набор кругов ----------------------------------------------------------------------------------------
+    def add_selected(self):
+        for iid in self.tree.selection():
+            L = self._rows.get(iid)
+            if L is not None and L not in self.picks and len(self.picks) < 100:
+                self.picks.append(L)
+        self.refresh_out()
+
+    def add_best(self):
+        best = {}
+        for L in self.laps:
+            if L.time and (L.driver not in best or L.time < best[L.driver].time):
+                best[L.driver] = L
+        for L in sorted(best.values(), key=lambda x: x.time):
+            if L not in self.picks and len(self.picks) < 100:
+                self.picks.append(L)
+        self.refresh_out()
+
+    def selected_out(self):
+        return sorted(int(i) for i in self.out.selection())
+
+    def remove(self):
+        for i in reversed(self.selected_out()):
+            del self.picks[i]
+        self.refresh_out()
+
+    def clear(self):
+        self.picks = []
+        self.refresh_out()
+
+    def move(self, d):
+        sel = self.selected_out()
+        if not sel or (d < 0 and sel[0] == 0) or (d > 0 and sel[-1] == len(self.picks) - 1):
+            return
+        for i in (sel if d < 0 else reversed(sel)):
+            self.picks[i + d], self.picks[i] = self.picks[i], self.picks[i + d]
+        self.refresh_out()
+        for i in sel:
+            self.out.selection_add(str(i + d))
+
+    # --- сохранение ------------------------------------------------------------------------------------------
+    def save(self):
+        if self.busy or not self.picks or self.rep is None:
+            return
+        base = os.path.splitext(os.path.basename(self.path))[0]
+        out = filedialog.asksaveasfilename(parent=self.app.root, title=tr("Сохранить новый повтор"), defaultextension=".Vcr",
+                                           initialdir=os.path.dirname(self.path), initialfile=base + "_laps.Vcr",
+                                           filetypes=[(tr("Повторы rFactor 2"), "*.Vcr"), (tr("Все файлы"), "*.*")])
+        if not out:
+            return
+        if os.path.abspath(out).lower() == os.path.abspath(self.path).lower():
+            mb_error("Повтор", "Нельзя сохранять поверх исходного повтора: выберите другое имя.")
+            return
+        self.busy = True
+        self.save_btn.config(state="disabled")
+        self.say("Собираю повтор…")
+        threading.Thread(target=self._save_job, args=(self.rep, list(self.picks), out), daemon=True).start()
+        self.after_id = self.body.after(150, self._poll)
+
+    def _save_job(self, rep, picks, out):
+        try:
+            rep.build(picks, out, progress=lambda f, t="": self._q.put(("progress", (t or "Собираю повтор…") + "  " + str(int(f * 100)) + "%")))
+            mb = os.path.getsize(out) / 1048576
+            self._q.put(("saved", tr("Готово: ") + os.path.basename(out) + " · " + format(mb, ".1f") + " " + tr("МБ") + " · " + str(len(picks)) + " " +
+                         tr("кругов") + ". " + tr("Откройте его в игре: Мониторинг → Повторы.")))
+        except Exception as e:                           # noqa: BLE001
+            self._q.put(("save_error", str(e) or e.__class__.__name__))
+
+
 class SetupsPage(ScrollPage):
-    """Отдельный экран «Сетапы»: подбор бесплатных сетапов HYMO / P1Doks под текущую трассу и машину (Le Mans Ultimate)."""
+    """Отдельный экран «Сетапы»: подбор бесплатных сетапов HYMO / P1Doks под текущую трассу и машину (Le Mans Ultimate).
+    Для rFactor 2 вместо него — «Повторы»: редактор повторов (круги выбранных пилотов в новый .Vcr)."""
     TITLE = "Сетапы"
     SUB = "Бесплатные сетапы из открытого репозитория. Зайдите на трассу в игре, потом нажмите кнопку: лаунчер возьмёт трассу и машину у оверлея, найдёт подходящие сетапы и положит выбранные в UserData\\player\\Settings. Уже имеющиеся файлы не перезаписываются."
+    TITLE_RF2 = "Повторы rFactor 2"
+    SUB_RF2 = "Соберите свой повтор: откройте любой повтор гонки, отметьте круги нужных пилотов — лаунчер запишет новый файл, где эти круги едут одновременно. Исходный повтор не меняется."
+
+    def rebuild(self):
+        rf = self.app.selected == "rf2" and VCR is not None
+        self.TITLE = self.TITLE_RF2 if rf else SetupsPage.TITLE
+        self.SUB = self.SUB_RF2 if rf else SetupsPage.SUB
+        super().rebuild()
 
     def fill(self, body):
+        if self.app.selected == "rf2" and VCR is not None:
+            self.editor = ReplayEditor(body, self.app)
+            return
         p = self.app.panels.get("lmu")
         if self.app.selected != "lmu" or setups is None or p is None:
             sec = section(body, "Сетапы")
@@ -11341,6 +11680,15 @@ class TopBar(tk.Frame):
             w = max(10, c.winfo_width())
             c.create_rectangle(0, 1, w, 5, fill=mix(UI_BG, UI_DIM, 0.25), outline="")
             c.create_rectangle(0, 1, max(3, w * max(0.0, min(1.0, frac))), 5, fill="#f5b921", outline="")
+        except tk.TclError:
+            pass
+
+    def relabel(self, name, text):
+        """Меняет подпись вкладки (для rFactor 2 «Сетапы» превращаются в «Повторы»)."""
+        lb = self.tabs[name][0]
+        try:
+            if lb.cget("text") != tr(text):
+                lb.config(text=tr(text))
         except tk.TclError:
             pass
 
@@ -12581,6 +12929,7 @@ class App:
         tb = getattr(self, "topbar", None)
         if tb is None:
             return
+        tb.relabel("setups", "Повторы" if self.selected == "rf2" and VCR is not None else "Сетапы")
         v = self.view
         if v == "home":
             name = "home"
