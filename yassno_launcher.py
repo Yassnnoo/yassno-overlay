@@ -83,7 +83,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.11.33"
+APP_VERSION = "3.11.34"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -2475,9 +2475,11 @@ class StatusChip(tk.Canvas):
     (оба с пульсирующей точкой), off — серый."""
     H = 28
 
-    def __init__(self, parent, bg=None):
+    def __init__(self, parent, bg=None, max_width=None):
         super().__init__(parent, height=self.H, width=10, bg=bg or UI_BG, highlightthickness=0, borderwidth=0)
         self._no_tint = True
+        self.max_width = max_width
+        self._height = self.H
         self.font = tkfont.Font(family="Segoe UI Semibold", size=10)
         self.text, self.state = "", "off"
 
@@ -2494,17 +2496,25 @@ class StatusChip(tk.Canvas):
         try:
             self.delete("all")
             col, H, live = self.color(), self.H, self.state != "off"
-            w = 30 + self.font.measure(self.text) + 14
-            self.config(width=w)
+            w = 44 + max(self.font.measure(line) for line in self.text.split("\n"))
+            if self.max_width is not None:
+                w = min(w, self.max_width)
+            label = self.create_text(30, 0, text=self.text, anchor="nw", width=w - 43,
+                                     font=self.font, fill=mix(UI_FG, col, 0.2) if live else UI_DIM)
+            _, y0, _, y1 = self.bbox(label)
+            self._height = H = max(H, y1 - y0 + 10)
+            self.config(width=w, height=H)
             self.fillc = mix(UI_BG, col, 0.12) if live else UI_BG
-            r, x0, y0, x1, y1 = H / 2 - 1, 1, 1, w - 2, H - 2
+            r, x0, y0, x1, y1 = self.H / 2 - 1, 1, 1, w - 2, H - 2
             pts = [x0 + r, y0, x1 - r, y0, x1, y0, x1, y0 + r, x1, y1 - r, x1, y1, x1 - r, y1, x0 + r, y1,
                    x0, y1, x0, y1 - r, x0, y0 + r, x0, y0]
             self.create_polygon(pts, smooth=True, fill=self.fillc, outline=mix(UI_BORDER, col, 0.6) if live else mix(UI_BORDER, UI_DIM, 0.35))
             cy = H / 2
             self.create_oval(11, cy - 5, 21, cy + 5, outline=col, width=1, tags="ring", state="hidden")
             self.create_oval(12, cy - 4, 20, cy + 4, fill=col, outline="", tags="dot")
-            self.create_text(30, cy, text=self.text, anchor="w", font=self.font, fill=mix(UI_FG, col, 0.2) if live else UI_DIM)
+            self.itemconfigure(label, anchor="w")
+            self.coords(label, 30, cy)
+            self.tag_raise(label)
         except tk.TclError:
             pass
 
@@ -2513,7 +2523,7 @@ class StatusChip(tk.Canvas):
         if self.state == "off":
             return
         try:
-            col, cy = self.color(), self.H / 2
+            col, cy = self.color(), self._height / 2
             r = 4 + 6.5 * ph
             self.coords("ring", 16 - r, cy - r, 16 + r, cy + r)
             self.itemconfigure("ring", state="normal", outline=mix(col, self.fillc, min(1.0, ph * 1.15)))
@@ -11692,7 +11702,7 @@ class Sidebar(tk.Frame):
             self.tabs[key] = button, stripe
         footer = tk.Frame(self, bg=UI_PANEL)
         footer.pack(side="bottom", fill="x", padx=12, pady=14)
-        self.ver = StatusChip(footer, bg=UI_PANEL)
+        self.ver = StatusChip(footer, bg=UI_PANEL, max_width=175)
         self.ver.pack(anchor="w")
         self.ver.set(f"{tr('Версия')} {APP_VERSION}", "off")
         self.ver.configure(cursor="hand2")
@@ -12658,6 +12668,7 @@ class App:
         self.panels = {}
         self.topbar = Sidebar(self.root, self)
         self.topbar.pack(side="left", fill="y")
+        self.set_version_chip()
         content = ttk.Frame(self.root)
         content.pack(side="left", fill="both", expand=True)
         tiles = ttk.Frame(content, padding=(16, 12, 16, 0))
@@ -13405,7 +13416,7 @@ class App:
             return
         try:
             if info and info.get("newer"):
-                self.topbar.ver.set(f"{tr('Доступна')} {info['version']} · {tr('Обновить')}", "wait")
+                self.topbar.ver.set(f"{tr('Доступна')} {info['version']}\n{tr('Обновить')}", "wait")
             else:
                 self.topbar.ver.set(f"{tr('Версия')} {APP_VERSION}", "off")
         except (tk.TclError, AttributeError):
