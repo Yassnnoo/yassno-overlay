@@ -83,7 +83,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.11.34"
+APP_VERSION = "3.11.35"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -3578,7 +3578,7 @@ class GameTile(tk.Canvas):
 
 
 class Brand(tk.Frame):
-    """Логотип в шапке: квадрат цвета акцента с «Y», название и версия."""
+    """Логотип лаунчера: квадрат цвета акцента с «Y» и название."""
 
     def __init__(self, parent, bg=None):
         bg = bg or UI_BG
@@ -3588,7 +3588,7 @@ class Brand(tk.Frame):
         col = tk.Frame(self, bg=bg)
         col.pack(side="left", padx=(10, 0))
         tk.Label(col, text="Yassno", bg=bg, fg=UI_FG, font=("Segoe UI Semibold", 12), anchor="w", bd=0).pack(anchor="w")
-        tk.Label(col, text="Overlay " + APP_VERSION, bg=bg, fg=UI_DIM, font=("Segoe UI", 8), anchor="w", bd=0).pack(anchor="w")
+        tk.Label(col, text="Overlay", bg=bg, fg=UI_DIM, font=("Segoe UI", 8), anchor="w", bd=0).pack(anchor="w")
         ACCENT_DRAWN.add(self)
         self.draw()
 
@@ -11679,7 +11679,7 @@ class Sidebar(tk.Frame):
     def __init__(self, parent, app):
         super().__init__(parent, bg=UI_PANEL, width=199)
         self.pack_propagate(False)
-        brand = Brand(self)
+        brand = Brand(self, bg=UI_PANEL)
         brand.pack(anchor="w", padx=14, pady=(22, 20))
         actions = (
             ("home", "Главная", app.show_home),
