@@ -2768,9 +2768,13 @@ class App:
         return "Жду ETS2…\n" + (getattr(self.reader, "err", "") or "запустите игру и загрузите профиль")
 
     def write_state(self):
+        self._state_t = time.monotonic()
         try:
-            with open(STATE_PATH, "w", encoding="utf-8") as f:
-                json.dump({"locked": bool(self.cfg["locked"]), "pid": os.getpid(), "connected": self.d is not None}, f)
+            tmp = STATE_PATH + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"locked": bool(self.cfg["locked"]), "pid": os.getpid(),
+                           "connected": self.d is not None, "ts": time.time()}, f)
+            os.replace(tmp, STATE_PATH)
         except OSError:
             pass
 
@@ -2918,10 +2922,10 @@ class App:
             return
         try:
             d = self.reader.read()
-            if (d is None) != (self.d is None):
-                self.d = d
-                self.write_state()
+            changed = (d is None) != (self.d is None)
             self.d = d
+            if changed or time.monotonic() - getattr(self, "_state_t", 0.0) >= 1.0:
+                self.write_state()
             if d is not None and not self.demo:
                 try:
                     self.trips.feed(d)

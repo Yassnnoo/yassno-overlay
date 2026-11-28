@@ -83,7 +83,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.11.35"
+APP_VERSION = "3.11.36"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -770,10 +770,18 @@ def read_locked(game):
     return d.get("locked") if isinstance(d.get("locked"), bool) else None
 
 
-def read_connected(game):
-    """True — оверлей получает телеметрию, False — ждёт игру, None — оверлей не сообщил (старая версия)."""
-    d = read_json(os.path.splitext(profile_path(game))[0] + ".state")
-    return d.get("connected") if isinstance(d.get("connected"), bool) else None
+def telemetry_status(game):
+    """Статус связи из файла оверлея. Старые версии могли не писать отметку времени."""
+    path = os.path.join(HERE, "yassno_ets2.state") if game == "ets2" else os.path.splitext(profile_path(game))[0] + ".state"
+    state = read_json(path)
+    stamp = state.get("ts")
+    if type(stamp) in (int, float) and time.time() - stamp > 6:
+        return "stale"
+    if state.get("connected") is True:
+        return "live"
+    if state.get("connected") is False:
+        return "waiting"
+    return "unknown"
 
 
 def pid_alive(pid):
@@ -1719,6 +1727,8 @@ EN.update({
     "Панели оверлея": "Overlay panels",
     "Предпросмотр заставки": "Intro preview",
     "Воспроизвести": "Play",
+    "Открыть сессию": "Open session",
+    "Нет свежих данных": "No recent data",
 })
 
 EN_PREFIX.extend([
@@ -9501,8 +9511,9 @@ class StatsPage(ttk.Frame):
         self.reload()
 
     # ---- данные
-    def reload(self, keep=True):
-        sel = self.current[0] if (keep and self.current) else None
+    def reload(self, keep=True, session_path=None):
+        previous = self.current[0] if self.current else None
+        sel = session_path if session_path is not None else (previous if keep else None)
         self.sessions = load_sessions()
         self.lst.delete(0, "end")
         for path, d in self.sessions:
@@ -9515,7 +9526,12 @@ class StatsPage(ttk.Frame):
         idx = next((i for i, (p, _) in enumerate(self.sessions) if p == sel), 0)
         self.lst.selection_clear(0, "end")
         self.lst.selection_set(idx)
+        self.lst.see(idx)
         self.current = self.sessions[idx]
+        if session_path is not None or self.current[0] != previous:
+            self.subject = None
+        if session_path is not None:
+            self.vmode = "laps"
         self.show(self.current[1])
 
     RES_COLS = [("pos", "Поз", 40, "center"), ("cpos", "В классе", 66, "center"), ("number", "№", 40, "center"),
@@ -12260,11 +12276,24 @@ class HomePage(tk.Frame):
         vals = {"game": (GAMES[g] if g else tr("не запущена"), UI_GREEN if g else UI_OFF),
                 "ov": ((tr("работает") + (" · " + GAMES[r.game] if r.game in GAMES else "")) if run else tr("остановлен"),
                        UI_GREEN if run else UI_OFF)}
-        if run:
-            tel = True if r.mode == "demo" else read_connected(r.game)
-            vals["tel"] = (tr("идёт") if tel else tr("ждёт игру"), UI_GREEN if tel else "#f5b921")
+        ep = a.ets2_page if self.sel() == "ets2" else None
+        if ep is not None:
+            running = ep.running()
+            demo = getattr(ep, "demo", False)
+            tel = ("live" if demo else telemetry_status("ets2")) if running else "unknown"
+            game_on = tel == "live" and not demo
+            vals["game"] = ("Euro Truck Simulator 2" if game_on else tr("не запущена"), UI_GREEN if game_on else UI_OFF)
+            vals["ov"] = (tr("работает") if running else tr("остановлен"), UI_GREEN if running else UI_OFF)
+        elif run:
+            tel = "live" if r.mode == "demo" else telemetry_status(r.game)
         else:
-            vals["tel"] = (tr("ждёт игру") if a.auto_var.get() else "—", "#f5b921" if a.auto_var.get() else UI_OFF)
+            tel = "waiting" if a.auto_var.get() else "unknown"
+        vals["tel"] = {
+            "live": (tr("идёт"), UI_GREEN),
+            "waiting": (tr("ждёт игру"), "#f5b921"),
+            "stale": (tr("Нет свежих данных"), "#f5b921"),
+            "unknown": ("—", UI_OFF),
+        }[tel]
         for k, (txt, col) in vals.items():
             dot, val = self.s_rows[k]
             dot.config(fg=col)
@@ -12281,11 +12310,14 @@ class HomePage(tk.Frame):
         for w in body.winfo_children():
             w.destroy()
         g = self.app.selected
-        sess = next((d for _, d in load_sessions() if d.get("game") == g), None)
-        if not sess:
+        last = next(((path, d) for path, d in load_sessions() if d.get("game") == g), None)
+        if last is None:
+            self.set_card(0, "Последняя сессия", "Вся статистика", self.app.show_stats)
             tk.Label(body, text=tr("Пока нет записанных сессий для этой игры. Статистика пишется сама, пока идёт оверлей."),
                      bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI", 10), justify="left", anchor="w", wraplength=320).pack(fill="x")
             return
+        path, sess = last
+        self.set_card(0, "Последняя сессия", "Открыть сессию", lambda: self.app.show_stats(session_path=path))
         sm = summarize(sess)
         tk.Label(body, text=f"{sess.get('track') or '?'} · {sess.get('label') or sess.get('kind', '')}", bg=UI_PANEL, fg=UI_DIM,
                  font=("Segoe UI", 10), anchor="w").pack(fill="x")
@@ -12963,7 +12995,7 @@ class App:
     def stats_current(self):
         return self.ets2_stats_page if (self.home_sub == "ets2" and ETS2STATS) else self.stats_page
 
-    def show_stats(self):
+    def show_stats(self, session_path=None):
         self.view = "stats"
         for p in self.panels.values():
             p.pack_forget()
@@ -12973,9 +13005,12 @@ class App:
         self.home_page.pack_forget()
         self.setups_page.pack_forget()
         self.apps_page.pack_forget()
-        pg = self.stats_current()
+        pg = self.stats_page if session_path is not None else self.stats_current()
         pg.pack(fill="both", expand=True)
-        pg.reload()
+        if session_path is None:
+            pg.reload()
+        else:
+            pg.reload(session_path=session_path)
         self.update_tiles()
 
     def open_panel_page(self, page, card=None):
@@ -13285,23 +13320,25 @@ class App:
             ets = bool(ep is not None and ep.running())
         except Exception:                                # noqa: BLE001
             ets = False
-        tel = None                                         # True — данные идут, False — ждём игру, None — неизвестно
+        ets_demo = ets and getattr(ep, "demo", False)
+        tel = "unknown"
         if run:
-            tel = True if r.mode == "demo" else read_connected(r.game)
+            tel = "live" if r.mode == "demo" else telemetry_status(r.game)
         elif ets:
-            otxt = tr("Оверлей: работает для") + " Euro Truck Simulator 2" + (tr(" (демо)") if getattr(ep, "demo", False) else "")
-            tel = True if getattr(ep, "demo", False) else bool(read_json(os.path.join(HERE, "yassno_ets2.state")).get("connected"))
-            if not g and tel and not getattr(ep, "demo", False):
+            otxt = tr("Оверлей: работает для") + " Euro Truck Simulator 2" + (tr(" (демо)") if ets_demo else "")
+            tel = "live" if ets_demo else telemetry_status("ets2")
+            if not g and tel == "live" and not ets_demo:
                 gtxt = f"{tr('Игра')}: Euro Truck Simulator 2"
-        game_on = bool(g) or (ets and tel is True and not getattr(ep, "demo", False))
+        game_on = bool(g) or (ets and not run and tel == "live" and not ets_demo)
         key = (game_on, gtxt, otxt, run or ets, tel, UI_GREEN, UI_OFF, UI_BG)
         if getattr(self, "_status_key", None) == key:          # ничего не изменилось — не перерисовываем (вызывается каждые 1.5 с)
             return
         self._status_key = key
         self.chip_game.set(gtxt, "on" if game_on else "off")
         self.chip_ov.set(otxt, "on" if (run or ets) else "off")
-        if (run or ets) and tel is not None:
-            self.chip_tel.set(tr("Телеметрия идёт") if tel else tr("Жду данные игры…"), "on" if tel else "wait")
+        if (run or ets) and tel != "unknown":
+            label = {"live": "Телеметрия идёт", "waiting": "Жду данные игры…", "stale": "Нет свежих данных"}[tel]
+            self.chip_tel.set(tr(label), "on" if tel == "live" else "wait")
             if not self.chip_tel.winfo_manager():
                 self.chip_tel.pack(side="left")
         elif self.chip_tel.winfo_manager():
