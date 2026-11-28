@@ -83,7 +83,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.11.31"
+APP_VERSION = "3.11.32"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -557,6 +557,17 @@ UI_THEMES = {
                   BORDER="#d6dce5", ACTIVE="#dfe4eb", ACCENT_HI="#f2b705", OFF="#c5ccd6", KNOB_OFF="#ffffff",
                   TILE_TEXT="#ffffff", ACCENT_FG="#111111"),
 }
+UI_THEMES.update({
+    "pitwall": dict(BG="#101619", PANEL="#192328", FIELD="#202a2f", FG="#eef2ee", DIM="#9eafb4",
+                    ACCENT="#d5fa71", BORDER="#2d3a40", ACTIVE="#28382d", ACCENT_HI="#e4ff9a",
+                    OFF="#36454b", KNOB_OFF="#9eafb4", TILE_TEXT="#ffffff", ACCENT_FG="#101619"),
+    "midnight": dict(BG="#101524", PANEL="#192236", FIELD="#232e46", FG="#f0f4ff", DIM="#aab9d3",
+                     ACCENT="#9acaff", BORDER="#364969", ACTIVE="#283a55", ACCENT_HI="#b9dcff",
+                     OFF="#394967", KNOB_OFF="#aab9d3", TILE_TEXT="#ffffff", ACCENT_FG="#101524"),
+    "copper": dict(BG="#1b1514", PANEL="#2a211e", FIELD="#372b27", FG="#fff0e7", DIM="#cbb0a2",
+                   ACCENT="#ffac7e", BORDER="#513c34", ACTIVE="#493128", ACCENT_HI="#ffc7a6",
+                   OFF="#503d36", KNOB_OFF="#cbb0a2", TILE_TEXT="#ffffff", ACCENT_FG="#1b1514"),
+})
 UI_BG = UI_PANEL = UI_FIELD = UI_FG = UI_DIM = UI_ACCENT = UI_BORDER = UI_ACTIVE = UI_ACCENT_HI = ""
 UI_OFF = UI_KNOB_OFF = UI_ACCENT_FG = ""
 UI_GREEN, UI_GREEN_DK = "#2ee26d", "#1f9d4f"
@@ -682,7 +693,7 @@ def load_launcher():
     for k, dv in list(cfg.items()):
         if k in d and isinstance(d[k], type(dv)) or (k == "poll_sec" and isinstance(d.get(k), (int, float))):
             cfg[k] = d[k]
-    if cfg["theme"] not in ("dark", "light", "system"):
+    if cfg["theme"] != "system" and cfg["theme"] not in UI_THEMES:
         cfg["theme"] = "dark"
     if cfg["lang"] not in ("ru", "en"):
         cfg["lang"] = "ru"
@@ -1693,6 +1704,17 @@ EN.update({
     "Соберите свой повтор: откройте любой повтор гонки, отметьте круги нужных пилотов — лаунчер запишет новый файл, где эти круги едут одновременно. Исходный повтор не меняется.":
         "Build your own replay: open any race replay, pick the laps you want — the launcher writes a new file where those laps run together. The source replay is not changed.",
 })
+EN.update({
+    "Внешний вид лаунчера": "Launcher appearance",
+    "Тема лаунчера": "Launcher theme",
+    "Пит-уолл": "Pit Wall",
+    "Полночь": "Midnight",
+    "Медь": "Copper",
+    "Панели оверлея": "Overlay panels",
+    "Предпросмотр заставки": "Intro preview",
+    "Воспроизвести": "Play",
+})
+
 EN_PREFIX.extend([
     ("Запустить оверлей (", "Start overlay ("), ("Сохранено: ", "Saved: "), ("Стёрто карт: ", "Maps erased: "),
     ("Рядом с лаунчером не найден ", "Next to the launcher this file was not found: "),
@@ -2232,6 +2254,16 @@ def section(parent, title):
     return inner
 
 
+def draw_pitwall_lights(canvas, cx, cy, lit, reveal):
+    canvas.delete("all")
+    for i in range(5):
+        x = cx + (i - 2) * (34 + 8 * reveal)
+        color = "#e44750" if i < lit else "#422c31"
+        canvas.create_oval(x - 10, cy - 10, x + 10, cy + 10, fill=color, outline="")
+    canvas.create_text(cx, cy + 47, text="YASSNO OVERLAY", font=("Segoe UI", 17, "bold"), fill=UI_FG)
+    canvas.create_text(cx, cy + 70, text=APP_VERSION, font=("Consolas", 10), fill=UI_DIM)
+
+
 class Intro:
     """Заставка при запуске лаунчера: циферблат с разгоном стрелки, надпись по буквам, затем шторка уходит вверх.
     Клик или любая клавиша пропускают. Выключается в «Настройках лаунчера»."""
@@ -2240,6 +2272,7 @@ class Intro:
 
     def __init__(self, root, w=1240, h=700):
         self.root, self.hw, self.hh = root, w, h
+        self.pitwall = UI_THEME_NAME == "pitwall"
         self.t0 = None
         self.done = False
         self.cv = tk.Canvas(root, bg=UI_BG, highlightthickness=0, bd=0, takefocus=1)
@@ -2319,7 +2352,6 @@ class Intro:
         cv = self.cv
         W = cv.winfo_width() if cv.winfo_width() > 50 else self.hw
         H = cv.winfo_height() if cv.winfo_height() > 50 else self.hh
-        cv.delete("all")
         cx, cy = W / 2.0, H / 2.0 - 46
         R = max(70, min(W, H) * 0.17)
         # шторка: в конце весь экран уезжает вверх
@@ -2328,6 +2360,11 @@ class Intro:
             cv.place_configure(y=int(-rv * H))
         except tk.TclError:
             return
+        if self.pitwall:
+            lit = min(5, int(t / 0.24) + 1) if t < 1.48 else 0
+            draw_pitwall_lights(cv, cx, cy, lit, rv)
+            return
+        cv.delete("all")
         p = self.ease_out(t / 1.05)                      # заполнение дуги
         glow = mix(UI_BG, UI_ACCENT, 0.18)
         cv.create_arc(cx - R, cy - R, cx + R, cy + R, start=210, extent=-240, style="arc", outline=mix(UI_BG, UI_DIM, 0.35 * self.ease_out(t / 0.4)), width=3)
@@ -9823,7 +9860,8 @@ class StatsPage(ttk.Frame):
 # ---------------------------------------------------------------------------
 class SettingsPage(ttk.Frame):
     """Настройки самого лаунчера: тема, язык, запуск с Windows, трей и т.п."""
-    THEMES = [("dark", "Тёмная"), ("light", "Светлая"), ("system", "Как в Windows")]
+    THEMES = [("dark", "Тёмная"), ("light", "Светлая"), ("system", "Как в Windows"),
+              ("pitwall", "Пит-уолл"), ("midnight", "Полночь"), ("copper", "Медь")]
     LANGS = [("ru", "Русский"), ("en", "English")]
 
     def __init__(self, parent, app):
@@ -9855,10 +9893,18 @@ class SettingsPage(ttk.Frame):
         self.lang_var = tk.StringVar(value=dict(self.LANGS)[cfg["lang"]])
         P = self.build_frame()                           # P[категория] — рамка, куда складываются разделы этой категории
 
-        box = section(P["look"], "Тема и язык")
+        look = P["look"]
+        if UI_THEME_NAME == "pitwall":
+            look.columnconfigure(0, weight=3, uniform="appearance")
+            look.columnconfigure(1, weight=2, uniform="appearance")
+            appearance = ttk.Frame(look)
+            appearance.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
+        else:
+            appearance = look
+        box = section(appearance, "Внешний вид лаунчера")
         box.pack(fill="x", pady=(0, 10))
-        ttk.Label(box, text="Тема").grid(row=0, column=0, sticky="w", padx=(0, 12), pady=4)
-        cb = ttk.Combobox(box, textvariable=self.theme_var, values=[tr(n) for _, n in self.THEMES], state="readonly", width=16)
+        ttk.Label(box, text="Тема лаунчера").grid(row=0, column=0, sticky="w", padx=(0, 12), pady=4)
+        cb = ttk.Combobox(box, textvariable=self.theme_var, values=[tr(n) for _, n in self.THEMES], state="readonly", width=24)
         cb.grid(row=0, column=1, sticky="w")
         cb.bind("<<ComboboxSelected>>", self.on_theme)
         ttk.Label(box, text="Язык").grid(row=1, column=0, sticky="w", padx=(0, 12), pady=4)
@@ -9866,12 +9912,21 @@ class SettingsPage(ttk.Frame):
         cb2.grid(row=1, column=1, sticky="w")
         cb2.bind("<<ComboboxSelected>>", self.on_lang)
 
-        box = section(P["look"], "Анимации и оформление")
+        box = section(appearance, "Анимации и оформление")
         box.pack(fill="x", pady=(0, 10))
         self.tg(box, 0, "Анимация заставки при запуске лаунчера", "intro_anim")
         self.tg(box, 1, "Анимации интерфейса (плавные переходы, подсветка, статус)", "ui_anim")
-        self.tg(box, 2, "Цвет интерфейса под выбранную игру", "accent_by_game")
+        if UI_THEME_NAME in ("dark", "light"):
+            self.tg(box, 2, "Цвет интерфейса под выбранную игру", "accent_by_game")
         self.tg(box, 3, "Тени у карточек (со следующего запуска лаунчера)", "shadows")
+        if UI_THEME_NAME == "pitwall":
+            preview = section(look, "Предпросмотр заставки")
+            preview.grid(row=0, column=1, sticky="new")
+            lights = tk.Canvas(preview, bg=UI_BG, width=240, height=150, highlightthickness=0)
+            lights.pack(anchor="w", fill="x", pady=(0, 8))
+            lights.bind("<Configure>", lambda event: draw_pitwall_lights(
+                lights, event.width / 2, 45, 3, 0))
+            ttk.Button(preview, text=tr("Воспроизвести"), command=self.app.preview_intro).pack(anchor="w")
 
         box = section(P["start"], "Запуск")
         box.pack(fill="x", pady=(0, 10))
@@ -10019,18 +10074,28 @@ class SettingsPage(ttk.Frame):
         self.cat_rows, self.cat_key = {}, "look"
         wrap = ttk.Frame(self)
         wrap.grid(row=0, column=0, sticky="nsew")
-        wrap.columnconfigure(1, weight=1)
-        wrap.rowconfigure(0, weight=1)
+        horizontal = UI_THEME_NAME == "pitwall"
+        wrap.columnconfigure(0 if horizontal else 1, weight=1)
+        wrap.rowconfigure(2 if horizontal else 0, weight=1)
         nav = tk.Frame(wrap, bg=UI_PANEL, width=250)
-        nav.grid(row=0, column=0, sticky="ns", padx=(0, 18))
-        nav.pack_propagate(False)
-        tk.Label(nav, text=tr("Настройки лаунчера"), bg=UI_PANEL, fg=UI_FG, font=("Segoe UI Semibold", 12), anchor="w",
-                 padx=20, pady=14).pack(fill="x")
+        if horizontal:
+            heading = ttk.Label(wrap, text=tr("Настройки лаунчера"), style="Title.TLabel")
+            heading.grid(row=0, column=0, sticky="w", pady=(0, 10))
+            nav.grid(row=1, column=0, sticky="ew", pady=(0, 10))
+        else:
+            nav.grid(row=0, column=0, sticky="ns", padx=(0, 18))
+            nav.pack_propagate(False)
+            tk.Label(nav, text=tr("Настройки лаунчера"), bg=UI_PANEL, fg=UI_FG, font=("Segoe UI Semibold", 12),
+                     anchor="w", padx=20, pady=14).pack(fill="x")
         for key, icon, title, desc in self.CATS:
             row = tk.Frame(nav, bg=UI_PANEL, cursor="hand2")
-            row.pack(fill="x", padx=8, pady=1)
+            if horizontal:
+                row.pack(side="left", padx=(0, 2), pady=1)
+            else:
+                row.pack(fill="x", padx=8, pady=1)
             ic = tk.Label(row, text=icon, bg=UI_PANEL, fg=UI_DIM, font=("Segoe UI Symbol", 12), width=2, anchor="center", cursor="hand2")
-            ic.pack(side="left", padx=(10, 0))
+            if not horizontal:
+                ic.pack(side="left", padx=(10, 0))
             lb = tk.Label(row, text=tr(title), bg=UI_PANEL, fg=UI_FG, font=("Segoe UI", 11), anchor="w", padx=8, pady=9, cursor="hand2")
             lb.pack(side="left", fill="x", expand=True)
             row._icon = ic
@@ -10040,7 +10105,7 @@ class SettingsPage(ttk.Frame):
                 w.bind("<Enter>", lambda e, k=key: self.cat_hover(k, True), add="+")
                 w.bind("<Leave>", lambda e, k=key: self.cat_hover(k, False), add="+")
         right = ttk.Frame(wrap)
-        right.grid(row=0, column=1, sticky="nsew")
+        right.grid(row=2 if horizontal else 0, column=0 if horizontal else 1, sticky="nsew")
         right.columnconfigure(0, weight=1)
         right.rowconfigure(0, weight=1)
         self.sc, sbar, body = self.scroller(right, self.MAXW, center=False)
@@ -10414,7 +10479,9 @@ def hero_image(master, w, h, acc, panel, border, outer, r=18):
         # трасса — справа, по высоте карточки
         th = h * 0.78
         sc = th / 316.0
-        ox, oy = w - 560 * sc - w * 0.04, (h - th) / 2
+        if UI_THEME_NAME == "pitwall":
+            sc = min(sc, w * 0.42 / 560)
+        ox, oy = w - 560 * sc - w * 0.04, (h - 316 * sc) / 2
         if ox > w * 0.42:
             pts = [((ox + x * sc) * S, (oy + y * sc) * S) for x, y in _catmull(TRACK_SHAPE)]
             pts.append(pts[0])
@@ -11651,6 +11718,10 @@ class TopBar(tk.Frame):
     def __init__(self, parent, app):
         super().__init__(parent, bg=UI_BG)
         self.app = app
+        self.sidebar = UI_THEME_NAME == "pitwall"
+        if self.sidebar:
+            self.build_sidebar(app)
+            return
         top = tk.Frame(self, bg=UI_BG)
         top.pack(fill="x", padx=22, pady=(14, 0))
         lead = Brand(top)
@@ -11693,6 +11764,43 @@ class TopBar(tk.Frame):
         tk.Frame(self, bg=UI_BORDER, height=1).pack(fill="x")
         self.cur = None
 
+    def build_sidebar(self, app):
+        self.configure(bg=UI_PANEL, width=199)
+        self.pack_propagate(False)
+        brand = Brand(self)
+        brand.pack(anchor="w", padx=14, pady=(22, 20))
+        actions = (
+            ("home", "Главная", app.show_home),
+            ("overlay", "Панели оверлея", app.open_overlay),
+            ("stats", "Статистика", app.show_stats),
+            ("setups", "Сетапы", lambda: app.open_panel_page("general", "Сетапы")),
+            ("apps", "Программы", lambda: app.open_panel_page("apps")),
+            ("settings", "Настройки лаунчера", app.show_settings),
+        )
+        self.tabs = {}
+        for key, label, action in actions:
+            row = tk.Frame(self, bg=UI_PANEL)
+            row.pack(fill="x", padx=10, pady=3)
+            stripe = tk.Frame(row, bg=UI_PANEL, width=3)
+            stripe.pack(side="left", fill="y")
+            button = tk.Button(row, text=tr(label), command=action, anchor="w", bd=0, relief="flat",
+                               bg=UI_PANEL, fg=UI_DIM, activebackground=UI_ACTIVE, activeforeground=UI_FG,
+                               font=("Segoe UI Semibold", 10), padx=12, pady=9, cursor="hand2")
+            button.pack(side="left", fill="x", expand=True)
+            self.tabs[key] = button, stripe
+        footer = tk.Frame(self, bg=UI_PANEL)
+        footer.pack(side="bottom", fill="x", padx=12, pady=14)
+        self.ver = StatusChip(footer, bg=UI_PANEL)
+        self.ver.pack(anchor="w")
+        self.ver.set(f"{tr('Версия')} {APP_VERSION}", "off")
+        self.ver.configure(cursor="hand2")
+        self.ver.bind("<Button-1>", lambda event: app.on_version_click())
+        self.prog = tk.Canvas(footer, height=6, bg=UI_PANEL, highlightthickness=0)
+        self.prog.pack(fill="x", pady=(3, 0))
+        self._pf = None
+        self.prog.bind("<Configure>", lambda event: self.show_progress(self._pf))
+        self.cur = None
+
     def show_progress(self, frac):
         """Строка скачивания обновления под чипом версии: frac от 0 до 1, None — убрать."""
         self._pf = frac
@@ -11728,7 +11836,9 @@ class TopBar(tk.Frame):
             on = n == name
             try:
                 lb.config(fg=UI_FG if on else UI_DIM, cursor="arrow" if on else "hand2")
-                line.config(bg=UI_ACCENT if on else UI_BG)
+                if self.sidebar:
+                    lb.config(bg=UI_ACTIVE if on else UI_PANEL)
+                line.config(bg=UI_ACCENT if on else UI_PANEL if self.sidebar else UI_BG)
             except tk.TclError:
                 pass
 
@@ -11747,9 +11857,13 @@ class HomePage(tk.Frame):
         main = tk.Frame(self, bg=UI_BG)
         main.pack(fill="both", expand=True, padx=pad, pady=(18, 16))
         main.columnconfigure(0, weight=1)
+        if UI_THEME_NAME == "pitwall":
+            ttk.Label(main, text=tr("Главная"), style="Title.TLabel").grid(
+                row=0, column=0, sticky="w", pady=(0, 8))
+        offset = int(UI_THEME_NAME == "pitwall")
         # --- ряд игр ---
         gr = tk.Frame(main, bg=UI_BG)
-        gr.grid(row=0, column=0, sticky="ew")
+        gr.grid(row=offset, column=0, sticky="ew")
         self.cards = {}
         games = list(GAMES.items()) + [("ac", "Assetto Corsa")] + ([("ets2", "ETS 2")] if ETS2 is not None else [])
         for i, (g, name) in enumerate(games):
@@ -11761,7 +11875,7 @@ class HomePage(tk.Frame):
 
         # --- карточка игры и статус ---
         mid = tk.Frame(main, bg=UI_BG)
-        mid.grid(row=1, column=0, sticky="ew", pady=(14, 0))
+        mid.grid(row=1 + offset, column=0, sticky="ew", pady=(14, 0))
         mid.columnconfigure(0, weight=1)
         self.hero = tk.Canvas(mid, height=300, bg=UI_BG, highlightthickness=0, borderwidth=0)
         self.hero.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
@@ -11780,7 +11894,7 @@ class HomePage(tk.Frame):
         self._hb, self._hb_lk = hb, lk
 
         st = RoundBox(mid, radius=16, fill=UI_PANEL, border=UI_BORDER, outer=UI_BG, autow=False, fillh=True)
-        st.configure(width=380)
+        st.configure(width=315 if UI_THEME_NAME == "pitwall" else 380)
         st.grid(row=0, column=1, sticky="nsew")
         s_ = tk.Frame(st.inner, bg=UI_PANEL)
         s_.pack(fill="both", expand=True, padx=16, pady=10)
@@ -11806,8 +11920,8 @@ class HomePage(tk.Frame):
 
         # --- нижние карточки ---
         row = tk.Frame(main, bg=UI_BG)
-        row.grid(row=2, column=0, sticky="nsew", pady=(14, 0))
-        main.rowconfigure(2, weight=1)
+        row.grid(row=2 + offset, column=0, sticky="nsew", pady=(14, 0))
+        main.rowconfigure(2 + offset, weight=1)
         row.rowconfigure(0, weight=1)
         for i in range(3):
             row.columnconfigure(i, weight=1, uniform="home")
@@ -12193,8 +12307,9 @@ class HomePage(tk.Frame):
                 pts = [r, 0, x1 - r, 0, x1, 0, x1, r, x1, y1 - r, x1, y1, x1 - r, y1, r, y1, 0, y1, 0, y1 - r, 0, r, 0, 0]
                 cv.create_polygon(pts, smooth=True, fill=UI_PANEL, outline=UI_BORDER)
             x = 36
-            kick = {"ac": "ПОДДЕРЖКА В РАЗРАБОТКЕ", "ets2": "ГОТОВО К РЕЙСУ"}.get(g, "ГОТОВО К ГОНКЕ")
-            cv.create_text(x, 42, text=tr(kick), anchor="w", fill=acc, font=("Segoe UI", 9, "bold"))
+            if UI_THEME_NAME != "pitwall":
+                kick = {"ac": "ПОДДЕРЖКА В РАЗРАБОТКЕ", "ets2": "ГОТОВО К РЕЙСУ"}.get(g, "ГОТОВО К ГОНКЕ")
+                cv.create_text(x, 42, text=tr(kick), anchor="w", fill=acc, font=("Segoe UI", 9, "bold"))
             cv.create_text(x, 88, text=self.name_of(g), anchor="w", fill=UI_FG, font=("Segoe UI Semibold", 30))
             cv.create_text(x, 134, text=self.hero_info(), anchor="nw", fill=UI_DIM, font=("Segoe UI", 11), width=max(200, int(w * 0.48)))
             bg = mix(UI_PANEL, acc, 0.05)                    # кнопки стоят на почти чистом фоне карточки
@@ -12550,6 +12665,10 @@ class App:
         if os.name == "nt" and "--minimized" not in sys.argv and not self.cfg.get("shortcut_asked"):
             self.root.after(2500, self.offer_shortcut)
 
+    def preview_intro(self):
+        if self.intro is None or self.intro.done:
+            self.intro = Intro(self.root, self.root.winfo_width(), self.root.winfo_height())
+
     def offer_shortcut(self):
         """При первом запуске предлагаем ярлык на рабочем столе; ответ запоминаем, больше не спрашиваем."""
         if self.cfg.get("shortcut_asked"):
@@ -12625,13 +12744,33 @@ class App:
                 p.save(quiet=True)
             except Exception:
                 pass
-        for w in self.root.winfo_children():
+        children = self.root.winfo_children()
+        if children:
+            # Tk keeps pending after scripts when their owning widgets are destroyed.
+            # Cancel only callbacks owned by the outgoing widget tree.
+            owners = {}
+            pending = list(children)
+            while pending:
+                widget = pending.pop()
+                owners.update((command, widget) for command in (widget._tclCommands or ()))
+                pending.extend(widget.winfo_children())
+            for timer in self.root.tk.splitlist(self.root.tk.call("after", "info")):
+                script, _ = self.root.tk.splitlist(self.root.tk.call("after", "info", timer))
+                if script in owners:
+                    owners[script].after_cancel(timer)
+        for w in children:
             w.destroy()
         setup_style(self.root)
         self.panels = {}
         self.topbar = TopBar(self.root, self)
-        self.topbar.pack(fill="x")
-        tiles = ttk.Frame(self.root, padding=(16, 12, 16, 0))
+        if self.topbar.sidebar:
+            self.topbar.pack(side="left", fill="y")
+            content = ttk.Frame(self.root)
+            content.pack(side="left", fill="both", expand=True)
+        else:
+            self.topbar.pack(fill="x")
+            content = self.root
+        tiles = ttk.Frame(content, padding=(16, 12, 16, 0))
         tiles.pack(fill="x")
         self.tiles = {}
         seg = RoundBox(tiles, radius=12, fill=UI_PANEL, border=UI_BORDER, outer=UI_BG, m=0)
@@ -12650,7 +12789,7 @@ class App:
             self.tiles["ets2"] = t
         ttk.Button(tiles, text="▶  Запустить игру", style="Launch.TButton", command=lambda: self.launch_game()).pack(side="right")
 
-        head = ttk.Frame(self.root, padding=(14, 8, 14, 2))
+        head = ttk.Frame(content, padding=(14, 8, 14, 2))
         head.pack(fill="x")
         chips = tk.Frame(head, bg=UI_BG)                    # живой статус: игра, оверлей, телеметрия
         chips.pack(side="left")
@@ -12666,12 +12805,12 @@ class App:
         Toggle(head, "Закрывать оверлей вместе с игрой", self.close_var, command=self.save_cfg).pack(side="right", padx=(0, 22))
         Toggle(head, "Сам определять игру и запускать оверлей с её профилем", self.auto_var, command=self.save_cfg).pack(side="right", padx=(0, 22))
 
-        body = ttk.Frame(self.root)
+        body = ttk.Frame(content)
         body.pack(fill="both", expand=True, padx=14, pady=(2, 10))
         self._chrome = (tiles, head, body)                 # шапка и тело: на «Главной» шапку и левое меню прячем
         body.columnconfigure(1, weight=1)
         body.rowconfigure(0, weight=1)
-        self.navhost = tk.Frame(body, bg=UI_BG, width=268)
+        self.navhost = tk.Frame(body, bg=UI_BG, width=205 if self.topbar.sidebar else 268)
         self.navhost.grid(row=0, column=0, sticky="ns", padx=(0, 14), pady=(12, 12))
         self.navhost.pack_propagate(False)
         self.holder = ttk.Frame(body)
@@ -12964,7 +13103,7 @@ class App:
         elif v == "apps":
             name = "apps"
         elif v == "settings":
-            name = None
+            name = "settings" if tb.sidebar else None
         elif v in ("ac", "ets2"):
             name = "overlay"
         else:
