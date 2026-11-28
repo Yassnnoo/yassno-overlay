@@ -83,7 +83,7 @@ def _preload_pil():
 
 threading.Thread(target=_preload_pil, daemon=True).start()
 
-APP_VERSION = "3.11.36"
+APP_VERSION = "3.11.37"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OVERLAY = os.path.join(HERE, "yassno_overlay.py")
 PROFILES = os.path.join(HERE, "profiles")
@@ -3880,7 +3880,6 @@ class ProfilePanel(ttk.Frame):
     # ---------- каркас ----------
     def build_ui(self):
         self.columnconfigure(0, weight=1)
-        self.columnconfigure(1, minsize=self.RW)
         self.rowconfigure(0, weight=1)
         nav = self.nav = tk.Frame(self.app.navhost, bg=UI_PANEL, width=268)
         nav.pack_propagate(False)
@@ -3950,10 +3949,11 @@ class ProfilePanel(ttk.Frame):
 
         center = ttk.Frame(self)
         center.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
+        center.grid_propagate(False)
         center.columnconfigure(0, weight=1)
         center.rowconfigure(2, weight=1)
         self.title = ttk.Label(center, text="", style="Title.TLabel")
-        self.title.grid(row=0, column=0, sticky="w")
+        self.title.grid(row=0, column=0, sticky="ew", padx=(0, 95))
         self.btn_bg = ttk.Button(center, style="Mini.TButton", width=0, command=self.app.toggle_pv_bg,
                                  text=tr("Фон: день") if self.app.cfg.get("pv_bg", "dark") == "light" else tr("Фон: ночь"))
         self.btn_bg.grid(row=0, column=0, sticky="e")
@@ -3963,7 +3963,7 @@ class ProfilePanel(ttk.Frame):
         center.bind("<Configure>", lambda e: self.fit_later())
         self.note.grid(row=1, column=0, sticky="w", pady=(2, 10))
         self.ed_bar = tk.Frame(center, bg=UI_BG)                     # 3.1: мониторы и «живые данные» над редактором раскладки
-        pbox = RoundBox(center, radius=16, fill=MOCK_BG, border=mix(UI_BORDER, UI_DIM, 0.3), shadow=10)
+        pbox = RoundBox(center, radius=16, fill=MOCK_BG, border=mix(UI_BORDER, UI_DIM, 0.3), shadow=10, autow=False)
         pbox.configure(width=self.PW + 22 + 2 * pbox.off)
         self._pbox = pbox
         pbox.grid(row=2, column=0, sticky="n")                      # по центру колонки, предпросмотр в скруглённой рамке
@@ -3978,6 +3978,8 @@ class ProfilePanel(ttk.Frame):
         self.canvas.bind("<Leave>", self.on_leave)
 
         holder = ttk.Frame(self, width=self.RW)
+        self._settings_holder = holder
+        self.bind("<Configure>", self.fit_settings_width, add="+")
         holder.grid(row=0, column=1, sticky="nsew")
         holder.grid_propagate(False)
         holder.columnconfigure(0, weight=1)
@@ -4093,7 +4095,7 @@ class ProfilePanel(ttk.Frame):
             self.app.mark_tabs()
         except Exception:                                # noqa: BLE001
             pass
-        self.canvas.config(height=190 if key == "apps" else self.gen_h() if key == "general" else self.PH)
+        self.canvas.config(height=min(190, self.PH) if key == "apps" else self.gen_h() if key == "general" else self.PH)
         self.scroll.yview_moveto(0)
         self.title.config(text=tr(next(t for k, t, _ in PAGES if k == key)))
         try:
@@ -4110,6 +4112,7 @@ class ProfilePanel(ttk.Frame):
                              "Жёлтое свечение спереди/сзади — расстояние до машины. Пропадает, когда рядом никого нет."}
         self.note.config(text=tr((IR_NOTES.get(key) if self.game == "iracing" else None) or PAGE_NOTES.get(key, "Все панели оверлея сразу. Клик по панели в предпросмотре включает или выключает её. "
                                                       "Шрифт и цвета общие для всего оверлея.")))
+        self.fit_later()
         t_build = time.perf_counter()
         self.scroll.itemconfigure(self._swin, state="hidden")        # страница собирается скрытой: без промежуточных перерисовок, показываем готовой
         for w in self.settings.winfo_children():
@@ -5094,6 +5097,12 @@ class ProfilePanel(ttk.Frame):
                 self.v[key].set(not self.v[key].get())
                 return
 
+    def fit_settings_width(self, event):
+        if event.width > 1:
+            width = min(self.RW, max(320, event.width * 51 // 100))
+            if width != self._settings_holder.winfo_reqwidth():
+                self._settings_holder.configure(width=width)
+
     def fit_later(self):
         """Дебаунс: при растягивании окна и смене страницы Configure идёт пачкой — перерисовываем один раз."""
         old = getattr(self, "_fit_job", None)
@@ -5105,21 +5114,22 @@ class ProfilePanel(ttk.Frame):
         self._fit_job = self.after(80, self.fit_preview)
 
     def fit_preview(self):
-        """Предпросмотр подстраивается под свободное место: окно больше — картинка крупнее (но не мельче базового размера)."""
+        """Размер холста учитывает фактическую ширину и высоту колонки."""
         self._fit_job = None
         try:
             cw, chh = self._center.winfo_width(), self._center.winfo_height()
             if cw < 100 or chh < 100:
                 return
-            nw = int(max(680, min(1180, cw - 2 * (self._pbox.off + 11) - 4)))
-            avail_h = chh - self.title.winfo_reqheight() - self.note.winfo_reqheight() - 2 * (self._pbox.off + 11) - 24
-            gh = int(max(330, min(980, avail_h)))
-            ph = int(max(400, min(760, avail_h)))
+            nw = max(1, min(1180, cw - 2 * (self._pbox.off + 11) - 4))
+            self.note.config(wraplength=nw)
+            _, _, _, row_h = self._center.grid_bbox(0, 2)
+            avail_h = max(1, row_h - 2 * (self._pbox.off + 11) - 4)
+            gh = min(980, avail_h)
+            ph = min(760, avail_h)
             if (nw, gh, ph) == (self.PW, self.GH, self.PH):
                 return
             self.PW, self.GH, self.PH = nw, gh, ph
-            self.note.config(wraplength=nw)
-            self.canvas.config(width=nw, height=190 if self.page == "apps" else self.gen_h() if self.page == "general" else ph)
+            self.canvas.config(width=nw, height=min(190, ph) if self.page == "apps" else self.gen_h() if self.page == "general" else ph)
             self._pbox.configure(width=nw + 22 + 2 * self._pbox.off)
             self.draw_preview()
         except tk.TclError:
@@ -5277,11 +5287,11 @@ class ProfilePanel(ttk.Frame):
 
     def gen_h(self):
         wh = getattr(self.app, "win_h", 1000)
-        full = int(max(330, min(self.GH, wh - 250)))
+        full = min(self.GH, max(330, wh - 250))
         if getattr(self, "editor_on", True):
             try:
                 v = self.ed_view()
-                return int(max(260, min(full, (self.PW - 24) * v[3] / float(v[2]) + 52)))     # 3.1: по форме экрана, без пустоты
+                return int(min(full, max(260, (self.PW - 24) * v[3] / float(v[2]) + 52)))     # 3.1: по форме экрана, без пустоты
             except Exception:                            # noqa: BLE001
                 return full
         return full
@@ -6067,7 +6077,7 @@ class ProfilePanel(ttk.Frame):
 
     def draw_single(self, key):
         c = self.canvas
-        ph = 190 if key == "apps" else self.PH
+        ph = min(190, self.PH) if key == "apps" else self.PH
         n = max(4, min(14, int(self.num("rows", 12))))
         count = int(self.num("rel_ahead", 3)) + 1 + int(self.num("rel_behind", 3))
         ncards = max(1, sum(1 for v in self.wxc.values() if v.get()))
@@ -6099,7 +6109,7 @@ class ProfilePanel(ttk.Frame):
         if key in SCALE_KEYS:
             user = self.num(SCALE_KEYS[key], 1.0) / (0.8 if key == "fuel" else 1.0)
         fit = min(self.PW * 0.92 / dw, ph * 0.92 / dh)
-        k = max(0.4, min(fit, 3.2, fit * 0.85 * user))
+        k = min(fit, 3.2, max(0.4, fit * 0.85 * user))
         self.make_fonts(k)
         before = set(c.find_all())
         self._pk = k
