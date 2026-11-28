@@ -3,7 +3,7 @@
 import math
 
 try:
-    from PIL import Image, ImageDraw, ImageFilter
+    from PIL import Image, ImageDraw
     OK = True
 except Exception:                                   # pragma: no cover
     OK = False
@@ -141,80 +141,126 @@ def _draw_round(cv):
     cv.arc_mark(-7, 7, 0.80, 1.0, RED)                                  # красная метка «12 часов»
 
 
-def _draw_gt(cv):
-    # обод со срезом снизу: маска «кольцо минус всё ниже линии среза»
-    B = cv.B
-    ring = Image.new("RGBA", (B, B), (0, 0, 0, 0))
-    saved = cv.im, cv.d
-    cv.im, cv.d = ring, ImageDraw.Draw(ring)
-    cv.ring(1.0, 0.80, *LEATHER)
-    cut = cv.c + 0.70 * cv.r
-    ImageDraw.Draw(ring).rectangle((0, cut, B, B), fill=(0, 0, 0, 0))
-    cv.im, cv.d = saved
-    cv.im.alpha_composite(ring)
-    cv.d = ImageDraw.Draw(cv.im)
-    for i in range(10):                                                 # плоский низ обода: хорда со скруглёнными краями и объёмом
-        t = i / 9.0
-        col = _lerp("#0f1114", "#3a3e46", min(1.0, t * 1.2)) + (255,)
-        cv.rrect(-0.73 + t * 0.10, 0.54 + t * 0.045, 0.73 - t * 0.10, 0.705 - t * 0.045, 0.06, fill=col)
-    cv.rrect(-0.55, 0.585, 0.55, 0.60, 0.01, fill=(110, 116, 128, 130))
-    _stitch(cv, 0.90, 70, (205, 210, 220, 160), 0.0)
-    # две боковые спицы-«плечи» и нижняя
-    cv.capsule((-0.84, 0.02), (0, 0.04), 0.20, *METAL)
-    cv.capsule((0.84, 0.02), (0, 0.04), 0.20, *METAL)
-    cv.capsule((0, 0.04), (0, 0.58), 0.18, *METAL)
-    cv.disc(0, 0.04, 0.30, "#23262c", "#8a8f99", "#dfe3ea")
-    cv.disc(0, 0.04, 0.19, "#15171b", "#3b3f47", "#6a707b")
-    cv.disc(0, 0.04, 0.07, "#8a8f99", "#e9ecf1")
-    cv.arc_mark(-7, 7, 0.80, 1.0, RED)
+def _trace(cv, pts, color, depth=0.02):
+    cv.d.line([cv.P(*point) for point in pts], fill=color,
+              width=max(1, round(cv.r * depth)), joint="curve")
 
 
-def _draw_rally(cv):
-    cv.ring(1.0, 0.72, "#08090b", "#2d3037", "#555b66")                 # толстый обод
-    _stitch(cv, 0.86, 70, (170, 176, 188, 150), 0.0)
-    for ang in (-90, 90, 180):
-        ex, ey = math.sin(math.radians(ang)) * 0.78, -math.cos(math.radians(ang)) * 0.78
-        cv.capsule((0, 0), (ex, ey), 0.26, *METAL)
-        mx, my = ex * 0.62, ey * 0.62
-        cv.hole(mx, my, 0.07)                                           # облегчающие отверстия
-    cv.disc(0, 0, 0.34, "#1b1d22", "#7b808a", "#d3d7de")
-    cv.disc(0, 0, 0.20, "#0d0e11", "#262930", "#4b505a")
-    for px, py in ((-0.27, -0.27), (0.27, -0.27), (-0.27, 0.27), (0.27, 0.27)):
-        cv.disc(px, py, 0.04, "#454a54", "#cdd1d8")
-    cv.arc_mark(-9, 9, 0.72, 1.0, GOLD)                                 # жёлтая лента сверху, как на раллийных рулях
+def _carbon(cv, bounds):
+    x0, y0, x1, y1 = bounds
+    row = 0
+    y = y0
+    while y < y1:
+        x = x0
+        while x < x1:
+            color = ("#293039", "#252b33")[(row + round((x-x0)/.07)) % 2]
+            _trace(cv, [(x, y), (min(x+.065, x1), min(y+.033, y1))], color, .016)
+            x += .07
+        y += .036
+        row += 1
+
+
+def _screw(cv, x, y, radius=.038):
+    cv.disc(x, y, radius, "#0c1014", "#84919a", "#bcc7cb")
+    _trace(cv, [(x-radius*.35, y), (x+radius*.35, y)], "#20262b", .012)
+
+
+def _button(cv, x, y, color, radius=.071):
+    cv.disc(x, y+.012, radius*1.18, "#080b0e", "#46525d")
+    cv.disc(x, y, radius, "#101317", color, "#edf3fa")
+
+
+def _dial(cv, x, y, color, radius=.12):
+    cv.disc(x, y, radius, "#10151a", "#6e7c8c", "#a9b6c1")
+    for index in range(12):
+        a=index*30
+        dx,dy=math.cos(math.radians(a)),math.sin(math.radians(a))
+        _trace(cv, [(x+radius*.72*dx,y+radius*.72*dy),(x+radius*.9*dx,y+radius*.9*dy)], "#171c23", .012)
+    cv.disc(x, y, radius*.62, "#1a1e24", "#454d58")
+    _trace(cv, [(x, y-.012), (x+.018, y-radius*.76)], color, .024)
 
 
 def _draw_formula(cv):
-    # корпус формульного руля: прямоугольник со срезанными верхними углами и «хватами» по бокам
-    def body(inset, fill):
-        k = 1.0 - inset
-        pts = [(-0.80, -0.62), (-0.45, -0.74), (0.45, -0.74), (0.80, -0.62), (0.96, -0.30), (1.00, 0.30), (0.97, 0.78),
-               (0.86, 0.90), (0.74, 0.82), (0.70, 0.52), (0.52, 0.46), (-0.52, 0.46), (-0.70, 0.52), (-0.74, 0.82),
-               (-0.86, 0.90), (-0.97, 0.78), (-1.00, 0.30), (-0.96, -0.30)]
-        cv.poly([(x * k, y * k) for x, y in pts], fill)
-    body(0.0, (8, 9, 11, 255))
-    body(0.03, (34, 37, 43, 255))
-    body(0.07, (22, 24, 28, 255))
-    # прорезиненные хваты
-    for sx in (-1, 1):
-        cv.rrect(0.80 * sx - 0.12 if sx > 0 else -0.98, -0.18, 0.98 if sx > 0 else -0.80 + 0.12, 0.70, 0.07, fill=(46, 50, 58, 255))
-    # дисплей
-    cv.rrect(-0.46, -0.56, 0.46, -0.06, 0.05, fill=(4, 5, 7, 255), outline=(70, 76, 88, 255), width=max(2, cv.B // 150))
-    for i in range(15):                                                 # светодиоды шифт-лайта над дисплеем
-        x = -0.40 + 0.80 * i / 14
-        col = (46, 226, 109, 255) if i < 5 else (255, 59, 48, 255) if i < 10 else (74, 144, 255, 255)
-        cv.disc(x, -0.66, 0.030, tuple(int(v * 0.5) for v in col[:3]), col[:3])
-    for i, (w, col) in enumerate(((0.6, (46, 226, 109)), (0.35, (255, 193, 7)), (0.8, (74, 163, 255)))):   # строки данных на дисплее
-        y = -0.46 + i * 0.13
-        cv.rrect(-0.38, y, -0.38 + 0.76 * w, y + 0.06, 0.02, fill=col + (255,))
-    # кнопки и поворотные переключатели
-    cols = ((230, 60, 55), (255, 193, 7), (60, 200, 110), (74, 144, 255))
-    for i, (px, py) in enumerate(((-0.68, -0.30), (-0.68, 0.02), (0.68, -0.30), (0.68, 0.02))):
-        cv.disc(px, py, 0.095, (20, 22, 26), cols[i])
-    for px in (-0.30, 0.30):
-        cv.disc(px, 0.24, 0.12, "#1a1c20", "#9aa0ab", "#e4e7ec")
-        cv.d.line((*cv.P(px, 0.24), *cv.P(px, 0.15)), fill=(20, 22, 26, 255), width=max(2, cv.B // 120))
-    cv.rrect(-0.06, -0.72, 0.06, -0.62, 0.02, fill=GOLD)                # жёлтая метка «12 часов»
+    cv.r *= 0.95  # хваты должны помещаться при любом угле поворота
+    for s in (-1, 1):
+        cv.poly([(s*x,y) for x,y in [(.51,-.42),(.87,-.49),(.94,-.31),(.9,.4),(.52,.44)]], "#34434e")
+    face=[(-.73,-.56),(-.44,-.68),(.44,-.68),(.73,-.56),(.72,.39),(.47,.57),(-.47,.57),(-.72,.39)]
+    for k,color in [(1,"#101519"),(.98,"#70808a"),(.947,"#232a32")]:
+        cv.poly([(x*k,y*k) for x,y in face],color)
+    _carbon(cv,(-.49,-.50,.49,.45))
+    for s in (-1,1):
+        for inset, color in [(0,"#0d1115"),(.035,"#3e4955"),(.07,"#232a31")]:
+            path=[(.665+inset,-.49+inset),(.82,-.49+inset),(.875-inset,-.26),
+                  (.90-inset,.28),(.85-inset,.66-inset),(.75,.73-inset),(.67+inset,.62),(.64+inset,.19)]
+            cv.poly([(s*x,y) for x,y in path], color)
+        _trace(cv,[(.78*s,-.36),(.82*s,-.1),(.82*s,.30),(.79*s,.56)],"#586571",.014)
+        for j,col in enumerate(("#ed574f","#55a6ed","#e1b75d") if s<0 else ("#58cb92","#ed574f","#9eb2cc")):
+            _button(cv,s*.55,-.27+j*.22,col)
+        _screw(cv,s*.505,-.515)
+        _screw(cv,s*.435,.465)
+    cv.rrect(-.405,-.46,.405,.08,.04,"#080e14", "#66778a", max(1,cv.B//150))
+    cv.rrect(-.365,-.42,.365,.035,.025,"#122534")
+    # Цифра передачи на дисплее и два поля приборов.
+    for seg in [[(-.07,-.35),(-.07,-.19),(.07,-.19)],[(.07,-.36),(.07,-.08)]]:
+        _trace(cv,seg,"#e3f2f9",.034)
+    for x in (-.305,.155):
+        for j,length in enumerate((.14,.10,.13)):
+            _trace(cv,[(x,-.31+j*.08),(x+length,-.31+j*.08)],"#66a8be",.022)
+    for i in range(11):
+        x=(i-5)*.074
+        color="#66db81" if i<4 else "#f27255" if i<8 else "#60a6e4"
+        cv.disc(x,-.55,.026,"#121820",color)
+    _dial(cv,-.23,.28,"#ef735d")
+    _dial(cv,.23,.28,"#7eaeee")
+
+
+def _draw_gt(cv):
+    for s in (-1,1):
+        cv.poly([(s*x,y) for x,y in [(.43,-.46),(.7,-.5),(.83,-.31),(.81,.4),(.57,.43)]], "#313f49")
+    cv.ring(.96,.765,"#161c24","#48515c","#75838e")
+    cv.d.rectangle((*cv.P(-1,.70),*cv.P(1,1)),fill=(0,0,0,0))
+    cv.capsule((-.62,.616),(.62,.616),.18,"#171e27","#45505b","#667582")
+    for s in (-1,1):
+        cv.capsule((s*.825,-.25),(s*.83,.245),.208,"#171e24","#3b454f","#63727d")
+    face=[(-.75,-.075),(-.60,-.20),(-.28,-.16),(-.20,-.29),(.20,-.29),(.28,-.16),(.60,-.20),
+          (.75,-.075),(.68,.22),(.30,.29),(.16,.62),(-.16,.62),(-.30,.29),(-.68,.22)]
+    for k,col in [(1,"#11161c"),(.983,"#77848f"),(.943,"#28323b")]:
+        cv.poly([(x*k,y*k) for x,y in face],col)
+    _carbon(cv,(-.49,-.12,.49,.19))
+    for s in (-1,1):
+        _button(cv,s*.52,-.045,"#ee774b" if s<0 else "#5ca8f5")
+        _button(cv,s*.52,.127,"#4f96d2" if s<0 else "#72cf9c",.059)
+        _screw(cv,s*.64,.045,.028)
+    cv.disc(0,.055,.225,"#171d26","#515f6a","#717f88")
+    cv.disc(0,.055,.141,"#141a22","#2a343e","#42525d")
+    _dial(cv,0,.37,"#e4bd6e",.092)
+    cv.arc_mark(-7,7,.768,.95,"#ea644e")
+    cv.arc_mark(-4,4,.905,.95,"#fd997c")
+
+
+def _draw_rally(cv):
+    for s in (-1,1):
+        pts=[(s*x,y) for x,y in [(0,-.15),(.70,-.10),(.85,-.18),(.85,.085),(.68,.16),(0,.13)]]
+        cv.poly(pts,"#252e36")
+        _trace(cv,[pts[1],pts[2],pts[3]],"#b5bec0",.036)
+        cv.capsule((s*.19,.016),(s*.68,.016),.13,"#46535f","#83949b","#bac2c2")
+        for x,r in ((.39,.083),(.59,.061)):
+            cv.hole(s*x,.009,r)
+            _trace(cv,[(s*x-r*.62,.065),(s*x+r*.62,.065)],"#aab9bd",.014)
+    cv.poly([(-.21,.10),(.21,.10),(.15,.83),(-.15,.83)],"#313b44")
+    cv.capsule((0,.22),(0,.755),.21,"#46535d","#8e9c9e","#b9c7c8")
+    for y,r in ((.40,.074),(.62,.056)):
+        cv.hole(0,y,r)
+    cv.disc(0,.015,.295,"#0f151b","#596873","#8c9ba3")
+    cv.disc(0,.015,.164,"#171e23","#323e47","#4d5b63")
+    for i in range(6):
+        a = i * math.tau / 6
+        _screw(cv,.22*math.cos(a),.015+.22*math.sin(a),.034)
+    cv.ring(1,.76,"#121820","#51565a","#7b8180")
+    for i in range(0,360,9):
+        cv.arc_mark(i,i+2,.845,.889,"#596061")
+    cv.arc_mark(-11,11,.76,.989,"#e6bb4f")
+    cv.arc_mark(-7,8,.89,.98,"#f8d374")
 
 
 _DRAW = {"round": _draw_round, "formula": _draw_formula, "gt": _draw_gt, "rally": _draw_rally}
